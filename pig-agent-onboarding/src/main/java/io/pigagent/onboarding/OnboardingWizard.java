@@ -45,9 +45,22 @@ public final class OnboardingWizard {
             String available = p.isAvailable() ? " [credentials found]" : "";
             System.out.printf("  %d) %s - %s%s%n", i + 1, p.displayName(), p.description(), available);
         }
+
+        // Auto-select first available provider if stdin is not available
+        for (int i = 0; i < providers.size(); i++) {
+            if (providers.get(i).isAvailable()) {
+                System.out.printf("\nAuto-selected: %s (credentials found)%n", providers.get(i).displayName());
+                return providers.get(i);
+            }
+        }
+
         System.out.print("\nSelect provider (number): ");
-        String input = reader.readLine().trim();
-        int idx = Integer.parseInt(input) - 1;
+        String input = reader.readLine();
+        if (input == null || input.isBlank()) {
+            System.out.println("No input, defaulting to first provider.");
+            return providers.get(0);
+        }
+        int idx = Integer.parseInt(input.trim()) - 1;
         return providers.get(idx);
     }
 
