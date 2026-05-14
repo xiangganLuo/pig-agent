@@ -93,6 +93,12 @@ public final class PigAgentCli {
         McpManager mcpManager = new McpManager();
         mcpManager.connectAll(config.getMcp(), toolkit);
 
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.err.println("\n[CLI] Shutting down...");
+            taskScheduler.shutdown();
+            mcpManager.closeAll();
+        }));
+
         String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd();
         PigAgent agent = PigAgent.builder()
                 .name(config.getAgent().getName())
