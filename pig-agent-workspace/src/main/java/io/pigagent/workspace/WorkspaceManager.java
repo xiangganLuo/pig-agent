@@ -97,7 +97,7 @@ public final class WorkspaceManager {
 
                 model:
                   provider: anthropic
-                  model-name: claude-sonnet-4-5-20250929
+                  model-name: mimo-v2.5-pro
 
                 agent:
                   name: PigAgent

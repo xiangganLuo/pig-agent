@@ -36,7 +36,7 @@
         <picocli.version>4.7.6</picocli.version>
         <snakeyaml.version>2.3</snakeyaml.version>
         <jackson.version>2.18.3</jackson.version>
-        <lucene.version>10.1.0</lucene.version>
+        <lucene.version>9.12.0</lucene.version>
 
         <!-- Test -->
         <junit.version>5.11.4</junit.version>

@@ -44,12 +44,18 @@ import java.util.List;
 public final class PigAgentCli {
 
     public static void main(String[] args) throws Exception {
-        System.out.println(" ____  _          _              _     _           ");
-        System.out.println("|  _ \\(_) __ _  __| | __ _  ___  / \\   (_)______ _  ");
-        System.out.println("| |_) | |/ _` |/ _` |/ _` |/ _ \\/ _ \\  | |_  / _` | ");
-        System.out.println("|  __/| | (_| | (_| | (_| |  __/ ___ \\ | |/ / (_| | ");
-        System.out.println("|_|   |_|\\__,_|\\__,_|\\__, |\\___/_/   \\_\\/___|\\__,_| ");
-        System.out.println("                     |___/                          \n");
+        System.out.println("""
+                                                                      __     \s
+                        __                                            /\\ \\__  \s
+                 _____ /\\_\\     __          __       __      __    ___\\ \\ ,_\\ \s
+                /\\ '__`\\/\\ \\  /'_ `\\      /'__`\\   /'_ `\\  /'__`\\/' _ `\\ \\ \\/ \s
+                \\ \\ \\L\\ \\ \\ \\/\\ \\L\\ \\    /\\ \\L\\.\\_/\\ \\L\\ \\/\\  __//\\ \\/\\ \\ \\ \\_\s
+                 \\ \\ ,__/\\ \\_\\ \\____ \\   \\ \\__/.\\_\\ \\____ \\ \\____\\ \\_\\ \\_\\ \\__\\
+                  \\ \\ \\/  \\/_/\\/___L\\ \\   \\/__/\\/_/\\/___L\\ \\/____/\\/_/\\/_/\\/__/
+                   \\ \\_\\        /\\____/              /\\____/                  \s
+                    \\/_/        \\_/__/               \\_/__/                   \s
+                
+                """);
 
         WorkspaceManager workspace = WorkspaceManager.defaultWorkspace();
         workspace.initialize();
@@ -148,19 +154,11 @@ public final class PigAgentCli {
                     }
                 }).doOnError(e -> {
                     System.err.println("\nError: " + e.getMessage());
-                    Throwable cause = e.getCause();
-                    while (cause != null) {
-                        System.err.println("  Caused by: " + cause.getMessage());
-                        cause = cause.getCause();
-                    }
+                    e.printStackTrace(System.err);
                 }).blockLast();
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());
-                Throwable cause = e.getCause();
-                while (cause != null) {
-                    System.err.println("  Caused by: " + cause.getMessage());
-                    cause = cause.getCause();
-                }
+                e.printStackTrace(System.err);
             }
             System.out.println();
         }

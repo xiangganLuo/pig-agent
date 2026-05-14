@@ -2,9 +2,10 @@
 <settings>
   <mirrors>
     <mirror>
-      <id>central-mirror</id>
-      <mirrorOf>nexus</mirrorOf>
-      <url>https://repo.maven.apache.org/maven2</url>
+      <id>alimaven</id>
+      <mirrorOf>*</mirrorOf>
+      <name>aliyun maven</name>
+      <url>https://maven.aliyun.com/repository/public</url>
     </mirror>
   </mirrors>
 </settings>

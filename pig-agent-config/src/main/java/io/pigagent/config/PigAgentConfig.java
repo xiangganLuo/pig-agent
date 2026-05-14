@@ -19,8 +19,8 @@ public final class PigAgentConfig {
     public McpConfig getMcp() { return mcp; }
 
     public static final class ModelConfig {
-        @JsonProperty("provider") private String provider = "anthropic";
-        @JsonProperty("model-name") private String modelName = "claude-sonnet-4-5-20250929";
+        @JsonProperty("provider") private String provider = "mimo";
+        @JsonProperty("model-name") private String modelName = "mimo-v2.5-pro";
         public String getProvider() { return provider; }
         public void setProvider(String p) { this.provider = p; }
         public String getModelName() { return modelName; }

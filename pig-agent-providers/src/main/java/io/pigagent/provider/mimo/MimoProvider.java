@@ -18,9 +18,8 @@ public final class MimoProvider implements AgentOnboardingProvider {
     public Model createModel(ProviderCredentials credentials) {
         return OpenAIChatModel.builder()
                 .apiKey(credentials.getRequired("MIMO_API_KEY"))
-                .baseUrl("https://token-plan-cn.xiaomimimo.com/v1")
+                .baseUrl("https://api.xiaomimimo.com/v1/chat/completions")
                 .modelName(defaultModelName())
-                .stream(false)
                 .build();
     }
 }

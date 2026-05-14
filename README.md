@@ -1,8 +1,12 @@
-# Pig Agent
+<div align="center">
+  <img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
+  <h1>Pig Agent</h1>
+  <strong>一个基于 AgentScope Java 构建的终端 AI Agent 框架</strong>
+  <p>架构简单、开发者易学习、功能完整、方便扩展。</p>
+</div>
 
-一个基于 [AgentScope Java](https://docs.agentscope.io/) 构建的终端 AI Agent 框架。
 
-架构简单、开发者易学习、功能完整、方便扩展。
+
 
 ## 项目背景
 
@@ -93,10 +97,11 @@ ReActAgent 推理循环:
 
 ### pig-agent-providers — LLM 提供商
 
-支持 5 个 LLM 提供商，通过环境变量配置 API Key：
+支持 6 个 LLM 提供商，通过环境变量配置 API Key：
 
 | 提供商 | 环境变量 | 默认模型 |
 |--------|---------|---------|
+| MiMo (小米) | `MIMO_API_KEY` | mimo-v2.5-pro |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-5-20250929 |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Ollama | 无需 (本地运行) | llama3 |
@@ -308,7 +313,7 @@ mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
 ```yaml
 model:
   provider: anthropic
-  model-name: claude-sonnet-4-5-20250929
+  model-name: mimo-v2.5-pro
 
 agent:
   name: PigAgent
