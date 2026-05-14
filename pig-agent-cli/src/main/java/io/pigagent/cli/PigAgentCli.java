@@ -27,6 +27,7 @@ import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
+import io.pigagent.tool.websearch.BraveWebSearchTool;
 import io.pigagent.workspace.WorkspaceManager;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -83,6 +84,7 @@ public final class PigAgentCli {
         toolkit.registration().tool(new ShellTools()).apply();
         toolkit.registration().tool(new FileSystemTools()).apply();
         toolkit.registration().tool(new SmartWebFetchTool()).apply();
+        toolkit.registration().tool(new BraveWebSearchTool()).apply();
         toolkit.registration().tool(new CheckListTool()).apply();
         toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
 
