@@ -20,6 +20,7 @@ public final class MimoProvider implements AgentOnboardingProvider {
                 .apiKey(credentials.getRequired("MIMO_API_KEY"))
                 .baseUrl("https://token-plan-cn.xiaomimimo.com/v1")
                 .modelName(defaultModelName())
+                .stream(false)
                 .build();
     }
 }
