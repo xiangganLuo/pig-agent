@@ -1,5 +1,7 @@
 package io.pigagent.cli;
 
+import io.agentscope.core.agent.Event;
+import io.agentscope.core.agent.EventType;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
@@ -123,8 +125,22 @@ public final class PigAgentCli {
 
             System.out.print("agent> ");
             try {
-                Msg response = agent.call(userMsg);
-                System.out.println(response.getTextContent());
+                StringBuilder finalResponse = new StringBuilder();
+                agent.stream(userMsg).doOnNext(event -> {
+                    if (event.getType() == EventType.REASONING) {
+                        System.err.println("\n  [thinking] " + event.getMessage().getTextContent());
+                    } else if (event.getType() == EventType.TOOL_RESULT) {
+                        System.err.println("  [tool] " + event.getMessage().getTextContent());
+                    } else if (event.getType() == EventType.AGENT_RESULT) {
+                        finalResponse.append(event.getMessage().getTextContent());
+                    }
+                }).doOnComplete(() -> {
+                    if (!finalResponse.isEmpty()) {
+                        System.out.println(finalResponse);
+                    }
+                }).doOnError(e -> {
+                    System.err.println("\nError: " + e.getMessage());
+                }).blockLast();
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());
             }
