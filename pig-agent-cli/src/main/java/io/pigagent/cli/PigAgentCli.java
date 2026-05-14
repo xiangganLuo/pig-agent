@@ -10,6 +10,7 @@ import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
 import io.pigagent.core.provider.AgentOnboardingProvider;
+import io.pigagent.mcp.McpManager;
 import io.pigagent.onboarding.OnboardingWizard;
 import io.pigagent.provider.registry.ProviderRegistry;
 import io.pigagent.provider.anthropic.AnthropicProvider;
@@ -81,6 +82,9 @@ public final class PigAgentCli {
         toolkit.registration().tool(new SmartWebFetchTool()).apply();
         toolkit.registration().tool(new CheckListTool()).apply();
         toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
+
+        McpManager mcpManager = new McpManager();
+        mcpManager.connectAll(config.getMcp(), toolkit);
 
         String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd();
         PigAgent agent = PigAgent.builder()

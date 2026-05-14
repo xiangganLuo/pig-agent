@@ -53,7 +53,15 @@ public final class PigAgentConfig {
     public static final class McpServerConfig {
         @JsonProperty("command") private String command;
         @JsonProperty("args") private java.util.List<String> args = java.util.List.of();
+        @JsonProperty("env") private Map<String, String> env = Map.of();
+        @JsonProperty("url") private String url;
+        @JsonProperty("streamable-http") private boolean streamableHttp = false;
+        @JsonProperty("headers") private Map<String, String> headers = Map.of();
         public String getCommand() { return command; }
         public java.util.List<String> getArgs() { return args; }
+        public Map<String, String> getEnv() { return env; }
+        public String getUrl() { return url; }
+        public boolean isStreamableHttp() { return streamableHttp; }
+        public Map<String, String> getHeaders() { return headers; }
     }
 }

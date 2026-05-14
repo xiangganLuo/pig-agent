@@ -47,6 +47,10 @@
             <artifactId>pig-agent-onboarding</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-mcp</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
         </dependency>
