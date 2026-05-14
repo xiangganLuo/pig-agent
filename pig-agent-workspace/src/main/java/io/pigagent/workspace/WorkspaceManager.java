@@ -31,6 +31,7 @@ public final class WorkspaceManager {
         Files.createDirectories(rootPath.resolve("tasks").resolve(todayDir()));
         createIfAbsent(rootPath.resolve("AGENT.md"), defaultAgentMd());
         createIfAbsent(rootPath.resolve("INFO.md"), defaultInfoMd());
+        createIfAbsent(rootPath.resolve("application.yaml"), defaultConfigYaml());
     }
 
     public Path getRootPath() { return rootPath; }
@@ -88,5 +89,39 @@ public final class WorkspaceManager {
         return "# Environment Info\n\n- OS: " + System.getProperty("os.name")
                 + "\n- Java: " + System.getProperty("java.version")
                 + "\n- Workspace: " + rootPath.toAbsolutePath() + "\n";
+    }
+
+    private String defaultConfigYaml() {
+        return """
+                # Pig Agent Configuration
+
+                model:
+                  provider: anthropic
+                  model-name: claude-sonnet-4-5-20250929
+
+                agent:
+                  name: PigAgent
+                  max-iters: 10
+
+                channels:
+                  telegram:
+                    enabled: false
+                    token: ""
+                  discord:
+                    enabled: false
+                    token: ""
+
+                mcp:
+                  servers: {}
+                  # Example stdio server:
+                  #   filesystem:
+                  #     command: npx
+                  #     args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+                  # Example SSE server:
+                  #   remote:
+                  #     url: http://localhost:3000/sse
+                  #     headers:
+                  #       Authorization: Bearer token
+                """;
     }
 }
