@@ -148,9 +148,19 @@ public final class PigAgentCli {
                     }
                 }).doOnError(e -> {
                     System.err.println("\nError: " + e.getMessage());
+                    Throwable cause = e.getCause();
+                    while (cause != null) {
+                        System.err.println("  Caused by: " + cause.getMessage());
+                        cause = cause.getCause();
+                    }
                 }).blockLast();
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());
+                Throwable cause = e.getCause();
+                while (cause != null) {
+                    System.err.println("  Caused by: " + cause.getMessage());
+                    cause = cause.getCause();
+                }
             }
             System.out.println();
         }
