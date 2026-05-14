@@ -108,10 +108,10 @@ public final class PigAgentCli {
                 .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
                 .build();
 
-        startRepl(agent);
+        startRepl(agent, configManager);
     }
 
-    private static void startRepl(PigAgent agent) throws IOException {
+    private static void startRepl(PigAgent agent, ConfigurationManager configManager) throws IOException {
         Terminal terminal = TerminalBuilder.builder().system(true).build();
         LineReader reader = LineReaderBuilder.builder().terminal(terminal).build();
 
@@ -122,7 +122,7 @@ public final class PigAgentCli {
             if (input == null || input.isBlank()) continue;
 
             if (input.startsWith("/")) {
-                if (!handleCommand(input, agent)) break;
+                if (!handleCommand(input, agent, configManager)) break;
                 continue;
             }
 
@@ -154,7 +154,7 @@ public final class PigAgentCli {
         }
     }
 
-    private static boolean handleCommand(String input, PigAgent agent) {
+    private static boolean handleCommand(String input, PigAgent agent, ConfigurationManager configManager) {
         String cmd = input.split("\\s+")[0].toLowerCase();
         switch (cmd) {
             case "/help" -> {
@@ -162,6 +162,7 @@ public final class PigAgentCli {
                 System.out.println("  /help        Show this help");
                 System.out.println("  /tasks       List tasks");
                 System.out.println("  /skills      List skills");
+                System.out.println("  /config      Show current configuration");
                 System.out.println("  /quit        Exit");
             }
             case "/quit", "/exit" -> {
@@ -177,6 +178,14 @@ public final class PigAgentCli {
                 Msg msg = Msg.builder().name("user").role(MsgRole.USER)
                         .content(TextBlock.builder().text("List available skills").build()).build();
                 System.out.println(agent.call(msg).getTextContent());
+            }
+            case "/config" -> {
+                var cfg = configManager.getConfig();
+                System.out.println("Provider: " + cfg.getModel().getProvider());
+                System.out.println("Model: " + cfg.getModel().getModelName());
+                System.out.println("Agent: " + cfg.getAgent().getName());
+                System.out.println("Max Iterations: " + cfg.getAgent().getMaxIters());
+                System.out.println("MCP Servers: " + cfg.getMcp().getServers().keySet());
             }
             default -> System.out.println("Unknown command: " + cmd + ". Type /help.");
         }
