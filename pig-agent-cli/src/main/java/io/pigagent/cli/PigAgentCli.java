@@ -20,6 +20,7 @@ import io.pigagent.provider.openai.OpenAiProvider;
 import io.pigagent.provider.ollama.OllamaProvider;
 import io.pigagent.provider.gemini.GeminiProvider;
 import io.pigagent.provider.dashscope.DashScopeProvider;
+import io.pigagent.provider.mimo.MimoProvider;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskScheduler;
@@ -43,11 +44,11 @@ import java.util.List;
 public final class PigAgentCli {
 
     public static void main(String[] args) throws Exception {
-        System.out.println("  ___  _          _              _     _           ");
-        System.out.println(" |  _(_) __ _  __| | __ _  ___  / \\   (_)______ _  ");
-        System.out.println(" | |_| |/ _` |/ _` |/ _` |/ _ \\/ _ \\  | |_  / _` | ");
-        System.out.println(" |  _| | (_| | (_| | (_| |  __/ ___ \\ | |/ / (_| | ");
-        System.out.println(" |_| |_|\\__,_|\\__,_|\\__, |\\___/_/   \\_\\/___|\\__,_| ");
+        System.out.println(" ____  _          _              _     _           ");
+        System.out.println("|  _ \\(_) __ _  __| | __ _  ___  / \\   (_)______ _  ");
+        System.out.println("| |_) | |/ _` |/ _` |/ _` |/ _ \\/ _ \\  | |_  / _` | ");
+        System.out.println("|  __/| | (_| | (_| | (_| |  __/ ___ \\ | |/ / (_| | ");
+        System.out.println("|_|   |_|\\__,_|\\__,_|\\__, |\\___/_/   \\_\\/___|\\__,_| ");
         System.out.println("                     |___/                          \n");
 
         WorkspaceManager workspace = WorkspaceManager.defaultWorkspace();
@@ -59,6 +60,7 @@ public final class PigAgentCli {
         PigAgentConfig config = configManager.getConfig();
 
         ProviderRegistry registry = new ProviderRegistry();
+        registry.register(new MimoProvider());
         registry.register(new AnthropicProvider());
         registry.register(new OpenAiProvider());
         registry.register(new OllamaProvider());
