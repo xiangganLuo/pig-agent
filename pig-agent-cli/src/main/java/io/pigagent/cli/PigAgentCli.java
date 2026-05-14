@@ -20,6 +20,7 @@ import io.pigagent.provider.gemini.GeminiProvider;
 import io.pigagent.provider.dashscope.DashScopeProvider;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
+import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.checklist.CheckListTool;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.shell.ShellTools;
@@ -74,6 +75,8 @@ public final class PigAgentCli {
         var model = provider.createModelFromEnv();
 
         TaskManager taskManager = new TaskManager(new FileSystemTaskRepository(workspace.getTasksDir()));
+        TaskScheduler taskScheduler = new TaskScheduler(taskManager);
+        taskScheduler.scheduleAll();
 
         Toolkit toolkit = new Toolkit();
         toolkit.registration().tool(new TaskTool(taskManager)).apply();
