@@ -216,7 +216,6 @@ REPL 命令：
 ```
 pig-agent/
 ├── pom.xml                          # 父 POM，依赖管理
-├── .mvn/settings.xml                # Maven 镜像配置
 ├── pig-agent-core/                  # Agent 核心
 │   └── src/main/java/io/pigagent/core/
 │       ├── agent/PigAgent.java
@@ -291,7 +290,7 @@ pig-agent/
 ### 编译
 
 ```bash
-mvn compile -s .mvn/settings.xml
+mvn compile -s 
 ```
 
 ### 运行
@@ -304,7 +303,7 @@ export OPENAI_API_KEY=your_key
 # 或使用本地 Ollama（无需 Key）
 
 # 启动
-mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
+mvn exec:java -s  -pl pig-agent-cli
 ```
 
 首次运行会自动：
@@ -519,10 +518,10 @@ Pig Agent 支持作为后台服务 24 小时运行，持续接收外部通道消
 
 ```bash
 # 前台运行
-mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
+mvn exec:java -s  -pl pig-agent-cli
 
 # 后台运行（nohup）
-nohup mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli > pig-agent.log 2>&1 &
+nohup mvn exec:java -s  -pl pig-agent-cli > pig-agent.log 2>&1 &
 
 # 使用 systemd（推荐生产环境）
 # 创建 /etc/systemd/system/pig-agent.service
@@ -539,7 +538,7 @@ After=network.target
 Type=simple
 User=pigagent
 WorkingDirectory=/opt/pig-agent
-ExecStart=/usr/bin/mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
+ExecStart=/usr/bin/mvn exec:java -s -pl pig-agent-cli
 Environment=MIMO_API_KEY=your_key
 Restart=always
 RestartSec=10

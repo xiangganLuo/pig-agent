@@ -10,6 +10,36 @@
     <packaging>pom</packaging>
     <name>Pig Agent</name>
     <description>A terminal-based AI agent framework built on AgentScope Java</description>
+    <url>https://github.com/xiangganLuo/pig-agent</url>
+
+    <licenses>
+        <license>
+            <name>Apache Software License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>ls</name>
+            <email>xiangganluo@gmail.com</email>
+            <organization>ls</organization>
+            <roles>
+                <role>author</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <issueManagement>
+        <system>Github Issue</system>
+        <url>https://github.com/xiangganLuo/pig-agent/issues</url>
+    </issueManagement>
+
+    <scm>
+        <connection>scm:https://github.com/xiangganLuo/pig-agent</connection>
+        <developerConnection>scm:git@github.com:xiangganLuo/pig-agent.git</developerConnection>
+        <url>https://github.com/xiangganLuo/pig-agent</url>
+    </scm>
 
     <modules>
         <module>pig-agent-core</module>
