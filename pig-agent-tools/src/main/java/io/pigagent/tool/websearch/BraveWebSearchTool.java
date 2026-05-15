@@ -34,7 +34,8 @@ public final class BraveWebSearchTool {
         int resultCount = 5;
         if (count != null && !count.isBlank()) {
             try {
-                resultCount = Math.clamp(Integer.parseInt(count.trim()), 1, 10);
+                int parsed = Integer.parseInt(count.trim());
+                resultCount = Math.max(1, Math.min(10, parsed));
             } catch (NumberFormatException e) {
                 // use default
             }
