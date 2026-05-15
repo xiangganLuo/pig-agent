@@ -1,8 +1,13 @@
 <div align="center">
+
   <img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
-  <h1>Pig Agent</h1>
-  <strong>一个基于 AgentScope Java 构建的终端 AI Agent 框架</strong>
-  <p>架构简单、开发者易学习、功能完整、方便扩展。</p>
+
+  # Pig Agent
+
+  **一个基于 AgentScope Java 构建的终端 AI Agent 框架**
+
+  *架构简单 · 开发者易学习 · 功能完整 · 方便扩展*
+
 </div>
 
 
@@ -178,6 +183,7 @@ ReActAgent 推理循环:
 | 类 | 职责 |
 |---|------|
 | `Channel` | 通道接口：start、sendMessage、stop、isRunning |
+| `ChannelAgentBridge` | 通道-Agent 桥接器，将通道消息路由到 Agent 并回传响应 |
 | `ChatChannel` | 终端通道实现 |
 | `TelegramChannel` | Telegram 通道（存根） |
 | `DiscordChannel` | Discord 通道（存根） |
@@ -474,6 +480,83 @@ mcp:
 ```
 
 MCP Server 提供的工具会自动注册到 Agent 的 Toolkit 中。
+
+### 6. 通道-Agent 打通
+
+通过 `ChannelAgentBridge` 将外部通道（Telegram、Discord 等）连接到 Agent，实现消息自动路由：
+
+```
+外部通道 (Telegram/Discord)
+    ↓ 用户消息
+ChannelAgentBridge
+    ↓ Msg(USER)
+PigAgent.stream(msg)
+    ↓ Agent 响应
+Channel.sendMessage(response)
+    ↓
+外部通道回复用户
+```
+
+配置示例（`application.yaml`）：
+
+```yaml
+channels:
+  telegram:
+    enabled: true
+    token: "your-telegram-bot-token"
+  discord:
+    enabled: true
+    token: "your-discord-bot-token"
+```
+
+启动后自动连接所有 `enabled: true` 的通道，无需手动干预。
+
+## 24 小时不间断运行
+
+Pig Agent 支持作为后台服务 24 小时运行，持续接收外部通道消息和执行定时任务。
+
+### 运行方式
+
+```bash
+# 前台运行
+mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
+
+# 后台运行（nohup）
+nohup mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli > pig-agent.log 2>&1 &
+
+# 使用 systemd（推荐生产环境）
+# 创建 /etc/systemd/system/pig-agent.service
+```
+
+### systemd 服务配置示例
+
+```ini
+[Unit]
+Description=Pig Agent - AI Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=pigagent
+WorkingDirectory=/opt/pig-agent
+ExecStart=/usr/bin/mvn exec:java -s .mvn/settings.xml -pl pig-agent-cli
+Environment=MIMO_API_KEY=your_key
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 持续运行能力
+
+| 能力 | 说明 |
+|------|------|
+| 通道常驻 | Telegram/Discord 通道持续监听消息，收到即响应 |
+| 定时任务 | TaskScheduler 后台执行 CRON/DELAYED 任务 |
+| MCP 长连接 | MCP Server 连接保持，工具随时可用 |
+| 优雅关闭 | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
+| 自动重启 | 配合 systemd `Restart=always` 实现故障自愈 |
 
 ## 设计原则
 
