@@ -11,6 +11,7 @@ import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
+import io.pigagent.core.memory.FileSystemLongTermMemory;
 import io.pigagent.core.provider.AgentOnboardingProvider;
 import io.pigagent.channel.Channel;
 import io.pigagent.channel.ChannelAgentBridge;
@@ -110,12 +111,16 @@ public final class PigAgentCli {
         mcpManager.connectAll(config.getMcp(), toolkit);
 
         String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd();
+        FileSystemLongTermMemory longTermMemory = new FileSystemLongTermMemory(
+                workspace.getContextDir().resolve("memory.md"));
+
         PigAgent agent = PigAgent.builder()
                 .name(config.getAgent().getName())
                 .sysPrompt(sysPrompt)
                 .model(model)
                 .toolkit(toolkit)
                 .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
+                .longTermMemory(longTermMemory)
                 .build();
 
         List<ChannelAgentBridge> bridges = startChannels(agent, config.getChannels());

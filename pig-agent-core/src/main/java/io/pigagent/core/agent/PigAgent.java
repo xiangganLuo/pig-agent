@@ -2,6 +2,8 @@ package io.pigagent.core.agent;
 
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.memory.InMemoryMemory;
+import io.agentscope.core.memory.LongTermMemory;
+import io.agentscope.core.memory.LongTermMemoryMode;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
@@ -56,6 +58,7 @@ public final class PigAgent {
         private Model model;
         private Toolkit toolkit;
         private List<io.agentscope.core.hook.Hook> hooks;
+        private LongTermMemory longTermMemory;
 
         private Builder() {}
 
@@ -84,6 +87,11 @@ public final class PigAgent {
             return this;
         }
 
+        public Builder longTermMemory(LongTermMemory longTermMemory) {
+            this.longTermMemory = longTermMemory;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -92,6 +100,11 @@ public final class PigAgent {
                     .sysPrompt(sysPrompt)
                     .model(model)
                     .memory(new InMemoryMemory());
+
+            if (longTermMemory != null) {
+                reactBuilder.longTermMemory(longTermMemory);
+                reactBuilder.longTermMemoryMode(LongTermMemoryMode.STATIC_CONTROL);
+            }
 
             if (toolkit != null) {
                 reactBuilder.toolkit(toolkit);
