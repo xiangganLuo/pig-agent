@@ -29,6 +29,7 @@ public final class WorkspaceManager {
         Files.createDirectories(rootPath.resolve("tasks"));
         Files.createDirectories(rootPath.resolve("tasks/recurring"));
         Files.createDirectories(rootPath.resolve("tasks").resolve(todayDir()));
+        Files.createDirectories(rootPath.resolve("sessions"));
         createIfAbsent(rootPath.resolve("AGENT.md"), defaultAgentMd());
         createIfAbsent(rootPath.resolve("INFO.md"), defaultInfoMd());
         createIfAbsent(rootPath.resolve("application.yaml"), defaultConfigYaml());
@@ -42,6 +43,7 @@ public final class WorkspaceManager {
     public Path getTasksDir() { return rootPath.resolve("tasks"); }
     public Path getRecurringTasksDir() { return rootPath.resolve("tasks/recurring"); }
     public Path getTodayTaskDir() { return rootPath.resolve("tasks").resolve(todayDir()); }
+    public Path getSessionsDir() { return rootPath.resolve("sessions"); }
 
     public String readAgentMd() throws IOException {
         return Files.readString(getAgentMd());

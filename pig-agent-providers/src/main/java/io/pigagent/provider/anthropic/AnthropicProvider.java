@@ -11,7 +11,7 @@ public final class AnthropicProvider implements AgentOnboardingProvider {
     @Override public String displayName() { return "Anthropic (Claude)"; }
     @Override public String description() { return "Claude series models by Anthropic"; }
     @Override public List<String> requiredCredentialKeys() { return List.of("ANTHROPIC_API_KEY"); }
-    @Override public String defaultModelName() { return "claude-sonnet-4-5-20250929"; }
+    @Override public String defaultModelName() { return "claude-sonnet-4-6"; }
 
     @Override
     public Model createModel(ProviderCredentials credentials) {

@@ -47,6 +47,7 @@
         <module>pig-agent-tools</module>
         <module>pig-agent-workspace</module>
         <module>pig-agent-task</module>
+        <module>pig-agent-session</module>
         <module>pig-agent-channel</module>
         <module>pig-agent-config</module>
         <module>pig-agent-onboarding</module>
@@ -67,6 +68,7 @@
         <snakeyaml.version>2.3</snakeyaml.version>
         <jackson.version>2.18.3</jackson.version>
         <lucene.version>9.12.0</lucene.version>
+        <jansi.version>2.4.1</jansi.version>
 
         <!-- Test -->
         <junit.version>5.11.4</junit.version>
@@ -111,6 +113,11 @@
             </dependency>
             <dependency>
                 <groupId>io.pigagent</groupId>
+                <artifactId>pig-agent-session</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.pigagent</groupId>
                 <artifactId>pig-agent-channel</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -147,6 +154,19 @@
                 <groupId>info.picocli</groupId>
                 <artifactId>picocli</artifactId>
                 <version>${picocli.version}</version>
+            </dependency>
+            <!-- Picocli + JLine3 integration for the interactive REPL -->
+            <dependency>
+                <groupId>info.picocli</groupId>
+                <artifactId>picocli-shell-jline3</artifactId>
+                <version>${picocli.version}</version>
+            </dependency>
+
+            <!-- Jansi for colored terminal output -->
+            <dependency>
+                <groupId>org.fusesource.jansi</groupId>
+                <artifactId>jansi</artifactId>
+                <version>${jansi.version}</version>
             </dependency>
 
             <!-- SnakeYAML for config -->

@@ -1,17 +1,14 @@
 <div align="center">
 
-  <img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
+<img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
 
-  # Pig Agent
+# Pig Agent
 
-  **一个基于 AgentScope Java 构建的终端 AI Agent 框架**
+**一个基于 AgentScope Java 构建的终端 AI Agent 框架**
 
-  *架构简单 · 开发者易学习 · 功能完整 · 方便扩展*
+*架构简单 · 开发者易学习 · 功能完整 · 方便扩展*
 
 </div>
-
-
-
 
 ## 项目背景
 
@@ -24,14 +21,15 @@ Pig Agent 的设计灵感来源于 OpenCLAW、Hermes Agent 等终端智能体产
 
 ### 技术栈
 
-| 组件 | 技术选型 |
-|------|---------|
-| Agent 框架 | AgentScope Java 1.0.10 |
-| 终端 REPL | JLine3 3.28.0 |
-| 配置管理 | Jackson YAML 2.18.3 |
-| 工具发现 | Apache Lucene 10.1.0 |
-| MCP 协议 | AgentScope 内置 MCP Client |
-| 构建工具 | Maven (Java 17) |
+
+| 组件       | 技术选型                   |
+| ---------- | -------------------------- |
+| Agent 框架 | AgentScope Java 1.0.10     |
+| 终端 REPL  | JLine3 3.28.0              |
+| 配置管理   | Jackson YAML 2.18.3        |
+| 工具发现   | Apache Lucene 10.1.0       |
+| MCP 协议   | AgentScope 内置 MCP Client |
+| 构建工具   | Maven (Java 17)            |
 
 ## 核心架构
 
@@ -79,10 +77,6 @@ ReActAgent 推理循环:
     ├── 工具执行 (@Tool 方法)
     └── PostActingEvent    → ToolCallLoggingHook
     ↓
-流式输出 Event:
-    ├── REASONING    → stderr: [thinking]
-    ├── TOOL_RESULT  → stderr: [tool]
-    └── AGENT_RESULT → stdout: 最终回答
 ```
 
 ## 系统模块
@@ -91,56 +85,61 @@ ReActAgent 推理循环:
 
 ### pig-agent-core — Agent 核心
 
-| 类 | 职责 |
-|---|------|
-| `PigAgent` | 核心 Agent，封装 AgentScope 的 ReActAgent，提供 `call()` 和 `stream()` 接口 |
-| `LoggingHook` | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件 |
-| `ToolCallLoggingHook` | 工具调用 Hook，打印工具名称和执行状态 |
-| `FileMemory` | 文件持久化内存，会话历史保存到磁盘 |
-| `AgentOnboardingProvider` | LLM 提供商接口，定义凭证校验、模型创建等标准方法 |
-| `ProviderCredentials` | 不可变凭证容器，copy-on-write 语义 |
+
+| 类                        | 职责                                                                       |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `PigAgent`                | 核心 Agent，封装 AgentScope 的 ReActAgent，提供`call()` 和 `stream()` 接口 |
+| `LoggingHook`             | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件                 |
+| `ToolCallLoggingHook`     | 工具调用 Hook，打印工具名称和执行状态                                      |
+| `FileMemory`              | 文件持久化内存，会话历史保存到磁盘                                         |
+| `AgentOnboardingProvider` | LLM 提供商接口，定义凭证校验、模型创建等标准方法                           |
+| `ProviderCredentials`     | 不可变凭证容器，copy-on-write 语义                                         |
 
 ### pig-agent-providers — LLM 提供商
 
 支持 6 个 LLM 提供商，通过环境变量配置 API Key：
 
-| 提供商 | 环境变量 | 默认模型 |
-|--------|---------|---------|
-| MiMo (小米) | `MIMO_API_KEY` | mimo-v2.5-pro |
-| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-5-20250929 |
-| OpenAI | `OPENAI_API_KEY` | gpt-4o |
-| Ollama | 无需 (本地运行) | llama3 |
-| Gemini | `GEMINI_API_KEY` | gemini-1.5-pro |
-| DashScope | `DASHSCOPE_API_KEY` | qwen-max |
+
+| 提供商      | 环境变量            | 默认模型                   |
+| ----------- | ------------------- | -------------------------- |
+| MiMo (小米) | `MIMO_API_KEY`      | mimo-v2.5-pro              |
+| Anthropic   | `ANTHROPIC_API_KEY` | claude-sonnet-4-5-20250929 |
+| OpenAI      | `OPENAI_API_KEY`    | gpt-4o                     |
+| Ollama      | 无需 (本地运行)     | llama3                     |
+| Gemini      | `GEMINI_API_KEY`    | gemini-1.5-pro             |
+| DashScope   | `DASHSCOPE_API_KEY` | qwen-max                   |
 
 ### pig-agent-tools — 内置工具
 
-| 工具 | @Tool 方法 | 功能 |
-|------|-----------|------|
-| `ShellTools` | `executeCommand` | 执行 Shell 命令，30 秒超时 |
-| `FileSystemTools` | `readFile`, `writeFile`, `listDirectory` | 文件读写和目录列表 |
-| `SmartWebFetchTool` | `fetchUrl` | 抓取网页内容，自动截断至 10K 字符 |
-| `BraveWebSearchTool` | `webSearch` | Brave Search API 网页搜索 |
-| `TaskTool` | `createTask`, `listTasks`, `updateTaskStatus` | 任务管理 |
-| `CheckListTool` | `createChecklist`, `completeItem`, `showChecklist` | 清单管理 |
-| `SkillsTool` | `listSkills`, `loadSkill` | 从 workspace/skills/ 加载技能 |
-| `ToolDiscovery` | — | 基于 Lucene 的工具全文搜索 |
+
+| 工具                 | @Tool 方法                                         | 功能                              |
+| -------------------- | -------------------------------------------------- | --------------------------------- |
+| `ShellTools`         | `executeCommand`                                   | 执行 Shell 命令，30 秒超时        |
+| `FileSystemTools`    | `readFile`, `writeFile`, `listDirectory`           | 文件读写和目录列表                |
+| `SmartWebFetchTool`  | `fetchUrl`                                         | 抓取网页内容，自动截断至 10K 字符 |
+| `BraveWebSearchTool` | `webSearch`                                        | Brave Search API 网页搜索         |
+| `TaskTool`           | `createTask`, `listTasks`, `updateTaskStatus`      | 任务管理                          |
+| `CheckListTool`      | `createChecklist`, `completeItem`, `showChecklist` | 清单管理                          |
+| `SkillsTool`         | `listSkills`, `loadSkill`                          | 从 workspace/skills/ 加载技能     |
+| `ToolDiscovery`      | —                                                 | 基于 Lucene 的工具全文搜索        |
 
 ### pig-agent-task — 任务管理
 
-| 类 | 职责 |
-|---|------|
-| `Task` | 不可变记录，支持 `withStatus()`、`withSchedule()` 生成新实例 |
-| `TaskSchedule` | 调度配置：ONCE（一次）、CRON（定时）、DELAYED（延迟） |
-| `TaskStatus` | 状态枚举：TODO、IN_PROGRESS、COMPLETED、AWAITING_HUMAN_INPUT |
-| `TaskManager` | 任务 CRUD 操作 |
-| `TaskScheduler` | 后台调度器，使用 `ScheduledExecutorService` 执行延迟/定时任务 |
-| `FileSystemTaskRepository` | 文件系统存储，任务以 Markdown 格式保存在 `workspace/tasks/{date}/{id}.md` |
+
+| 类                         | 职责                                                                     |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `Task`                     | 不可变记录，支持`withStatus()`、`withSchedule()` 生成新实例              |
+| `TaskSchedule`             | 调度配置：ONCE（一次）、CRON（定时）、DELAYED（延迟）                    |
+| `TaskStatus`               | 状态枚举：TODO、IN_PROGRESS、COMPLETED、AWAITING_HUMAN_INPUT             |
+| `TaskManager`              | 任务 CRUD 操作                                                           |
+| `TaskScheduler`            | 后台调度器，使用`ScheduledExecutorService` 执行延迟/定时任务             |
+| `FileSystemTaskRepository` | 文件系统存储，任务以 Markdown 格式保存在`workspace/tasks/{date}/{id}.md` |
 
 ### pig-agent-mcp — MCP 集成
 
-| 类 | 职责 |
-|---|------|
+
+| 类           | 职责                                  |
+| ------------ | ------------------------------------- |
 | `McpManager` | 管理 MCP 客户端连接，支持三种传输方式 |
 
 支持的 MCP 传输方式：
@@ -151,9 +150,10 @@ ReActAgent 推理循环:
 
 ### pig-agent-workspace — 工作区管理
 
-| 类 | 职责 |
-|---|------|
-| `WorkspaceManager` | 管理 `~/.pig-agent/workspace/` 目录结构 |
+
+| 类                 | 职责                                   |
+| ------------------ | -------------------------------------- |
+| `WorkspaceManager` | 管理`~/.pig-agent/workspace/` 目录结构 |
 
 工作区结构：
 
@@ -172,44 +172,49 @@ ReActAgent 推理循环:
 
 ### pig-agent-config — 配置管理
 
-| 类 | 职责 |
-|---|------|
-| `PigAgentConfig` | Jackson 注解的配置类，支持 model、agent、channels、mcp 配置 |
-| `ConfigurationManager` | YAML 持久化，支持变更监听器模式 |
-| `ConfigurationChangedEvent` | 配置变更事件，携带 oldConfig 和 newConfig |
+
+| 类                          | 职责                                                        |
+| --------------------------- | ----------------------------------------------------------- |
+| `PigAgentConfig`            | Jackson 注解的配置类，支持 model、agent、channels、mcp 配置 |
+| `ConfigurationManager`      | YAML 持久化，支持变更监听器模式                             |
+| `ConfigurationChangedEvent` | 配置变更事件，携带 oldConfig 和 newConfig                   |
 
 ### pig-agent-channel — 通道抽象
 
-| 类 | 职责 |
-|---|------|
-| `Channel` | 通道接口：start、sendMessage、stop、isRunning |
+
+| 类                   | 职责                                                 |
+| -------------------- | ---------------------------------------------------- |
+| `Channel`            | 通道接口：start、sendMessage、stop、isRunning        |
 | `ChannelAgentBridge` | 通道-Agent 桥接器，将通道消息路由到 Agent 并回传响应 |
-| `ChatChannel` | 终端通道实现 |
-| `TelegramChannel` | Telegram 通道（存根） |
-| `DiscordChannel` | Discord 通道（存根） |
-| `ChannelRegistry` | 通道注册中心 |
+| `ChatChannel`        | 终端通道实现                                         |
+| `TelegramChannel`    | Telegram 通道（存根）                                |
+| `DiscordChannel`     | Discord 通道（存根）                                 |
+| `ChannelRegistry`    | 通道注册中心                                         |
 
 ### pig-agent-onboarding — 引导向导
 
-| 类 | 职责 |
-|---|------|
+
+| 类                 | 职责                                         |
+| ------------------ | -------------------------------------------- |
 | `OnboardingWizard` | 首次运行引导，选择提供商、配置凭证、更新配置 |
 
 ### pig-agent-cli — CLI 入口
 
-| 类 | 职责 |
-|---|------|
+
+| 类            | 职责                                    |
+| ------------- | --------------------------------------- |
 | `PigAgentCli` | 主入口，JLine3 REPL，流式输出，优雅关闭 |
 
 REPL 命令：
 
-| 命令 | 功能 |
-|------|------|
-| `/help` | 显示帮助 |
-| `/tasks` | 列出任务 |
-| `/skills` | 列出技能 |
+
+| 命令      | 功能         |
+| --------- | ------------ |
+| `/help`   | 显示帮助     |
+| `/tasks`  | 列出任务     |
+| `/skills` | 列出技能     |
 | `/config` | 显示当前配置 |
-| `/quit` | 退出 |
+| `/quit`   | 退出         |
 
 ## 代码结构
 
@@ -307,6 +312,7 @@ mvn exec:java -s  -pl pig-agent-cli
 ```
 
 首次运行会自动：
+
 1. 创建 `~/.pig-agent/workspace/` 工作区
 2. 生成 `AGENT.md`、`INFO.md`、`application.yaml`
 3. 如果 API Key 未配置，启动引导向导
@@ -549,13 +555,14 @@ WantedBy=multi-user.target
 
 ### 持续运行能力
 
-| 能力 | 说明 |
-|------|------|
-| 通道常驻 | Telegram/Discord 通道持续监听消息，收到即响应 |
-| 定时任务 | TaskScheduler 后台执行 CRON/DELAYED 任务 |
-| MCP 长连接 | MCP Server 连接保持，工具随时可用 |
-| 优雅关闭 | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
-| 自动重启 | 配合 systemd `Restart=always` 实现故障自愈 |
+
+| 能力       | 说明                                              |
+| ---------- | ------------------------------------------------- |
+| 通道常驻   | Telegram/Discord 通道持续监听消息，收到即响应     |
+| 定时任务   | TaskScheduler 后台执行 CRON/DELAYED 任务          |
+| MCP 长连接 | MCP Server 连接保持，工具随时可用                 |
+| 优雅关闭   | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
+| 自动重启   | 配合 systemd`Restart=always` 实现故障自愈         |
 
 ## 设计原则
 

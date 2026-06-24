@@ -4,8 +4,10 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.memory.InMemoryMemory;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.memory.LongTermMemoryMode;
+import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.session.Session;
 import io.agentscope.core.tool.Toolkit;
 import reactor.core.publisher.Flux;
 
@@ -50,6 +52,26 @@ public final class PigAgent {
 
     public ReActAgent getReactAgent() {
         return reactAgent;
+    }
+
+    /** The agent's short-term conversation memory (used to inspect, clear, or seed history). */
+    public Memory getMemory() {
+        return reactAgent.getMemory();
+    }
+
+    /** Clear the current conversation history. */
+    public void clearMemory() {
+        reactAgent.getMemory().clear();
+    }
+
+    /** Persist the agent's state (incl. conversation) under the given session id. */
+    public void saveTo(Session session, String sessionId) {
+        reactAgent.saveTo(session, sessionId);
+    }
+
+    /** Restore agent state for the given session id; returns false if none was stored. */
+    public boolean loadIfExists(Session session, String sessionId) {
+        return reactAgent.loadIfExists(session, sessionId);
     }
 
     public static final class Builder {

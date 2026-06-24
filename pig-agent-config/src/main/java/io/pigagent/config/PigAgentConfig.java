@@ -10,6 +10,8 @@ public final class PigAgentConfig {
     @JsonProperty("agent") private AgentConfig agent = new AgentConfig();
     @JsonProperty("channels") private Map<String, ChannelConfig> channels = Map.of();
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
+    @JsonProperty("current-session-id") private String currentSessionId;
+    @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
     public String getWorkspacePath() { return workspacePath; }
     public void setWorkspacePath(String path) { this.workspacePath = path; }
@@ -17,6 +19,10 @@ public final class PigAgentConfig {
     public AgentConfig getAgent() { return agent; }
     public Map<String, ChannelConfig> getChannels() { return channels; }
     public McpConfig getMcp() { return mcp; }
+    public String getCurrentSessionId() { return currentSessionId; }
+    public void setCurrentSessionId(String id) { this.currentSessionId = id; }
+    public boolean isMemoryEnabled() { return memoryEnabled; }
+    public void setMemoryEnabled(boolean enabled) { this.memoryEnabled = enabled; }
 
     public static final class ModelConfig {
         @JsonProperty("provider") private String provider = "mimo";
