@@ -3,7 +3,7 @@ package io.pigagent.provider.dashscope;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.DashScopeChatModel;
 import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ProviderCredentials;
+import io.pigagent.core.provider.ModelSpec;
 import java.util.List;
 
 public final class DashScopeProvider implements AgentOnboardingProvider {
@@ -14,10 +14,12 @@ public final class DashScopeProvider implements AgentOnboardingProvider {
     @Override public String defaultModelName() { return "qwen-max"; }
 
     @Override
-    public Model createModel(ProviderCredentials credentials) {
+    public Model createModel(ModelSpec spec) {
+        String modelName = spec.modelName() == null || spec.modelName().isBlank()
+                ? defaultModelName() : spec.modelName();
         return DashScopeChatModel.builder()
-                .apiKey(credentials.getRequired("DASHSCOPE_API_KEY"))
-                .modelName(defaultModelName())
+                .apiKey(spec.apiKey())
+                .modelName(modelName)
                 .build();
     }
 }

@@ -9,13 +9,18 @@ import io.pigagent.channel.telegram.TelegramChannel;
 import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
+import io.pigagent.core.agent.AgentFactory;
+import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
-import io.pigagent.core.provider.AgentOnboardingProvider;
 import io.pigagent.mcp.McpManager;
+import io.pigagent.model.JsonModelStore;
+import io.pigagent.model.ModelManager;
+import io.pigagent.model.StoredModel;
 import io.pigagent.onboarding.OnboardingWizard;
 import io.pigagent.provider.anthropic.AnthropicProvider;
 import io.pigagent.provider.dashscope.DashScopeProvider;
@@ -82,17 +87,14 @@ public final class PigAgentCli {
         registry.register(new GeminiProvider());
         registry.register(new DashScopeProvider());
 
-        String initialProviderId = config.getModel().getProvider();
-        var providerOpt = registry.findById(initialProviderId);
-        if (providerOpt.isEmpty() || !providerOpt.get().isAvailable()) {
-            new OnboardingWizard(registry, configManager, workspace).run();
-            config = configManager.getConfig();
+        // Model store + manager. No default model → force onboarding (cannot be skipped).
+        JsonModelStore modelStore = new JsonModelStore(workspace.getModelsFile());
+        ModelManager modelManager = new ModelManager(registry, modelStore);
+        if (!modelManager.isConfigured()) {
+            new OnboardingWizard(registry, modelManager).run();
         }
-
-        final String providerId = config.getModel().getProvider();
-        AgentOnboardingProvider provider = registry.findById(providerId)
-                .orElseThrow(() -> new IllegalStateException("Provider not found: " + providerId));
-        var model = provider.createModelFromEnv();
+        StoredModel defaultModel = modelManager.getDefault()
+                .orElseThrow(() -> new IllegalStateException("No model configured"));
 
         TaskManager taskManager = new TaskManager(new FileSystemTaskRepository(workspace.getTasksDir()));
         TaskScheduler taskScheduler = new TaskScheduler(taskManager);
@@ -116,26 +118,30 @@ public final class PigAgentCli {
                 workspace.getContextDir().resolve("memory.md"));
         CompositeLongTermMemory memory = new CompositeLongTermMemory(globalMemory, config.isMemoryEnabled());
 
-        PigAgent agent = PigAgent.builder()
-                .name(config.getAgent().getName())
-                .sysPrompt(sysPrompt)
-                .model(model)
-                .toolkit(toolkit)
-                .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
-                .longTermMemory(memory)
-                .build();
+        // Build the initial agent through a factory so the model can be swapped at runtime.
+        AgentFactory agentFactory = new AgentFactory(
+                config.getAgent().getName(), sysPrompt, toolkit,
+                List.of(new LoggingHook(), new ToolCallLoggingHook()), memory);
+        AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
+        modelManager.attach(agentHolder, agentFactory, defaultModel.id());
+        System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
 
         // Session management: AgentScope's JsonSession persists each session's conversation;
         // our repository tracks listing metadata. initialize() restores the last active session.
         JsonSession agentSession = new JsonSession(workspace.getSessionsDir());
         SessionRepository sessionRepository = new FileSystemSessionRepository(workspace.getSessionsDir());
         SessionManager sessionManager = new SessionManager(
-                agent, agentSession, memory, sessionRepository, configManager, workspace.getSessionsDir());
+                agentHolder, modelManager, agentSession, memory, sessionRepository,
+                configManager, workspace.getSessionsDir());
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
                 System.out.println(Ansi.success("Session: ") + Ansi.info(s.name() + " [" + s.id() + "]")));
 
-        List<ChannelAgentBridge> bridges = startChannels(agent, config.getChannels());
+        PigAgentConfig.CompressionConfig comp = config.getCompression();
+        CompressionService compressionService = new CompressionService(
+                agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
+
+        List<ChannelAgentBridge> bridges = startChannels(agentHolder, config.getChannels());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.err.println(Ansi.warn("\n[CLI] Shutting down..."));
@@ -148,10 +154,11 @@ public final class PigAgentCli {
             mcpManager.closeAll();
         }));
 
-        new AgentRepl(agent, configManager, registry, bridges, sessionManager, workspace.getRootPath()).run();
+        new AgentRepl(agentHolder, configManager, registry, modelManager, compressionService,
+                bridges, sessionManager, workspace.getRootPath()).run();
     }
 
-    private static List<ChannelAgentBridge> startChannels(PigAgent agent,
+    private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder,
                                                           Map<String, PigAgentConfig.ChannelConfig> channelConfigs) {
         List<ChannelAgentBridge> bridges = new ArrayList<>();
         for (var entry : channelConfigs.entrySet()) {
@@ -169,7 +176,7 @@ public final class PigAgentCli {
             };
             if (channel == null) continue;
 
-            ChannelAgentBridge bridge = new ChannelAgentBridge(agent, channel);
+            ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel);
             bridge.start();
             bridges.add(bridge);
             System.out.println(Ansi.success("Channel started: ") + Ansi.info(channel.displayName()));

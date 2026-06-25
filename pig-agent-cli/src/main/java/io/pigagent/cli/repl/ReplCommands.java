@@ -5,7 +5,10 @@ import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.config.PigAgentConfig;
+import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.provider.AgentOnboardingProvider;
+import io.pigagent.model.ModelManager;
+import io.pigagent.model.StoredModel;
 import io.pigagent.session.Session;
 import io.pigagent.session.SessionManager;
 import org.fusesource.jansi.Ansi.Color;
@@ -48,10 +51,10 @@ public final class ReplCommands {
         cmd.addSubcommand(new ConfigCommand(ctx));
         cmd.addSubcommand(new ProvidersCommand(ctx));
         cmd.addSubcommand(new ModelCommand(ctx));
-        cmd.addSubcommand(new SwitchCommand(ctx));
         cmd.addSubcommand(new ChannelsCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
         cmd.addSubcommand(new MemoryCommand(ctx));
+        cmd.addSubcommand(new CompressCommand(ctx));
         cmd.addSubcommand(new StatusCommand(ctx));
         cmd.addSubcommand(new ClearCommand(ctx));
         cmd.addSubcommand(new QuitCommand(ctx));
@@ -82,12 +85,12 @@ public final class ReplCommands {
             entry(t, "/tasks", "List all tasks");
             entry(t, "/skills", "List available skills");
             entry(t, "/config", "Show current configuration");
-            entry(t, "/providers", "List all LLM providers and availability");
-            entry(t, "/model", "Show current model details");
-            entry(t, "/switch <provider>", "Switch to a different provider");
+            entry(t, "/providers", "List all LLM provider types");
+            entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
             entry(t, "/channels", "Show connected channels and status");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/memory <on|off>", "Toggle/show global + session memory loading");
+            entry(t, "/compress <action>", "Context compression (now|status|off|on)");
             entry(t, "/status", "Show agent status summary");
             entry(t, "/clear", "Clear the screen");
             entry(t, "/quit", "Exit");
@@ -158,21 +161,31 @@ public final class ReplCommands {
 
         @Override
         public void run() {
-            String current = ctx.configManager().getConfig().getModel().getProvider();
+            String current = ctx.modelManager().getCurrentModel()
+                    .map(StoredModel::providerId).orElse(null);
             Terminal t = ctx.terminal();
-            Ansi.println(t, Ansi.heading("Registered providers:"));
+            Ansi.println(t, Ansi.heading("Provider types:"));
             for (AgentOnboardingProvider p : ctx.registry().getAllProviders()) {
-                boolean active = p.providerId().equals(current);
-                String avail = p.isAvailable() ? Ansi.success("ready") : Ansi.warn("no API key");
-                String marker = active ? Ansi.bold(" (active)", Color.GREEN) : "";
-                Ansi.println(t, String.format("  %-12s  %-20s  ", p.providerId(), p.displayName()) + avail + marker);
+                String marker = p.providerId().equals(current) ? Ansi.bold(" (active)", Color.GREEN) : "";
+                Ansi.println(t, String.format("  %-12s  %-20s", p.providerId(), p.displayName())
+                        + Ansi.dim("  " + p.description()) + marker);
             }
         }
     }
 
-    @Command(name = "/model", description = "Show current model details")
+    @Command(name = "/model", description = "Manage models (list|add|switch|edit|delete)")
     static final class ModelCommand implements Runnable {
         private final ReplContext ctx;
+
+        @Parameters(index = "0", arity = "0..1", paramLabel = "<action>",
+                description = "list | add | switch | edit | delete")
+        String action;
+
+        @Parameters(index = "1..*", paramLabel = "<args>")
+        String[] args;
+
+        @Option(names = "--global", description = "with 'switch': set as the global default (permanent)")
+        boolean global;
 
         ModelCommand(ReplContext ctx) {
             this.ctx = ctx;
@@ -180,59 +193,246 @@ public final class ReplCommands {
 
         @Override
         public void run() {
-            PigAgentConfig cfg = ctx.configManager().getConfig();
-            String providerId = cfg.getModel().getProvider();
             Terminal t = ctx.terminal();
-            Ansi.println(t, Ansi.heading("Current Model"));
-            Ansi.println(t, line("Provider", providerId));
-            Ansi.println(t, line("Model", cfg.getModel().getModelName()));
-            ctx.registry().findById(providerId).ifPresent(p -> {
-                Ansi.println(t, line("Display", p.displayName()));
-                Ansi.println(t, line("Description", p.description()));
-                Ansi.println(t, line("Credentials", String.valueOf(p.requiredCredentialKeys())));
-                Ansi.println(t, line("Available", String.valueOf(p.isAvailable())));
-            });
+            ModelManager mm = ctx.modelManager();
+            String act = action == null ? "list" : action.toLowerCase();
+            switch (act) {
+                case "list" -> listModels(t, mm);
+                case "add" -> addModel(t, mm);
+                case "switch" -> switchModel(t, mm);
+                case "edit" -> editModel(t, mm);
+                case "delete" -> deleteModel(t, mm);
+                case "help" -> usage(t);
+                default -> {
+                    Ansi.println(t, Ansi.error("Unknown action: " + act));
+                    usage(t);
+                }
+            }
+        }
+
+        private void listModels(Terminal t, ModelManager mm) {
+            List<StoredModel> models = mm.list();
+            Ansi.println(t, Ansi.heading("Models:"));
+            if (models.isEmpty()) {
+                Ansi.println(t, Ansi.dim("  (none — use /model add)"));
+                return;
+            }
+            String def = mm.getDefaultId();
+            String cur = mm.getCurrentModelId();
+            int idx = 1;
+            for (StoredModel m : models) {
+                String marker = m.id().equals(cur) ? Ansi.bold(" *", Color.GREEN) : "  ";
+                String tag = m.id().equals(def) ? Ansi.success(" [default]") : "";
+                Ansi.println(t, String.format("  %2d)", idx) + marker + " " + Ansi.info(m.label())
+                        + tag + Ansi.dim(" [" + m.id() + "]"));
+                idx++;
+            }
+        }
+
+        private void addModel(Terminal t, ModelManager mm) {
+            LineReader reader = ctx.readerRef().get();
+            if (reader == null) {
+                Ansi.println(t, Ansi.error("Interactive input is unavailable."));
+                return;
+            }
+            List<AgentOnboardingProvider> providers = ctx.registry().getAllProviders();
+            Ansi.println(t, Ansi.heading("Add model — choose a provider:"));
+            for (int i = 0; i < providers.size(); i++) {
+                AgentOnboardingProvider p = providers.get(i);
+                Ansi.println(t, String.format("  %d) %-18s %s", i + 1, p.displayName(), p.description()));
+            }
+            AgentOnboardingProvider provider;
+            try {
+                int idx = Integer.parseInt(reader.readLine("Provider number: ").trim()) - 1;
+                provider = providers.get(idx);
+            } catch (Exception e) {
+                Ansi.println(t, Ansi.error("Invalid selection."));
+                return;
+            }
+            String apiKey = null;
+            if (provider.requiresApiKey()) {
+                apiKey = reader.readLine("API key: ").trim();
+                if (apiKey.isBlank()) {
+                    Ansi.println(t, Ansi.error("API key is required."));
+                    return;
+                }
+            }
+            String baseUrl = null;
+            if (provider.supportsBaseUrl()) {
+                baseUrl = reader.readLine("Base URL (optional): ").trim();
+                if (baseUrl.isBlank()) {
+                    baseUrl = null;
+                }
+            }
+            String modelName = reader.readLine("Model name [" + provider.defaultModelName() + "]: ").trim();
+            if (modelName.isBlank()) {
+                modelName = provider.defaultModelName();
+            }
+            StoredModel m = StoredModel.create(provider.providerId(), apiKey, baseUrl, modelName);
+            Ansi.println(t, Ansi.dim("Testing " + m.label() + " ..."));
+            ModelManager.TestResult test = mm.test(m);
+            if (!test.ok()) {
+                Ansi.println(t, Ansi.error("Test failed: " + test.error() + " (not saved)"));
+                return;
+            }
+            mm.add(m);
+            Ansi.println(t, Ansi.success("Added " + m.label() + " [" + m.id() + "]"));
+        }
+
+        private void switchModel(Terminal t, ModelManager mm) {
+            if (args == null || args.length == 0) {
+                Ansi.println(t, Ansi.warn("Usage: /model switch <id|index> [--global]"));
+                return;
+            }
+            String id = resolveId(mm, args[0]);
+            StoredModel m = id == null ? null : mm.findById(id).orElse(null);
+            if (m == null) {
+                Ansi.println(t, Ansi.error("No such model: " + args[0]));
+                return;
+            }
+            Ansi.println(t, Ansi.dim("Testing " + m.label() + " ..."));
+            ModelManager.TestResult test = mm.test(m);
+            if (!test.ok()) {
+                Ansi.println(t, Ansi.error("Model unavailable: " + test.error() + " — keeping current model."));
+                return;
+            }
+            SessionManager sm = ctx.sessionManager();
+            if (global) {
+                mm.setDefault(id);
+                sm.bindCurrentSessionModel(null);
+                sm.reactivateCurrent();
+                Ansi.println(t, Ansi.success("Global default set to " + m.label() + " (applies to all sessions)."));
+            } else {
+                sm.bindCurrentSessionModel(id);
+                sm.reactivateCurrent();
+                Ansi.println(t, Ansi.success("This session now uses " + m.label()
+                        + " (new sessions keep the default)."));
+            }
+        }
+
+        private void editModel(Terminal t, ModelManager mm) {
+            if (args == null || args.length == 0) {
+                Ansi.println(t, Ansi.warn("Usage: /model edit <id|index>"));
+                return;
+            }
+            LineReader reader = ctx.readerRef().get();
+            if (reader == null) {
+                Ansi.println(t, Ansi.error("Interactive input is unavailable."));
+                return;
+            }
+            String id = resolveId(mm, args[0]);
+            StoredModel m = id == null ? null : mm.findById(id).orElse(null);
+            if (m == null) {
+                Ansi.println(t, Ansi.error("No such model: " + args[0]));
+                return;
+            }
+            Ansi.println(t, Ansi.dim("Editing " + m.label() + " (press Enter to keep a value)"));
+            String key = reader.readLine("API key [keep]: ").trim();
+            String url = reader.readLine("Base URL [keep]: ").trim();
+            String name = reader.readLine("Model name [" + m.modelName() + "]: ").trim();
+            StoredModel updated = m;
+            if (!key.isBlank()) {
+                updated = updated.withApiKey(key);
+            }
+            if (!url.isBlank()) {
+                updated = updated.withBaseUrl(url);
+            }
+            if (!name.isBlank()) {
+                updated = updated.withModelName(name);
+            }
+            mm.edit(updated);
+            Ansi.println(t, Ansi.success("Updated " + updated.label() + "."));
+            if (updated.id().equals(mm.getCurrentModelId())) {
+                Ansi.println(t, Ansi.dim("Re-switch to this model or restart for changes to take effect."));
+            }
+        }
+
+        private void deleteModel(Terminal t, ModelManager mm) {
+            if (args == null || args.length == 0) {
+                Ansi.println(t, Ansi.warn("Usage: /model delete <id|index>"));
+                return;
+            }
+            String id = resolveId(mm, args[0]);
+            if (id == null) {
+                Ansi.println(t, Ansi.error("No such model: " + args[0]));
+                return;
+            }
+            if (id.equals(mm.getCurrentModelId())) {
+                Ansi.println(t, Ansi.error("Cannot delete the model currently in use."));
+                return;
+            }
+            LineReader reader = ctx.readerRef().get();
+            String answer = reader != null ? reader.readLine(Ansi.warn("Delete model " + id + "? (y/N) ")) : "n";
+            if (answer == null || !answer.strip().equalsIgnoreCase("y")) {
+                Ansi.println(t, Ansi.dim("Cancelled."));
+                return;
+            }
+            mm.delete(id);
+            Ansi.println(t, Ansi.success("Deleted " + id + "."));
+        }
+
+        private String resolveId(ModelManager mm, String token) {
+            List<StoredModel> models = mm.list();
+            if (token.matches("\\d+")) {
+                int i = Integer.parseInt(token) - 1;
+                return (i >= 0 && i < models.size()) ? models.get(i).id() : null;
+            }
+            return models.stream().anyMatch(m -> m.id().equals(token)) ? token : null;
+        }
+
+        private static void usage(Terminal t) {
+            Ansi.println(t, Ansi.heading("/model actions:"));
+            Ansi.println(t, Ansi.dim("  list                       list saved models (* = active, [default])"));
+            Ansi.println(t, Ansi.dim("  add                        add a model (provider, key, url, name) + test"));
+            Ansi.println(t, Ansi.dim("  switch <id|index>          use this model for the current session"));
+            Ansi.println(t, Ansi.dim("  switch <id|index> --global set as the global default (all sessions)"));
+            Ansi.println(t, Ansi.dim("  edit <id|index>            change key / url / model name"));
+            Ansi.println(t, Ansi.dim("  delete <id|index>          delete a saved model (asks to confirm)"));
         }
     }
 
-    @Command(name = "/switch", description = "Switch to a different provider")
-    static final class SwitchCommand implements Runnable {
+    @Command(name = "/compress", description = "Context compression (now|status|off|on)")
+    static final class CompressCommand implements Runnable {
         private final ReplContext ctx;
 
-        @Parameters(index = "0", arity = "0..1", paramLabel = "<provider>",
-                description = "Target provider id")
-        String provider;
+        @Parameters(index = "0", arity = "0..1", paramLabel = "<now|status|off|on>")
+        String action;
 
-        SwitchCommand(ReplContext ctx) {
+        CompressCommand(ReplContext ctx) {
             this.ctx = ctx;
         }
 
         @Override
         public void run() {
             Terminal t = ctx.terminal();
-            if (provider == null || provider.isBlank()) {
-                Ansi.println(t, Ansi.warn("Usage: /switch <provider>"));
-                Ansi.println(t, Ansi.dim("Available: " + ctx.registry().getAllProviders().stream()
-                        .map(AgentOnboardingProvider::providerId).toList()));
-                return;
+            String sid = ctx.sessionManager().getCurrentSessionId();
+            String act = action == null ? "status" : action.toLowerCase();
+            switch (act) {
+                case "now" -> {
+                    boolean did = ctx.compressionService().compressNow(sid);
+                    Ansi.println(t, did ? Ansi.success("Context compressed.")
+                            : Ansi.dim("Nothing to compress yet."));
+                }
+                case "status" -> {
+                    CompressionStatus s = ctx.compressionService().status(sid);
+                    Ansi.println(t, Ansi.heading("Compression"));
+                    Ansi.println(t, line("Auto", s.enabled() ? "on" : "off"));
+                    Ansi.println(t, line("Tokens", s.estimatedTokens() + " / " + s.budgetTokens()
+                            + " (trigger " + s.thresholdTokens() + ")"));
+                    Ansi.println(t, line("Messages", String.valueOf(s.messageCount())));
+                    Ansi.println(t, line("Last", s.lastCompressedEpochMs() == 0 ? "never"
+                            : java.time.Instant.ofEpochMilli(s.lastCompressedEpochMs()).toString()));
+                }
+                case "off" -> {
+                    ctx.compressionService().setEnabled(sid, false);
+                    Ansi.println(t, Ansi.warn("Auto-compression off for this session."));
+                }
+                case "on" -> {
+                    ctx.compressionService().setEnabled(sid, true);
+                    Ansi.println(t, Ansi.success("Auto-compression on for this session."));
+                }
+                default -> Ansi.println(t, Ansi.error("Usage: /compress <now|status|off|on>"));
             }
-            String target = provider.toLowerCase();
-            var providerOpt = ctx.registry().findById(target);
-            if (providerOpt.isEmpty()) {
-                Ansi.println(t, Ansi.error("Unknown provider: " + target));
-                return;
-            }
-            var p = providerOpt.get();
-            if (!p.isAvailable()) {
-                Ansi.println(t, Ansi.error("Provider '" + target + "' is not available. Check API key."));
-                return;
-            }
-            ctx.configManager().updateConfig(cfg -> {
-                cfg.getModel().setProvider(target);
-                cfg.getModel().setModelName(p.defaultModelName());
-            });
-            Ansi.println(t, Ansi.success("Switched to " + p.displayName() + " / " + p.defaultModelName()));
-            Ansi.println(t, Ansi.dim("Note: restart required for model change to take effect."));
         }
     }
 
@@ -277,10 +477,12 @@ public final class ReplCommands {
             String sessionLabel = sm.getCurrentSession()
                     .map(s -> s.name() + " [" + s.id() + "]")
                     .orElse("(none)");
+            String modelLabel = ctx.modelManager().getCurrentModel()
+                    .map(StoredModel::label)
+                    .orElse("(none)");
             Ansi.println(t, Ansi.heading("Agent Status"));
             Ansi.println(t, line("Agent", ctx.agent().getAgentName()));
-            Ansi.println(t, line("Provider", cfg.getModel().getProvider()));
-            Ansi.println(t, line("Model", cfg.getModel().getModelName()));
+            Ansi.println(t, line("Model", modelLabel));
             Ansi.println(t, line("Session", sessionLabel));
             Ansi.println(t, line("Memory", sm.isMemoryEnabled() ? "on" : "off"));
             Ansi.println(t, line("Channels", runningChannels + " running"));

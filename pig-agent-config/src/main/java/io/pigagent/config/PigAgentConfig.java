@@ -10,6 +10,7 @@ public final class PigAgentConfig {
     @JsonProperty("agent") private AgentConfig agent = new AgentConfig();
     @JsonProperty("channels") private Map<String, ChannelConfig> channels = Map.of();
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
+    @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -19,6 +20,7 @@ public final class PigAgentConfig {
     public AgentConfig getAgent() { return agent; }
     public Map<String, ChannelConfig> getChannels() { return channels; }
     public McpConfig getMcp() { return mcp; }
+    public CompressionConfig getCompression() { return compression; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -49,6 +51,18 @@ public final class PigAgentConfig {
         public void setEnabled(boolean e) { this.enabled = e; }
         public String getToken() { return token; }
         public void setToken(String t) { this.token = t; }
+    }
+
+    public static final class CompressionConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        @JsonProperty("max-context-tokens") private int maxContextTokens = 32000;
+        @JsonProperty("threshold") private double threshold = 0.8;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getMaxContextTokens() { return maxContextTokens; }
+        public void setMaxContextTokens(int t) { this.maxContextTokens = t; }
+        public double getThreshold() { return threshold; }
+        public void setThreshold(double t) { this.threshold = t; }
     }
 
     public static final class McpConfig {

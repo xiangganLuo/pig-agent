@@ -31,6 +31,14 @@ class FileSystemSessionRepositoryTest {
     }
 
     @Test
+    void modelIdRoundTrips() {
+        SessionRepository repo = new FileSystemSessionRepository(sessionsDir);
+        Session s = repo.save(Session.create("bound").withModelId("model-42"));
+
+        assertThat(repo.findById(s.id())).get().extracting(Session::modelId).isEqualTo("model-42");
+    }
+
+    @Test
     void findAllReturnsEverySavedSession() {
         SessionRepository repo = new FileSystemSessionRepository(sessionsDir);
         repo.save(Session.create("one"));

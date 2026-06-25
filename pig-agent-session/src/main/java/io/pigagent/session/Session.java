@@ -16,24 +16,30 @@ public record Session(
         String name,
         Instant createdAt,
         Instant lastActiveAt,
+        String modelId,
         boolean corrupt) {
 
     /** Name given to a freshly created session before the first message renames it. */
     public static final String DEFAULT_NAME = "New session";
 
-    /** Create a new blank session with a generated short id. */
+    /** Create a new blank session with a generated short id (no model binding → default). */
     public static Session create(String name) {
         Instant now = Instant.now();
         String resolved = (name == null || name.isBlank()) ? DEFAULT_NAME : name.strip();
-        return new Session(UUID.randomUUID().toString().substring(0, 8), resolved, now, now, false);
+        return new Session(UUID.randomUUID().toString().substring(0, 8), resolved, now, now, null, false);
     }
 
     public Session withName(String newName) {
-        return new Session(id, newName, createdAt, lastActiveAt, corrupt);
+        return new Session(id, newName, createdAt, lastActiveAt, modelId, corrupt);
     }
 
     public Session withLastActiveAt(Instant when) {
-        return new Session(id, name, createdAt, when, corrupt);
+        return new Session(id, name, createdAt, when, modelId, corrupt);
+    }
+
+    /** Bind (or clear, with null) a per-session model — the temporary-switch case. */
+    public Session withModelId(String newModelId) {
+        return new Session(id, name, createdAt, lastActiveAt, newModelId, corrupt);
     }
 
     public boolean hasDefaultName() {

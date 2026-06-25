@@ -1,7 +1,7 @@
 package io.pigagent.session;
 
 import io.pigagent.config.ConfigurationManager;
-import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
 
@@ -15,21 +15,19 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Coordinates the session lifecycle across four collaborators: the live {@link PigAgent}
- * (conversation memory), AgentScope's {@code Session} store (conversation persistence),
- * the {@link CompositeLongTermMemory} (per-session temp memory target), and the
- * {@link SessionRepository} (listing metadata). Configuration tracks the last active
- * session id and the global memory switch.
- *
- * <p>The agent is built once; switching sessions never rebuilds it — it saves the current
- * conversation, clears + reloads the agent's memory for the target id, and repoints the
- * temporary-memory file.
+ * Coordinates the session lifecycle. The agent is read through an {@link AgentHolder} so that
+ * a runtime model switch (which rebuilds the agent) is transparent here. Before a session's
+ * conversation is loaded, {@link AgentModelSwitcher#ensureModel(String)} makes the agent use
+ * that session's bound model (or the global default), satisfying per-session temporary
+ * switching. Conversation persistence uses AgentScope's session store; listing metadata uses
+ * {@link SessionRepository}.
  */
 public final class SessionManager {
 
     private static final String TEMP_MEMORY_FILE = "temp-memory.md";
 
-    private final PigAgent agent;
+    private final AgentHolder agentHolder;
+    private final AgentModelSwitcher modelSwitcher;
     private final io.agentscope.core.session.Session agentSession;
     private final CompositeLongTermMemory memory;
     private final SessionRepository repository;
@@ -38,13 +36,15 @@ public final class SessionManager {
 
     private String currentSessionId;
 
-    public SessionManager(PigAgent agent,
+    public SessionManager(AgentHolder agentHolder,
+                          AgentModelSwitcher modelSwitcher,
                           io.agentscope.core.session.Session agentSession,
                           CompositeLongTermMemory memory,
                           SessionRepository repository,
                           ConfigurationManager configManager,
                           Path sessionsDir) {
-        this.agent = agent;
+        this.agentHolder = agentHolder;
+        this.modelSwitcher = modelSwitcher;
         this.agentSession = agentSession;
         this.memory = memory;
         this.repository = repository;
@@ -75,17 +75,39 @@ public final class SessionManager {
         }
     }
 
-    /** Make the given session current: persist the previous one, then load this one. */
+    /** Make the given session current: persist the previous conversation, ensure the right
+     * model is loaded, then restore this session's conversation and temp memory. */
     public void activate(String id) {
-        if (currentSessionId != null && !currentSessionId.equals(id)) {
+        if (currentSessionId != null) {
             saveCurrent();
         }
-        agent.clearMemory();
-        agent.loadIfExists(agentSession, id);
+        Session target = repository.findById(id).orElse(null);
+        modelSwitcher.ensureModel(target != null ? target.modelId() : null);
+
+        agentHolder.get().clearMemory();
+        agentHolder.get().loadIfExists(agentSession, id);
         memory.setSessionMemory(new FileSystemLongTermMemory(tempMemoryPath(id)));
         currentSessionId = id;
         configManager.updateConfig(c -> c.setCurrentSessionId(id));
         touch(id);
+    }
+
+    /** Re-apply the current session (used after a model bind/default change): persists the
+     * latest conversation, rebuilds the agent for the right model, then reloads. */
+    public void reactivateCurrent() {
+        if (currentSessionId != null) {
+            activate(currentSessionId);
+        }
+    }
+
+    /** Bind a model to the current session (temporary switch); null clears the binding. */
+    public void bindCurrentSessionModel(String modelId) {
+        if (currentSessionId == null) {
+            return;
+        }
+        repository.findById(currentSessionId)
+                .filter(s -> !s.corrupt())
+                .ifPresent(s -> repository.save(s.withModelId(modelId)));
     }
 
     /** Create a blank session (no history) and switch to it. */
@@ -95,7 +117,7 @@ public final class SessionManager {
         return created;
     }
 
-    /** Fork the current session: copy its conversation + temp memory into a new session. */
+    /** Fork the current session: copy its conversation + temp memory + model binding. */
     public Session fork(String name) {
         if (currentSessionId == null) {
             return createBlank(name);
@@ -107,9 +129,13 @@ public final class SessionManager {
                 ? (source != null ? source.name() + " (fork)" : Session.DEFAULT_NAME)
                 : name.strip();
 
-        Session forked = repository.save(Session.create(forkName));
+        Session forked = Session.create(forkName);
+        if (source != null && source.modelId() != null) {
+            forked = forked.withModelId(source.modelId());
+        }
+        forked = repository.save(forked);
         // The live agent currently holds the source conversation; persist it under the new id.
-        agent.saveTo(agentSession, forked.id());
+        agentHolder.get().saveTo(agentSession, forked.id());
         copyTempMemory(currentSessionId, forked.id());
 
         activate(forked.id());
@@ -129,8 +155,8 @@ public final class SessionManager {
         if (currentSessionId == null) {
             return;
         }
-        agent.clearMemory();
-        agent.saveTo(agentSession, currentSessionId);
+        agentHolder.get().clearMemory();
+        agentHolder.get().saveTo(agentSession, currentSessionId);
         if (withTempMemory) {
             try {
                 Files.deleteIfExists(tempMemoryPath(currentSessionId));
@@ -147,8 +173,7 @@ public final class SessionManager {
             repository.deleteById(id);
         }
         if (currentDeleted) {
-            // Avoid saveCurrent() re-creating the just-deleted directory.
-            currentSessionId = null;
+            currentSessionId = null; // avoid saveCurrent() re-creating the deleted directory
             Optional<Session> replacement = repository.findAll().stream()
                     .filter(s -> !s.corrupt())
                     .max(Comparator.comparing(Session::lastActiveAt));
@@ -175,7 +200,7 @@ public final class SessionManager {
         if (currentSessionId == null) {
             return;
         }
-        agent.saveTo(agentSession, currentSessionId);
+        agentHolder.get().saveTo(agentSession, currentSessionId);
         touch(currentSessionId);
     }
 

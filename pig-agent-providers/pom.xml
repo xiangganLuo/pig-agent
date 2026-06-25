@@ -22,5 +22,25 @@
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope</artifactId>
         </dependency>
+
+        <!-- Provider client SDKs (optional in agentscope; required at compile + runtime
+             for the AnthropicChatModel / OpenAIChatModel / GeminiChatModel / DashScopeChatModel
+             builders used by the providers here). Ollama needs no SDK. -->
+        <dependency>
+            <groupId>com.anthropic</groupId>
+            <artifactId>anthropic-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.genai</groupId>
+            <artifactId>google-genai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>dashscope-sdk-java</artifactId>
+        </dependency>
     </dependencies>
 </project>

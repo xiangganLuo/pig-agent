@@ -37,7 +37,16 @@ class ReplCommandsTest {
                 .streams(new ByteArrayInputStream(new byte[0]), out)
                 .build();
         AtomicBoolean running = new AtomicBoolean(true);
-        ReplContext ctx = new ReplContext(null, null, null, null, null, terminal, running,
+        ReplContext ctx = new ReplContext(
+                null, // agentHolder
+                null, // configManager
+                null, // registry
+                null, // modelManager
+                null, // compressionService
+                null, // bridges
+                null, // sessionManager
+                terminal,
+                running,
                 new AtomicReference<LineReader>());
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
         return new Harness(cmd, out, running);
@@ -58,8 +67,9 @@ class ReplCommandsTest {
         h.cmd().execute("/help");
         assertThat(h.output())
                 .contains("/tasks")
-                .contains("/switch")
-                .contains("/providers")
+                .contains("/model")
+                .contains("/session")
+                .contains("/compress")
                 .contains("/quit");
     }
 

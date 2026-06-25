@@ -9,9 +9,9 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>pig-agent-onboarding</artifactId>
-    <name>Pig Agent - Onboarding</name>
-    <description>First-run setup wizard</description>
+    <artifactId>pig-agent-model</artifactId>
+    <name>Pig Agent - Model Management</name>
+    <description>Multiple saved model configurations, connectivity testing, and runtime switching</description>
 
     <dependencies>
         <dependency>
@@ -24,7 +24,15 @@
         </dependency>
         <dependency>
             <groupId>io.pigagent</groupId>
-            <artifactId>pig-agent-model</artifactId>
+            <artifactId>pig-agent-session</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 </project>

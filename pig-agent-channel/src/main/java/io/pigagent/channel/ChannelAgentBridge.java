@@ -4,29 +4,29 @@ import io.agentscope.core.agent.EventType;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
-import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.AgentHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Bridges a Channel to a PigAgent.
- * Routes inbound channel messages to the agent and sends responses back.
+ * Bridges a Channel to the live agent (read through an {@link AgentHolder} so it follows
+ * runtime model switches). Routes inbound channel messages to the agent and sends responses back.
  */
 public final class ChannelAgentBridge {
 
     private static final Logger log = LoggerFactory.getLogger(ChannelAgentBridge.class);
 
-    private final PigAgent agent;
+    private final AgentHolder agentHolder;
     private final Channel channel;
 
-    public ChannelAgentBridge(PigAgent agent, Channel channel) {
-        this.agent = agent;
+    public ChannelAgentBridge(AgentHolder agentHolder, Channel channel) {
+        this.agentHolder = agentHolder;
         this.channel = channel;
     }
 
     public void start() {
         channel.start(this::handleMessage);
-        log.info("Channel '{}' connected to agent '{}'", channel.channelId(), agent.getAgentName());
+        log.info("Channel '{}' connected to agent '{}'", channel.channelId(), agentHolder.get().getAgentName());
     }
 
     public void stop() {
@@ -50,7 +50,7 @@ public final class ChannelAgentBridge {
 
         try {
             StringBuilder response = new StringBuilder();
-            agent.stream(userMsg).doOnNext(event -> {
+            agentHolder.get().stream(userMsg).doOnNext(event -> {
                 if (event.getType() == EventType.AGENT_RESULT) {
                     response.append(event.getMessage().getTextContent());
                 }

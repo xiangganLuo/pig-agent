@@ -3,7 +3,7 @@ package io.pigagent.provider.gemini;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.GeminiChatModel;
 import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ProviderCredentials;
+import io.pigagent.core.provider.ModelSpec;
 import java.util.List;
 
 public final class GeminiProvider implements AgentOnboardingProvider {
@@ -14,10 +14,12 @@ public final class GeminiProvider implements AgentOnboardingProvider {
     @Override public String defaultModelName() { return "gemini-2.0-flash"; }
 
     @Override
-    public Model createModel(ProviderCredentials credentials) {
+    public Model createModel(ModelSpec spec) {
+        String modelName = spec.modelName() == null || spec.modelName().isBlank()
+                ? defaultModelName() : spec.modelName();
         return GeminiChatModel.builder()
-                .apiKey(credentials.getRequired("GEMINI_API_KEY"))
-                .modelName(defaultModelName())
+                .apiKey(spec.apiKey())
+                .modelName(modelName)
                 .build();
     }
 }

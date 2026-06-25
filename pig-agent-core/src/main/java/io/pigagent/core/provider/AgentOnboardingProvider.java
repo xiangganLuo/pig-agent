@@ -6,7 +6,8 @@ import java.util.List;
 
 /**
  * Represents an LLM provider that can be discovered during onboarding.
- * Each provider knows how to create a Model instance from credentials.
+ * Each provider knows how to build an AgentScope {@code Model} from a {@link ModelSpec}
+ * (api key + optional base url + model name).
  */
 public interface AgentOnboardingProvider {
 
@@ -25,24 +26,32 @@ public interface AgentOnboardingProvider {
     /** Default model name for this provider. */
     String defaultModelName();
 
-    /** Create a Model instance from the given credentials. */
-    Model createModel(ProviderCredentials credentials);
+    /** Build a Model from a fully-resolved spec (api key, optional base url, model name). */
+    Model createModel(ModelSpec spec);
 
-    /** Check if this provider is available (credentials present). */
+    /** Whether a custom base URL / endpoint is meaningful for this provider. */
+    default boolean supportsBaseUrl() {
+        return false;
+    }
+
+    /** Whether this provider needs an API key (false for local providers like Ollama). */
+    default boolean requiresApiKey() {
+        return !requiredCredentialKeys().isEmpty();
+    }
+
+    /** Check if this provider is available via environment variables (legacy/fallback). */
     default boolean isAvailable() {
         return requiredCredentialKeys().stream()
                 .allMatch(key -> System.getenv(key) != null && !System.getenv(key).isBlank());
     }
 
-    /** Build a model using environment variables as credentials. */
+    /** Build a model using environment variables as the api key (legacy/fallback). */
     default Model createModelFromEnv() {
-        var creds = new ProviderCredentials();
-        for (String key : requiredCredentialKeys()) {
-            String value = System.getenv(key);
-            if (value != null) {
-                creds = creds.put(key, value);
-            }
-        }
-        return createModel(creds);
+        String apiKey = requiredCredentialKeys().stream()
+                .map(System::getenv)
+                .filter(v -> v != null && !v.isBlank())
+                .findFirst()
+                .orElse(null);
+        return createModel(new ModelSpec(providerId(), apiKey, null, defaultModelName()));
     }
 }

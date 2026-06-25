@@ -108,7 +108,7 @@ public final class FileSystemSessionRepository implements SessionRepository {
 
     private static Session corrupt(String id) {
         Instant now = Instant.now();
-        return new Session(id, "(corrupt)", now, now, true);
+        return new Session(id, "(corrupt)", now, now, null, true);
     }
 
     /** On-disk shape of session metadata. Epoch-millis timestamps keep Jackson plain. */
@@ -118,6 +118,7 @@ public final class FileSystemSessionRepository implements SessionRepository {
         public String name;
         public long createdAt;
         public long lastActiveAt;
+        public String modelId;
 
         static Meta from(Session s) {
             Meta m = new Meta();
@@ -125,12 +126,13 @@ public final class FileSystemSessionRepository implements SessionRepository {
             m.name = s.name();
             m.createdAt = s.createdAt().toEpochMilli();
             m.lastActiveAt = s.lastActiveAt().toEpochMilli();
+            m.modelId = s.modelId();
             return m;
         }
 
         Session toSession() {
             return new Session(id, name, Instant.ofEpochMilli(createdAt),
-                    Instant.ofEpochMilli(lastActiveAt), false);
+                    Instant.ofEpochMilli(lastActiveAt), modelId, false);
         }
     }
 }

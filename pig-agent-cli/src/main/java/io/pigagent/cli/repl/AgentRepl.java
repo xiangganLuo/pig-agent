@@ -7,7 +7,9 @@ import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
-import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.compression.CompressionService;
+import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProviderRegistry;
 import io.pigagent.session.SessionManager;
 import org.jline.console.SystemRegistry;
@@ -40,18 +42,23 @@ import java.util.function.Supplier;
  */
 public final class AgentRepl {
 
-    private final PigAgent agent;
+    private final AgentHolder agentHolder;
     private final ConfigurationManager configManager;
     private final ProviderRegistry registry;
+    private final ModelManager modelManager;
+    private final CompressionService compressionService;
     private final List<ChannelAgentBridge> bridges;
     private final SessionManager sessionManager;
     private final Path workDir;
 
-    public AgentRepl(PigAgent agent, ConfigurationManager configManager, ProviderRegistry registry,
+    public AgentRepl(AgentHolder agentHolder, ConfigurationManager configManager, ProviderRegistry registry,
+                     ModelManager modelManager, CompressionService compressionService,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir) {
-        this.agent = agent;
+        this.agentHolder = agentHolder;
         this.configManager = configManager;
         this.registry = registry;
+        this.modelManager = modelManager;
+        this.compressionService = compressionService;
         this.bridges = bridges;
         this.sessionManager = sessionManager;
         this.workDir = workDir;
@@ -65,8 +72,8 @@ public final class AgentRepl {
 
             AtomicBoolean running = new AtomicBoolean(true);
             AtomicReference<LineReader> readerRef = new AtomicReference<>();
-            ReplContext ctx = new ReplContext(agent, configManager, registry, bridges,
-                    sessionManager, terminal, running, readerRef);
+            ReplContext ctx = new ReplContext(agentHolder, configManager, registry, modelManager,
+                    compressionService, bridges, sessionManager, terminal, running, readerRef);
 
             DefaultParser parser = new DefaultParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
@@ -100,8 +107,12 @@ public final class AgentRepl {
                     String trimmed = line.strip();
                     if (trimmed.startsWith("/")) {
                         systemRegistry.execute(trimmed);
+                    } else if (!modelManager.isConfigured()) {
+                        Ansi.println(terminal, Ansi.error(
+                                "No model configured. Use /model add to configure one."));
                     } else {
                         sessionManager.noteUserMessage(trimmed);
+                        compressionService.maybeCompress(sessionManager.getCurrentSessionId());
                         streamToAgent(trimmed, terminal);
                         sessionManager.saveCurrent();
                     }
@@ -124,7 +135,7 @@ public final class AgentRepl {
         Ansi.print(terminal, Ansi.prompt("agent> "));
         StringBuilder finalResponse = new StringBuilder();
         try {
-            agent.stream(userMsg).doOnNext(event -> {
+            agentHolder.get().stream(userMsg).doOnNext(event -> {
                 if (event.getType() == EventType.REASONING) {
                     Ansi.println(terminal, Ansi.dim("\n  [thinking] " + event.getMessage().getTextContent()));
                 } else if (event.getType() == EventType.TOOL_RESULT) {

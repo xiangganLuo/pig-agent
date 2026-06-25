@@ -2,7 +2,9 @@ package io.pigagent.cli.repl;
 
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
-import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.compression.CompressionService;
+import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProviderRegistry;
 import io.pigagent.session.SessionManager;
 import org.jline.reader.LineReader;
@@ -15,19 +17,25 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Immutable bundle of collaborators shared with every REPL command.
  *
- * <p>The {@code running} flag lets a command (e.g. {@code /quit}) request the read loop in
- * {@link AgentRepl} to terminate. {@code readerRef} holds the JLine {@link LineReader} once
- * it has been built (it is set by {@link AgentRepl} after construction, which resolves the
- * context → command tree → reader build-order cycle); commands use it for interactive
- * confirmation prompts such as session deletion.
+ * <p>The agent is reached via {@link AgentHolder} (not a fixed reference) so commands always
+ * see the current agent after a runtime model switch. {@code running} lets {@code /quit} stop
+ * the loop; {@code readerRef} (set by {@link AgentRepl} after the reader is built) is used for
+ * interactive confirmation prompts.
  */
 public record ReplContext(
-        PigAgent agent,
+        AgentHolder agentHolder,
         ConfigurationManager configManager,
         ProviderRegistry registry,
+        ModelManager modelManager,
+        CompressionService compressionService,
         List<ChannelAgentBridge> bridges,
         SessionManager sessionManager,
         Terminal terminal,
         AtomicBoolean running,
         AtomicReference<LineReader> readerRef) {
+
+    /** Convenience accessor for the current agent. */
+    public io.pigagent.core.agent.PigAgent agent() {
+        return agentHolder.get();
+    }
 }

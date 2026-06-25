@@ -44,6 +44,7 @@ public final class WorkspaceManager {
     public Path getRecurringTasksDir() { return rootPath.resolve("tasks/recurring"); }
     public Path getTodayTaskDir() { return rootPath.resolve("tasks").resolve(todayDir()); }
     public Path getSessionsDir() { return rootPath.resolve("sessions"); }
+    public Path getModelsFile() { return rootPath.resolve("models.json"); }
 
     public String readAgentMd() throws IOException {
         return Files.readString(getAgentMd());
