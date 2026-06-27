@@ -1,5 +1,6 @@
 package io.pigagent.cli.repl;
 
+import io.pigagent.mcp.McpManager;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
@@ -11,10 +12,13 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Verifies the picocli command tree dispatches slash-prefixed command names and
@@ -31,6 +35,10 @@ class ReplCommandsTest {
     }
 
     private Harness newHarness() throws IOException {
+        return newHarness(null);
+    }
+
+    private Harness newHarness(McpManager mcpManager) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = TerminalBuilder.builder()
                 .dumb(true)
@@ -43,6 +51,7 @@ class ReplCommandsTest {
                 null, // registry
                 null, // modelManager
                 null, // compressionService
+                mcpManager,
                 null, // bridges
                 null, // sessionManager
                 terminal,
@@ -69,8 +78,29 @@ class ReplCommandsTest {
                 .contains("/tasks")
                 .contains("/model")
                 .contains("/session")
+                .contains("/mcp")
                 .contains("/compress")
                 .contains("/quit");
+    }
+
+    @Test
+    void mcpListDispatchesToManagerAndRendersEmpty() throws IOException {
+        McpManager mcp = mock(McpManager.class);
+        when(mcp.list()).thenReturn(List.of());
+        Harness h = newHarness(mcp);
+        int code = h.cmd().execute("/mcp", "list");
+        assertThat(code).isZero();
+        assertThat(h.output()).contains("MCP servers").contains("none");
+    }
+
+    @Test
+    void mcpDefaultsToListWhenNoAction() throws IOException {
+        McpManager mcp = mock(McpManager.class);
+        when(mcp.list()).thenReturn(List.of());
+        Harness h = newHarness(mcp);
+        int code = h.cmd().execute("/mcp");
+        assertThat(code).isZero();
+        assertThat(h.output()).contains("MCP servers");
     }
 
     @Test

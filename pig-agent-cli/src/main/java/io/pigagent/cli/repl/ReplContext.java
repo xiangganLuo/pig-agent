@@ -4,6 +4,7 @@ import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProviderRegistry;
 import io.pigagent.session.SessionManager;
@@ -28,6 +29,7 @@ public record ReplContext(
         ProviderRegistry registry,
         ModelManager modelManager,
         CompressionService compressionService,
+        McpManager mcpManager,
         List<ChannelAgentBridge> bridges,
         SessionManager sessionManager,
         Terminal terminal,

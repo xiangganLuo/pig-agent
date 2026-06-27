@@ -27,6 +27,11 @@
             <artifactId>pig-agent-workspace</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-mcp</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope</artifactId>
         </dependency>
