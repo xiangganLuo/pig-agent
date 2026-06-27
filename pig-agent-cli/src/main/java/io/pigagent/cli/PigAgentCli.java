@@ -17,6 +17,7 @@ import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
+import io.pigagent.mcp.JsonMcpStore;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
@@ -36,6 +37,8 @@ import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.checklist.CheckListTool;
+import io.pigagent.tool.mcp.McpConfirmer;
+import io.pigagent.tool.mcp.McpTool;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
@@ -44,10 +47,13 @@ import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
 import io.pigagent.workspace.WorkspaceManager;
 
+import org.jline.reader.LineReader;
+
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Terminal entry point. Bootstraps the workspace, configuration, providers, tools,
@@ -109,8 +115,24 @@ public final class PigAgentCli {
         toolkit.registration().tool(new CheckListTool()).apply();
         toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
 
+        // MCP: mcp.json is the source of truth; application.yaml servers are imported once.
+        // Enabled servers are connected best-effort (a bad server never crashes startup).
         McpManager mcpManager = new McpManager();
-        mcpManager.connectAll(config.getMcp(), toolkit);
+        mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
+
+        // The agent may self-manage MCP servers, gated by mcp.agent-management (D-SEC).
+        // Human confirmation reads from the live REPL reader (shared via readerRef).
+        AtomicReference<LineReader> readerRef = new AtomicReference<>();
+        McpConfirmer confirmer = prompt -> {
+            LineReader r = readerRef.get();
+            if (r == null) {
+                return false;
+            }
+            String answer = r.readLine(Ansi.warn(prompt + " (y/N) "));
+            return answer != null && answer.strip().equalsIgnoreCase("y");
+        };
+        toolkit.registration().tool(new McpTool(mcpManager,
+                () -> configManager.getConfig().getMcp().getAgentManagement(), confirmer)).apply();
 
         String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd();
         // Two-tier memory: shared global memory + a switchable per-session temporary memory.
@@ -155,7 +177,7 @@ public final class PigAgentCli {
         }));
 
         new AgentRepl(agentHolder, configManager, registry, modelManager, compressionService,
-                bridges, sessionManager, workspace.getRootPath()).run();
+                mcpManager, bridges, sessionManager, workspace.getRootPath(), readerRef).run();
     }
 
     private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder,

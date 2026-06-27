@@ -12,14 +12,18 @@ public final class AnthropicProvider implements AgentOnboardingProvider {
     @Override public String description() { return "Claude series models by Anthropic"; }
     @Override public List<String> requiredCredentialKeys() { return List.of("ANTHROPIC_API_KEY"); }
     @Override public String defaultModelName() { return "claude-sonnet-4-6"; }
+    @Override public boolean supportsBaseUrl() { return true; }
 
     @Override
     public Model createModel(ModelSpec spec) {
         String modelName = spec.modelName() == null || spec.modelName().isBlank()
                 ? defaultModelName() : spec.modelName();
-        return AnthropicChatModel.builder()
+        var builder = AnthropicChatModel.builder()
                 .apiKey(spec.apiKey())
-                .modelName(modelName)
-                .build();
+                .modelName(modelName);
+        if (spec.hasBaseUrl()) {
+            builder.baseUrl(spec.baseUrl());
+        }
+        return builder.build();
     }
 }

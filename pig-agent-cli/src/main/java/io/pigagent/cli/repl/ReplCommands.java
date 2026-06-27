@@ -4,6 +4,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
+import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.provider.AgentOnboardingProvider;
@@ -53,6 +54,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new ModelCommand(ctx));
         cmd.addSubcommand(new ChannelsCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
+        cmd.addSubcommand(new McpCommand(ctx));
         cmd.addSubcommand(new MemoryCommand(ctx));
         cmd.addSubcommand(new CompressCommand(ctx));
         cmd.addSubcommand(new StatusCommand(ctx));
@@ -89,6 +91,7 @@ public final class ReplCommands {
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
             entry(t, "/channels", "Show connected channels and status");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
+            entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
             entry(t, "/memory <on|off>", "Toggle/show global + session memory loading");
             entry(t, "/compress <action>", "Context compression (now|status|off|on)");
             entry(t, "/status", "Show agent status summary");
@@ -470,7 +473,6 @@ public final class ReplCommands {
 
         @Override
         public void run() {
-            PigAgentConfig cfg = ctx.configManager().getConfig();
             Terminal t = ctx.terminal();
             long runningChannels = ctx.bridges().stream().filter(b -> b.getChannel().isRunning()).count();
             SessionManager sm = ctx.sessionManager();
@@ -486,7 +488,9 @@ public final class ReplCommands {
             Ansi.println(t, line("Session", sessionLabel));
             Ansi.println(t, line("Memory", sm.isMemoryEnabled() ? "on" : "off"));
             Ansi.println(t, line("Channels", runningChannels + " running"));
-            Ansi.println(t, line("MCP", cfg.getMcp().getServers().size() + " configured"));
+            long mcpConnected = ctx.mcpManager().list().stream().filter(s -> s.connected()).count();
+            Ansi.println(t, line("MCP", ctx.mcpManager().list().size() + " configured, "
+                    + mcpConnected + " connected"));
         }
     }
 

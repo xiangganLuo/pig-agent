@@ -9,6 +9,7 @@ import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProviderRegistry;
 import io.pigagent.session.SessionManager;
@@ -47,21 +48,26 @@ public final class AgentRepl {
     private final ProviderRegistry registry;
     private final ModelManager modelManager;
     private final CompressionService compressionService;
+    private final McpManager mcpManager;
     private final List<ChannelAgentBridge> bridges;
     private final SessionManager sessionManager;
     private final Path workDir;
+    private final AtomicReference<LineReader> readerRef;
 
     public AgentRepl(AgentHolder agentHolder, ConfigurationManager configManager, ProviderRegistry registry,
-                     ModelManager modelManager, CompressionService compressionService,
-                     List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir) {
+                     ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
+                     List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
+                     AtomicReference<LineReader> readerRef) {
         this.agentHolder = agentHolder;
         this.configManager = configManager;
         this.registry = registry;
         this.modelManager = modelManager;
         this.compressionService = compressionService;
+        this.mcpManager = mcpManager;
         this.bridges = bridges;
         this.sessionManager = sessionManager;
         this.workDir = workDir;
+        this.readerRef = readerRef;
     }
 
     public void run() throws IOException {
@@ -71,9 +77,8 @@ public final class AgentRepl {
                 .system(true).jna(true).jansi(false).build()) {
 
             AtomicBoolean running = new AtomicBoolean(true);
-            AtomicReference<LineReader> readerRef = new AtomicReference<>();
             ReplContext ctx = new ReplContext(agentHolder, configManager, registry, modelManager,
-                    compressionService, bridges, sessionManager, terminal, running, readerRef);
+                    compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
 
             DefaultParser parser = new DefaultParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();

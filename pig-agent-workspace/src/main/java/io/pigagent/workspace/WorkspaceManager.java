@@ -45,6 +45,7 @@ public final class WorkspaceManager {
     public Path getTodayTaskDir() { return rootPath.resolve("tasks").resolve(todayDir()); }
     public Path getSessionsDir() { return rootPath.resolve("sessions"); }
     public Path getModelsFile() { return rootPath.resolve("models.json"); }
+    public Path getMcpFile() { return rootPath.resolve("mcp.json"); }
 
     public String readAgentMd() throws IOException {
         return Files.readString(getAgentMd());

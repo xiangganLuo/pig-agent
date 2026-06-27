@@ -138,9 +138,12 @@ ReActAgent 推理循环:
 ### pig-agent-mcp — MCP 集成
 
 
-| 类           | 职责                                  |
-| ------------ | ------------------------------------- |
-| `McpManager` | 管理 MCP 客户端连接，支持三种传输方式 |
+| 类             | 职责                                                       |
+| -------------- | ---------------------------------------------------------- |
+| `McpManager`   | MCP 服务器运行时增删改查、启停、连通测试，实时注册/注销工具 |
+| `McpServerSpec`| 不可变服务器配置（record，`withXxx` 拷贝）                  |
+| `McpStore`     | 持久化接口                                                 |
+| `JsonMcpStore` | `workspace/mcp.json` 实现（按名作键，坏文件备份后从空开始） |
 
 支持的 MCP 传输方式：
 
@@ -458,33 +461,40 @@ public final class MyChannel implements Channel {
 }
 ```
 
-### 5. MCP Server 扩展
+### 5. MCP Server 扩展（动态增删改查）
 
-通过 `application.yaml` 配置即可连接任意 MCP Server：
+MCP 服务器**在运行时管理**，配置持久化到 `workspace/mcp.json`（按名作键，为唯一真源）。
+首次启动时会把旧的 `application.yaml` 中 `mcp.servers` **一次性导入** `mcp.json`，此后以 `mcp.json` 为准。
+
+**运维者通过 `/mcp` 命令实时管理**（完全信任，可添加 stdio 服务器）：
+
+```text
+/mcp list                    列出所有服务器及实时健康（已连接 + 工具数 / 未连接 / 已停用）
+/mcp add                     交互式添加（stdio | sse | http），先连通测试再生效
+/mcp remove <名称|序号>      移除（先确认）
+/mcp edit <名称|序号>        重新录入配置（先测试新配置再应用，失败保持旧的）
+/mcp enable  <名称|序号>     启用并连接
+/mcp disable <名称|序号>     停用（注销工具，保留配置）
+/mcp test <名称|序号>        仅测试连通性，不改动任何状态
+```
+
+新增/删除即时生效（热注册/注销工具），无需重启。工具命名空间扁平，**新增服务器若工具名与已注册工具冲突即拒绝**。
+
+**Agent 自助管理（受 D-SEC 安全门控制）**：Agent 可经 `McpTool` 调用 `listMcpServers`/`testMcpServer`/`addMcpServer`/`removeMcpServer`，但受 `application.yaml` 的 `mcp.agent-management` 门控：
 
 ```yaml
 mcp:
-  servers:
-    # 本地 stdio 进程
-    my-server:
-      command: /path/to/mcp-server
-      args: ["--port", "3000"]
-      env:
-        API_KEY: "your-key"
-
-    # 远程 SSE 服务
-    remote-server:
-      url: https://api.example.com/mcp/sse
-      headers:
-        Authorization: Bearer token
-
-    # Streamable HTTP
-    http-server:
-      url: https://api.example.com/mcp/http
-      streamable-http: true
+  agent-management:
+    allow-add: false        # 默认关：禁止 agent 添加
+    allow-remove: false     # 默认关：禁止 agent 移除
+    allowed-hosts: []       # 开启 add 后，仅允许这些 host 的 URL 服务器
 ```
 
-MCP Server 提供的工具会自动注册到 Agent 的 Toolkit 中。
+- `list`/`test` 始终允许；`add`/`remove` 默认全部关闭。
+- 开启 `allow-add` 后，agent **只能添加 URL 类型**（拒绝 stdio/command），且 host 必须在 `allowed-hosts` 白名单内，并经**人工确认**方可添加。
+- 工具返回值对 `env`/`headers` **脱敏**（只显示键名，值为 `***`），避免凭据回显。
+
+> 旧的 `application.yaml` `mcp.servers` 配置仍兼容（首启导入），但推荐改用 `/mcp` 命令管理。
 
 ### 6. 通道-Agent 打通
 

@@ -27,8 +27,8 @@ public final class PigAgentConfig {
     public void setMemoryEnabled(boolean enabled) { this.memoryEnabled = enabled; }
 
     public static final class ModelConfig {
-        @JsonProperty("provider") private String provider = "mimo";
-        @JsonProperty("model-name") private String modelName = "mimo-v2.5-pro";
+        @JsonProperty("provider") private String provider = "anthropic";
+        @JsonProperty("model-name") private String modelName = "claude-sonnet-4-6";
         public String getProvider() { return provider; }
         public void setProvider(String p) { this.provider = p; }
         public String getModelName() { return modelName; }
@@ -67,7 +67,22 @@ public final class PigAgentConfig {
 
     public static final class McpConfig {
         @JsonProperty("servers") private Map<String, McpServerConfig> servers = Map.of();
+        @JsonProperty("agent-management") private AgentManagementConfig agentManagement = new AgentManagementConfig();
         public Map<String, McpServerConfig> getServers() { return servers; }
+        public AgentManagementConfig getAgentManagement() { return agentManagement; }
+    }
+
+    /** agent 经 McpTool 自助管理 MCP 的安全门（D-SEC）。默认全关。 */
+    public static final class AgentManagementConfig {
+        @JsonProperty("allow-add") private boolean allowAdd = false;
+        @JsonProperty("allow-remove") private boolean allowRemove = false;
+        @JsonProperty("allowed-hosts") private java.util.List<String> allowedHosts = java.util.List.of();
+        public boolean isAllowAdd() { return allowAdd; }
+        public void setAllowAdd(boolean v) { this.allowAdd = v; }
+        public boolean isAllowRemove() { return allowRemove; }
+        public void setAllowRemove(boolean v) { this.allowRemove = v; }
+        public java.util.List<String> getAllowedHosts() { return allowedHosts; }
+        public void setAllowedHosts(java.util.List<String> h) { this.allowedHosts = h; }
     }
 
     public static final class McpServerConfig {

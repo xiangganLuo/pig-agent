@@ -7,3 +7,8 @@ target/
 .DS_Store
 application.yaml
 .mvn
+
+# 安全审查待人工确认文档（不入库，见 docs/review/mcp-security-followups.md）
+docs/review/
+# 本地导出的 classpath 等构建产物
+cp.txt
