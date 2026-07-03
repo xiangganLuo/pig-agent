@@ -76,16 +76,20 @@
 - **WHEN** `mode=plan` 时 agent 调用 `addMcpServer`/`removeMcpServer`
 - **THEN** 请求被否决，不进入 D-SEC，无副作用
 
-### Requirement: 非交互渠道兜底（安全默认）
-渠道（Telegram/Discord 等无终端）回合共享 REPL 的权限门。当某工具需要人工确认但渠道无终端可确认时，该工具 MUST NOT 被自动执行（fail-safe：不会 fail-open）。完整的 per-origin `channel-mode`（用渠道模式而非交互模式、并对 ASK 明确 fail-closed 回传说明）需要给渠道单独构建 agent，作为独立跟进变更；`permissions.channel-mode` 配置与解析已就位供其使用。默认渠道关闭。
+### Requirement: 非交互渠道兜底
+渠道（Telegram/Discord 等无终端）回合 MUST 使用 `permissions.channel-mode`（默认 `auto`）而非交互模式，并经一个独立的渠道 agent（其权限 hook 无 confirmer）执行。当某决策需要人工确认但渠道无 confirmer 时，系统 MUST fail-closed 拒绝，除非 `channel-mode=bypass`。渠道 agent 随模型切换一并重建（`attachChannel`），仍跟随活动模型。默认渠道关闭。
 
-#### Scenario: 渠道回合不会自动执行需确认的工具
-- **WHEN** 启用渠道、来自 Telegram 的回合触发需要确认的可变工具（如 shell 执行）
-- **THEN** 因渠道无终端满足确认，该工具不被自动执行（fail-safe）
+#### Scenario: 渠道 auto 下 shell 被拒
+- **WHEN** `channel-mode=auto`、来自 Telegram 的回合触发 shell 执行（EXEC 在 auto 下需确认）
+- **THEN** 因渠道无 confirmer，请求被 fail-closed 拒绝，不执行
 
-#### Scenario: channel-mode 配置就位供跟进
-- **WHEN** 运维设置 `permissions.channel-mode`
-- **THEN** 该值被解析保存（`resolveChannelMode`），供后续渠道专用 agent 生效
+#### Scenario: 渠道 auto 放行写文件
+- **WHEN** `channel-mode=auto`、渠道回合触发写文件（WRITE 在 auto 下自动放行）
+- **THEN** 工具直接执行，无需确认
+
+#### Scenario: 渠道 bypass 完全放行
+- **WHEN** 运维显式设 `channel-mode=bypass`
+- **THEN** 渠道回合的所有工具直接执行，无确认
 
 ### Requirement: 权限运维命令
 系统 SHALL 提供 `/permission` 命令：`status`（默认，展示当前模式与 allowlist 概要）、`mode <plan|ask|auto|bypass>`、`allow <tool|command>`、`revoke <tool|command>`、`reset`（清空 allowlist）、`list`（展示工具风险分级与 allowlist）。`/status` MUST 展示当前权限模式。

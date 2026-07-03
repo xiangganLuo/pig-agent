@@ -43,6 +43,11 @@ public final class ModelManager implements AgentModelSwitcher {
     private AgentFactory factory;
     private String currentModelId;
 
+    // Optional secondary agent for non-interactive channels (its own permission hook /
+    // conversation), rebuilt on model switch alongside the main agent so channels also follow it.
+    private AgentHolder channelHolder;
+    private AgentFactory channelFactory;
+
     public ModelManager(ProviderRegistry registry, ModelStore store) {
         this.registry = registry;
         this.store = store;
@@ -53,6 +58,12 @@ public final class ModelManager implements AgentModelSwitcher {
         this.holder = holder;
         this.factory = factory;
         this.currentModelId = currentModelId;
+    }
+
+    /** Register a separate channel agent so model switches rebuild it too (optional). */
+    public void attachChannel(AgentHolder channelHolder, AgentFactory channelFactory) {
+        this.channelHolder = channelHolder;
+        this.channelFactory = channelFactory;
     }
 
     /** True once at least one model is saved and a resolvable default exists. */
@@ -137,6 +148,9 @@ public final class ModelManager implements AgentModelSwitcher {
         try {
             Model model = buildModel(target);
             holder.set(factory.create(model));
+            if (channelHolder != null && channelFactory != null) {
+                channelHolder.set(channelFactory.create(model));
+            }
             currentModelId = target.id();
         } catch (Exception e) {
             // Keep the previous model and conversation intact (§八).

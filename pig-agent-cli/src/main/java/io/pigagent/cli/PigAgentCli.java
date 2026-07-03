@@ -199,6 +199,18 @@ public final class PigAgentCli {
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
 
+        // Channels get their own agent whose permission hook runs in channel mode (uses
+        // permissions.channel-mode, no interactive confirmer → ASK fails closed). attachChannel
+        // makes model switches rebuild it too so channels keep following the active model.
+        ToolPermissionHook channelPermissionHook = new ToolPermissionHook(
+                () -> configManager.getConfig().getPermissions(), null, null, true);
+        AgentFactory channelAgentFactory = new AgentFactory(
+                config.getAgent().getName(), sysPrompt, toolkit,
+                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory);
+        AgentHolder channelAgentHolder = new AgentHolder(
+                channelAgentFactory.create(modelManager.buildModel(defaultModel)));
+        modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
+
         // Session management: AgentScope's JsonSession persists each session's conversation;
         // our repository tracks listing metadata. initialize() restores the last active session.
         JsonSession agentSession = new JsonSession(workspace.getSessionsDir());
@@ -214,7 +226,7 @@ public final class PigAgentCli {
         CompressionService compressionService = new CompressionService(
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
 
-        List<ChannelAgentBridge> bridges = startChannels(agentHolder, config.getChannels());
+        List<ChannelAgentBridge> bridges = startChannels(channelAgentHolder, config.getChannels());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.err.println(Ansi.warn("\n[CLI] Shutting down..."));

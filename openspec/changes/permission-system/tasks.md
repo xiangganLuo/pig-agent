@@ -27,12 +27,12 @@
 - [x] 4.4 `/status` 增加 `Perms` 当前模式展示。（plan 回合结束的 REPL 提示归到 AgentRepl，见 6.x 收尾。）
 - [x] 4.5 `ReplCommandsTest` 8/8 PASS：新增 `/permission mode plan` 派发+持久化、非法 mode 拒绝、`/help` 含 `/permission`；全 cli 编译 BUILD SUCCESS。
 
-## 5. 非交互渠道兜底（部分交付 + 跟进项）
+## 5. 非交互渠道兜底
 
-> 实现期发现：REPL 与渠道**共享同一 agent + 同一权限 hook**（`ChannelAgentBridge` 走 `agentHolder.get().stream`），且 hook 在 reactor 线程运行，无法可靠区分回合来源。完整 per-origin `channel-mode` 需给渠道单独建 agent（会破坏运行时模型切换对渠道的传播），超出本次范围。
+> 实现方案：给渠道单独建 agent（`channelAgentHolder`），其权限 hook `channel=true`、confirmer=null；`ModelManager.attachChannel` 让模型切换一并重建渠道 agent，渠道仍跟随活动模型。副作用：渠道对话与 REPL 会话分离（更合理——渠道不污染 REPL 会话上下文）。
 
-- [x] 5.1 安全默认已交付：渠道回合共享交互权限门；渠道无终端 → ASK 决策无法满足 → 危险工具**不会被自动执行**（fail-safe，非 fail-open）。`channel-mode` 配置 + `resolveChannelMode` + `ToolPermissionHook(channel=true)` 作为前瞻脚手架保留。
-- [ ] 5.2 （跟进）给渠道单独 agent + `channel=true` hook（confirmer=null），使 ASK 在渠道下明确 fail-closed 并回传说明、且用 `channel-mode` 而非交互 mode。**默认渠道关闭，安全影响有限**；追踪为独立变更。
+- [x] 5.1 渠道 agent 用 `channel-mode`（默认 auto）经 `resolveChannelMode`，非交互 mode；`ChannelAgentBridge` 接 `channelAgentHolder`。
+- [x] 5.2 渠道 hook confirmer=null → ASK 决策 fail-closed 拒绝（除非 `channel-mode=bypass`）。渠道语义由 `PermissionResolverTest` 的 mode+null-confirmer 组合覆盖（`nonInteractiveAskFailsClosed`=渠道 auto 下 EXEC 被拒；`autoAllowsWriteWithoutConfirm`=渠道 auto 放行写）。`ModelManager` 渠道重建 + 全链编译 BUILD SUCCESS、model 单测无回归。
 
 ## 6. 文档与验证
 
