@@ -39,6 +39,10 @@ import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.checklist.CheckListTool;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
+import io.pigagent.tool.permission.AllowlistWriter;
+import io.pigagent.tool.permission.PermissionConfirmer;
+import io.pigagent.tool.permission.PermissionDeniedTool;
+import io.pigagent.tool.permission.ToolPermissionHook;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
@@ -114,6 +118,8 @@ public final class PigAgentCli {
         toolkit.registration().tool(new BraveWebSearchTool()).apply();
         toolkit.registration().tool(new CheckListTool()).apply();
         toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
+        // Deny sentinel: the permission hook rewrites vetoed tool calls to this read-only tool.
+        toolkit.registration().tool(new PermissionDeniedTool()).apply();
 
         // MCP: mcp.json is the source of truth; application.yaml servers are imported once.
         // Enabled servers are connected best-effort (a bad server never crashes startup).
@@ -140,13 +146,70 @@ public final class PigAgentCli {
                 workspace.getContextDir().resolve("memory.md"));
         CompositeLongTermMemory memory = new CompositeLongTermMemory(globalMemory, config.isMemoryEnabled());
 
+        // Tool permission gate (plan/ask/auto/bypass): a high-priority PreActingEvent hook that
+        // vetoes tool calls per the current mode by rewriting them to the deny sentinel. ASK reads
+        // y/a/N from the live REPL reader; 'a' persists to permissions.allowlist.
+        PermissionConfirmer permissionConfirmer = prompt -> {
+            LineReader r = readerRef.get();
+            if (r == null) {
+                return PermissionConfirmer.Outcome.DENY; // fail-closed when no interactive reader
+            }
+            String ans = r.readLine(Ansi.warn(prompt + " (y=once / a=always / N=deny) "));
+            if (ans == null) {
+                return PermissionConfirmer.Outcome.DENY;
+            }
+            String s = ans.strip().toLowerCase();
+            if (s.equals("y")) {
+                return PermissionConfirmer.Outcome.ALLOW_ONCE;
+            }
+            if (s.equals("a")) {
+                return PermissionConfirmer.Outcome.ALLOW_ALWAYS;
+            }
+            return PermissionConfirmer.Outcome.DENY;
+        };
+        AllowlistWriter allowlistWriter = new AllowlistWriter() {
+            @Override
+            public void rememberTool(String toolName) {
+                configManager.updateConfig(c -> {
+                    List<String> l = c.getPermissions().getAllowlist().getTools();
+                    if (!l.contains(toolName)) {
+                        l.add(toolName);
+                    }
+                });
+            }
+
+            @Override
+            public void rememberCommand(String commandKey) {
+                configManager.updateConfig(c -> {
+                    List<String> l = c.getPermissions().getAllowlist().getCommands();
+                    if (!l.contains(commandKey)) {
+                        l.add(commandKey);
+                    }
+                });
+            }
+        };
+        ToolPermissionHook permissionHook = new ToolPermissionHook(
+                () -> configManager.getConfig().getPermissions(), permissionConfirmer, allowlistWriter);
+
         // Build the initial agent through a factory so the model can be swapped at runtime.
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(new LoggingHook(), new ToolCallLoggingHook()), memory);
+                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
+
+        // Channels get their own agent whose permission hook runs in channel mode (uses
+        // permissions.channel-mode, no interactive confirmer → ASK fails closed). attachChannel
+        // makes model switches rebuild it too so channels keep following the active model.
+        ToolPermissionHook channelPermissionHook = new ToolPermissionHook(
+                () -> configManager.getConfig().getPermissions(), null, null, true);
+        AgentFactory channelAgentFactory = new AgentFactory(
+                config.getAgent().getName(), sysPrompt, toolkit,
+                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory);
+        AgentHolder channelAgentHolder = new AgentHolder(
+                channelAgentFactory.create(modelManager.buildModel(defaultModel)));
+        modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
 
         // Session management: AgentScope's JsonSession persists each session's conversation;
         // our repository tracks listing metadata. initialize() restores the last active session.
@@ -163,7 +226,7 @@ public final class PigAgentCli {
         CompressionService compressionService = new CompressionService(
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
 
-        List<ChannelAgentBridge> bridges = startChannels(agentHolder, config.getChannels());
+        List<ChannelAgentBridge> bridges = startChannels(channelAgentHolder, config.getChannels());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.err.println(Ansi.warn("\n[CLI] Shutting down..."));

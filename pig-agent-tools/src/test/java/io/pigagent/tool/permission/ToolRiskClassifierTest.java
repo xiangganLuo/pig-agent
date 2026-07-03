@@ -1,0 +1,42 @@
+package io.pigagent.tool.permission;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** 工具风险分级：默认表 + overrides 覆盖 + 未知→EXEC。 */
+class ToolRiskClassifierTest {
+
+    @Test
+    void knownToolsClassifiedByDefaultTable() {
+        assertThat(ToolRiskClassifier.classify("readFile", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+        assertThat(ToolRiskClassifier.classify("writeFile", Map.of())).isEqualTo(ToolRisk.WRITE);
+        assertThat(ToolRiskClassifier.classify("executeCommand", Map.of())).isEqualTo(ToolRisk.EXEC);
+        assertThat(ToolRiskClassifier.classify("fetchUrl", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
+    }
+
+    @Test
+    void unknownToolDefaultsToExecFailSafe() {
+        assertThat(ToolRiskClassifier.classify("someRandomTool", Map.of())).isEqualTo(ToolRisk.EXEC);
+        assertThat(ToolRiskClassifier.classify(null, Map.of())).isEqualTo(ToolRisk.EXEC);
+        assertThat(ToolRiskClassifier.classify("  ", Map.of())).isEqualTo(ToolRisk.EXEC);
+    }
+
+    @Test
+    void overridesTakePrecedence() {
+        assertThat(ToolRiskClassifier.classify("fetchUrl", Map.of("fetchUrl", "EXEC")))
+                .isEqualTo(ToolRisk.EXEC);
+        // 大小写不敏感
+        assertThat(ToolRiskClassifier.classify("writeFile", Map.of("writeFile", "read_only")))
+                .isEqualTo(ToolRisk.READ_ONLY);
+    }
+
+    @Test
+    void illegalOverrideValueFallsBackToDefault() {
+        assertThat(ToolRiskClassifier.classify("writeFile", Map.of("writeFile", "garbage")))
+                .isEqualTo(ToolRisk.WRITE);
+    }
+}

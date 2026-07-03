@@ -526,6 +526,41 @@ channels:
 
 启动后自动连接所有 `enabled: true` 的通道，无需手动干预。
 
+## 工具权限体系
+
+对标 Claude Code / opencode / hermes 的权限级别，为工具执行加一道统一安全门（`ToolPermissionHook`，在 `PreActingEvent` 逐次判定）。四种全局**模式**：
+
+| 模式 | 行为 |
+|------|------|
+| `plan` | 只读：否决所有可变工具，agent 只产出计划 |
+| `ask`（默认） | 逐次确认可变工具（`y` 本次 / `a` 始终允许 / `N` 拒绝） |
+| `auto` | 自动放行写文件/网络，仍确认执行 shell / MCP 管理 |
+| `bypass` | 全部放行、无提示（完全信任 / 恢复旧行为） |
+
+工具按风险分级（只读 / 写 / 执行 / 网络 / MCP 管理；未知工具按最严处理）。`a`（始终允许）会持久化到 `permissions.allowlist`（工具名或命令首 token）。运维命令：
+
+```
+/permission status                     查看当前模式与 allowlist
+/permission mode <plan|ask|auto|bypass>  切换模式
+/permission allow <命令键>              加入 allowlist（--tool 加工具名）
+/permission revoke <名称> | reset       移除 / 清空
+```
+
+配置（`application.yaml`）：
+
+```yaml
+permissions:
+  mode: ask                 # 缺省 ask；升级后危险工具开始要确认，可设 bypass 恢复旧行为
+  channel-mode: auto
+  tool-overrides:           # 可选：重分类某工具
+    fetchUrl: high
+  allowlist:
+    tools: []
+    commands: []
+```
+
+> 说明：默认 `ask` 会改变旧行为（此前等同 bypass）。MCP 自助接入的 D-SEC 门保持不变（不重复弹窗）。渠道回合共享交互门（fail-safe，不会自动执行需确认的工具）；完整 per-origin `channel-mode` 为后续跟进。
+
 ## 24 小时不间断运行
 
 Pig Agent 支持作为后台服务 24 小时运行，持续接收外部通道消息和执行定时任务。

@@ -1,9 +1,12 @@
 package io.pigagent.cli.repl;
 
+import io.pigagent.config.ConfigurationManager;
+import io.pigagent.config.PermissionMode;
 import io.pigagent.mcp.McpManager;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 import org.jline.reader.LineReader;
@@ -12,6 +15,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,6 +32,9 @@ import static org.mockito.Mockito.when;
  */
 class ReplCommandsTest {
 
+    @TempDir
+    Path tmp;
+
     private record Harness(CommandLine cmd, ByteArrayOutputStream out, AtomicBoolean running) {
         String output() {
             return out.toString(StandardCharsets.UTF_8);
@@ -35,10 +42,14 @@ class ReplCommandsTest {
     }
 
     private Harness newHarness() throws IOException {
-        return newHarness(null);
+        return newHarness(null, null);
     }
 
     private Harness newHarness(McpManager mcpManager) throws IOException {
+        return newHarness(mcpManager, null);
+    }
+
+    private Harness newHarness(McpManager mcpManager, ConfigurationManager configManager) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = TerminalBuilder.builder()
                 .dumb(true)
@@ -47,7 +58,7 @@ class ReplCommandsTest {
         AtomicBoolean running = new AtomicBoolean(true);
         ReplContext ctx = new ReplContext(
                 null, // agentHolder
-                null, // configManager
+                configManager,
                 null, // registry
                 null, // modelManager
                 null, // compressionService
@@ -79,8 +90,31 @@ class ReplCommandsTest {
                 .contains("/model")
                 .contains("/session")
                 .contains("/mcp")
+                .contains("/permission")
                 .contains("/compress")
                 .contains("/quit");
+    }
+
+    @Test
+    void permissionModeDispatchesAndPersists() throws IOException {
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        Harness h = newHarness(null, cfg);
+
+        int code = h.cmd().execute("/permission", "mode", "plan");
+        assertThat(code).isZero();
+        assertThat(h.output()).contains("plan");
+        assertThat(cfg.getConfig().getPermissions().resolveMode()).isEqualTo(PermissionMode.PLAN);
+
+        h.cmd().execute("/permission", "status");
+        assertThat(h.output()).contains("Mode").contains("plan");
+    }
+
+    @Test
+    void permissionRejectsInvalidMode() throws IOException {
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        Harness h = newHarness(null, cfg);
+        h.cmd().execute("/permission", "mode", "garbage");
+        assertThat(h.output()).contains("Invalid mode");
     }
 
     @Test

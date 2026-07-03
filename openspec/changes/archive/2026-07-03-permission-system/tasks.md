@@ -1,0 +1,40 @@
+## 1. Spike（先做，卡点）
+
+- [x] 1.1 验证 `PreActingEvent` 否决语义：`PermissionVetoSpikeIT`（真实 anthropic）证实**策略 B（`setToolUse` 改写为 deny 哨兵）**可干净否决——`spyExecuted=false`、`sawPreActing=true`、模型收拒绝结果后继续对话。结论已回写 design.md。附带确认工具名=方法名。
+- [x] 1.2 hook 内阻塞式确认：复用 `McpConfirmer` 的阻塞 `readerLine`（`McpTool` 现有工具执行中已同款阻塞、跑通有先例）；实现时确认交互放到 boundedElastic scheduler 以稳妥不占 reactor 线程。低风险，采信先例。
+
+## 2. pig-agent-config：PermissionConfig
+
+- [x] 2.1 `PigAgentConfig` 新增 `permissions` 块：`mode`（默认 `ask`）、`channel-mode`（默认 `auto`）、`tool-overrides:Map<String,String>`、`allowlist`（`tools`/`commands`，可变集合便于 `/permission allow` 增删）。getter/setter + Jackson。
+- [x] 2.2 `PermissionMode` 枚举（`PLAN`/`ASK`/`AUTO`/`BYPASS`）+ `fromString` 容错（null/空/未知回退，不抛）；`PermissionConfig.resolveMode/resolveChannelMode`。
+- [x] 2.3 单测 `PermissionConfigTest`（5/5 PASS）：默认 ask/auto、容错解析、YAML 往返、缺省块回退、未知 mode 不崩。
+
+## 3. 权限判定 + Hook（实际落在 `pig-agent-tools`，非 core）
+
+> 放置调整：core 不依赖 config，为不给 core 增耦合，权限逻辑放 `pig-agent-tools`（已依赖 config+agentscope；`PermissionDeniedTool` 本就是 @Tool）。包 `io.pigagent.tool.permission`。
+
+- [x] 3.1 `ToolRisk` + `ToolRiskClassifier`：默认表 + `tool-overrides` 覆盖（容错），未知→EXEC（fail-safe）。
+- [x] 3.2 `PermissionDecision` + `PermissionPolicy.decide`（纯函数）：4 模式×5 风险矩阵、plan 全否决、auto 放行 WRITE/NETWORK、EXEC/MCP_ADMIN 规则、bypass 全放、allowlist 短路（plan 除外）。
+- [x] 3.3 `ToolPermissionHook implements Hook`（priority=0）：`PreActingEvent` → `PermissionResolver` → 否决则 `setToolUse` 改写为 `PermissionDeniedTool` 哨兵（策略 B）。判定核心抽到 `PermissionResolver`（confirmer/writer 注入，可纯测）；MCP_ADMIN 委托 D-SEC 不重复弹窗；渠道回合走 channel-mode。
+- [x] 3.4 `CommandKeys.of(input)`：EXEC 取 command 首 token 作规范化键 → allowlist.commands 匹配。
+- [x] 3.5 单测 19/19 PASS：`PermissionPolicyTest`(6，矩阵) + `PermissionResolverTest`(9，ASK 三态/allowlist/命令粒度/非交互 fail-closed) + `ToolRiskClassifierTest`(4)。Hook 适配器薄，由 resolver 测试 + spike IT 覆盖。
+
+## 4. pig-agent-cli：/permission 命令 + 接线
+
+- [x] 4.1 `PermissionConfirmer` 实现（y=once/a=always/N=deny）经共享 `readerRef`；无 reader → fail-closed（`PermissionConfirmer.Outcome.DENY`）。`AllowlistWriter` 经 `configManager.updateConfig` 落盘。
+- [x] 4.2 `/permission` 命令（`cli/repl/command/PermissionCommand.java`）：`status`/`mode`/`channel-mode`/`allow`(默认命令键，`--tool` 加工具)/`revoke`/`reset`/`list`。`ReplCommands.build()` 注册 + `/help` 条目。
+- [x] 4.3 `PigAgentCli` 接线：注册 `PermissionDeniedTool` 哨兵；构造 `ToolPermissionHook`(config supplier + confirmer + writer)，置于 `AgentFactory` hooks 列表**首位**（早于 Logging）。
+- [x] 4.4 `/status` 增加 `Perms` 当前模式展示。（plan 回合结束的 REPL 提示归到 AgentRepl，见 6.x 收尾。）
+- [x] 4.5 `ReplCommandsTest` 8/8 PASS：新增 `/permission mode plan` 派发+持久化、非法 mode 拒绝、`/help` 含 `/permission`；全 cli 编译 BUILD SUCCESS。
+
+## 5. 非交互渠道兜底
+
+> 实现方案：给渠道单独建 agent（`channelAgentHolder`），其权限 hook `channel=true`、confirmer=null；`ModelManager.attachChannel` 让模型切换一并重建渠道 agent，渠道仍跟随活动模型。副作用：渠道对话与 REPL 会话分离（更合理——渠道不污染 REPL 会话上下文）。
+
+- [x] 5.1 渠道 agent 用 `channel-mode`（默认 auto）经 `resolveChannelMode`，非交互 mode；`ChannelAgentBridge` 接 `channelAgentHolder`。
+- [x] 5.2 渠道 hook confirmer=null → ASK 决策 fail-closed 拒绝（除非 `channel-mode=bypass`）。渠道语义由 `PermissionResolverTest` 的 mode+null-confirmer 组合覆盖（`nonInteractiveAskFailsClosed`=渠道 auto 下 EXEC 被拒；`autoAllowsWriteWithoutConfirm`=渠道 auto 放行写）。`ModelManager` 渠道重建 + 全链编译 BUILD SUCCESS、model 单测无回归。
+
+## 6. 文档与验证
+
+- [x] 6.1 README（中文）新增「工具权限体系」章节（四模式表、`/permission`、`permissions` 配置块、升级后默认 `ask` 行为变更、渠道说明）+ `CLAUDE.md` 新增 Tool permissions 段。
+- [x] 6.2 验证：全模块 `mvn -pl pig-agent-cli -am test` **BUILD SUCCESS**，权限单测 config 5 + policy 6 + resolver 9 + classifier 4 + ReplCommands 8 全绿，其余模块无回归。集成测试 `PermissionEnforcementIT`（真实 `ToolPermissionHook` + anthropic）2/2：**plan 否决可变工具（spyExecuted=false）/ bypass 放行（spyExecuted=true）**。承重 spike `PermissionVetoSpikeIT` 亦通过。（ask 的 y/a/N 交互、auto 拦 shell、allowlist 免问在单测 `PermissionResolverTest` 覆盖；真机交互确认属手动冒烟。）
