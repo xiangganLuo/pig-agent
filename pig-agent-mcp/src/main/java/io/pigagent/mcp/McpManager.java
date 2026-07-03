@@ -9,6 +9,7 @@ import io.pigagent.config.PigAgentConfig.McpServerConfig;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,8 @@ public final class McpManager {
     private McpStore store;
     /** name -> 已连接的 client，受 {@code this} 锁保护。 */
     private final Map<String, McpClientWrapper> clients = new LinkedHashMap<>();
+    /** 正在添加/连接中的 name（占位防并发重名，L-1），受 {@code this} 锁保护。 */
+    private final Set<String> pending = new HashSet<>();
 
     /** 连通测试结果。 */
     public record TestResult(boolean ok, String error, int toolCount) {
@@ -84,14 +87,34 @@ public final class McpManager {
         }
     }
 
-    /** 添加并实时生效：查重名 → 连接(I/O) → 连通测试 → 碰撞检查+注册(临界区) → 持久化。 */
+    /** 添加并实时生效：原子占名(临界区) → 连接(I/O) → 连通测试 → 碰撞检查+注册(临界区) → 持久化 → 释放占名。 */
     public McpServerSpec add(McpServerSpec spec) {
-        if (store.findByName(spec.name()).isPresent()) {
-            throw new IllegalStateException("已存在同名 MCP 服务器: " + spec.name());
+        reserveName(spec.name());
+        try {
+            attach(spec);
+            store.save(spec);
+            return spec;
+        } finally {
+            synchronized (this) {
+                pending.remove(spec.name());
+            }
         }
-        attach(spec);
-        store.save(spec);
-        return spec;
+    }
+
+    /**
+     * 原子占名（L-1 TOCTOU 修复）：在同一临界区内查 store/clients/pending，全部空缺才登记 pending。
+     * 与 attach 的锁外 I/O 配合，把"查重 → 保存"之间原本非原子的窗口收敛为占名 + 释放两段临界区。
+     */
+    private synchronized void reserveName(String name) {
+        if (store.findByName(name).isPresent()) {
+            throw new IllegalStateException("已存在同名 MCP 服务器: " + name);
+        }
+        if (clients.containsKey(name)) {
+            throw new IllegalStateException("已连接同名 MCP 服务器: " + name);
+        }
+        if (!pending.add(name)) {
+            throw new IllegalStateException("同名 MCP 服务器正在添加中: " + name);
+        }
     }
 
     /** 实时移除：注销工具(临界区) → 关闭 client(锁外) → 删存储。 */
@@ -109,17 +132,46 @@ public final class McpManager {
         store.deleteByName(name);
     }
 
-    /** 编辑：先连通测试新配置（不动旧的）；通过后移除旧的再加新的（非破坏性）。 */
+    /**
+     * 编辑：先连通测试新配置（不动旧的）；通过后移除旧的再加新的（非破坏性）。
+     *
+     * <p>L-3 修复：{@code test()} 不查工具名冲突，{@code attach()} 才查；若 remove 旧的之后 add
+     * 因冲突失败，旧配置本会被删除且无回滚。故先快照旧 spec 与其连接状态，add 失败时恢复旧 spec
+     * 并（若原先已连接）重连，避免配置丢失。
+     */
     public McpServerSpec edit(McpServerSpec newSpec) {
         TestResult t = test(newSpec);
         if (!t.ok()) {
             throw new IllegalStateException("新配置不可用，保持原配置: " + t.error());
         }
-        // TODO: @luoxianggan 安全审查 L-3：test() 不查工具名冲突，attach() 才查；若 remove 旧的之后
-        // add 因冲突失败，旧配置已被删除且无回滚 → 配置丢失。是否引入"快照旧 spec、add 失败回滚重连"
-        // 需人工确认。详见 docs/review/mcp-security-followups.md（不入库）。
+        McpServerSpec oldSpec = store.findByName(newSpec.name()).orElse(null);
+        boolean wasConnected;
+        synchronized (this) {
+            wasConnected = clients.containsKey(newSpec.name());
+        }
         remove(newSpec.name());
-        return add(newSpec);
+        try {
+            return add(newSpec);
+        } catch (RuntimeException addFailure) {
+            rollbackEdit(oldSpec, wasConnected, addFailure);
+            throw new IllegalStateException("编辑失败，已回滚旧配置: " + addFailure.getMessage(), addFailure);
+        }
+    }
+
+    /** L-3 回滚：恢复旧 spec 到 store，并在原先已连接时尽力重连；回滚本身失败则合并报错。 */
+    private void rollbackEdit(McpServerSpec oldSpec, boolean wasConnected, RuntimeException addFailure) {
+        if (oldSpec == null) {
+            return;
+        }
+        try {
+            store.save(oldSpec);
+            if (wasConnected && oldSpec.enabled()) {
+                attach(oldSpec);
+            }
+        } catch (RuntimeException rollbackFailure) {
+            throw new IllegalStateException("编辑失败且回滚旧配置也失败: "
+                    + addFailure.getMessage() + "；回滚错误: " + rollbackFailure.getMessage(), addFailure);
+        }
     }
 
     /** 启用并连接；持久化 enabled=true。 */

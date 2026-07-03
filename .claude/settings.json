@@ -1,1 +1,13 @@
-{}
+{
+  "mcpServers": {
+    "openspec": {
+      "command": "npx",
+      "args": ["-y", "@fission-ai/openspec-mcp"]
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash:openspec:*"
+    ]
+  }
+}
