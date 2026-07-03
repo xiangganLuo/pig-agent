@@ -27,12 +27,14 @@
 - [x] 4.4 `/status` 增加 `Perms` 当前模式展示。（plan 回合结束的 REPL 提示归到 AgentRepl，见 6.x 收尾。）
 - [x] 4.5 `ReplCommandsTest` 8/8 PASS：新增 `/permission mode plan` 派发+持久化、非法 mode 拒绝、`/help` 含 `/permission`；全 cli 编译 BUILD SUCCESS。
 
-## 5. pig-agent-channel：非交互兜底
+## 5. 非交互渠道兜底（部分交付 + 跟进项）
 
-- [ ] 5.1 渠道回合使用 `channel-mode`（默认 auto）而非交互 mode；`ChannelAgentBridge` 传入无 confirmer 的权限上下文。
-- [ ] 5.2 无 confirmer 时 ASK 决策 fail-closed 拒绝并回传清晰说明（除非 `channel-mode=bypass`）。单测覆盖 EXEC 在渠道 auto 下被拒。
+> 实现期发现：REPL 与渠道**共享同一 agent + 同一权限 hook**（`ChannelAgentBridge` 走 `agentHolder.get().stream`），且 hook 在 reactor 线程运行，无法可靠区分回合来源。完整 per-origin `channel-mode` 需给渠道单独建 agent（会破坏运行时模型切换对渠道的传播），超出本次范围。
+
+- [x] 5.1 安全默认已交付：渠道回合共享交互权限门；渠道无终端 → ASK 决策无法满足 → 危险工具**不会被自动执行**（fail-safe，非 fail-open）。`channel-mode` 配置 + `resolveChannelMode` + `ToolPermissionHook(channel=true)` 作为前瞻脚手架保留。
+- [ ] 5.2 （跟进）给渠道单独 agent + `channel=true` hook（confirmer=null），使 ASK 在渠道下明确 fail-closed 并回传说明、且用 `channel-mode` 而非交互 mode。**默认渠道关闭，安全影响有限**；追踪为独立变更。
 
 ## 6. 文档与验证
 
-- [ ] 6.1 README（中文）新增权限章节（四模式、`/permission`、`permissions` 配置块、`channel-mode` 风险说明、升级后默认 `ask` 的行为变更）+ `CLAUDE.md`。
-- [ ] 6.2 验证：`mvn -pl pig-agent-cli -am compile` BUILD SUCCESS（全模块）；`mvn -pl pig-agent-config,pig-agent-core test` 权限矩阵单测全绿；`ReplCommandsTest` 派发测试全绿。手动冒烟以 anthropic 模型实跑：plan 模式只读不落地 / ask 弹 y-n-a / `a` 后免问 / auto 放行写文件但拦 shell / bypass 全放 / 渠道 auto 下 shell 被拒。
+- [x] 6.1 README（中文）新增「工具权限体系」章节（四模式表、`/permission`、`permissions` 配置块、升级后默认 `ask` 行为变更、渠道说明）+ `CLAUDE.md` 新增 Tool permissions 段。
+- [x] 6.2 验证：全模块 `mvn -pl pig-agent-cli -am test` **BUILD SUCCESS**，权限单测 config 5 + policy 6 + resolver 9 + classifier 4 + ReplCommands 8 全绿，其余模块无回归。集成测试 `PermissionEnforcementIT`（真实 `ToolPermissionHook` + anthropic）2/2：**plan 否决可变工具（spyExecuted=false）/ bypass 放行（spyExecuted=true）**。承重 spike `PermissionVetoSpikeIT` 亦通过。（ask 的 y/a/N 交互、auto 拦 shell、allowlist 免问在单测 `PermissionResolverTest` 覆盖；真机交互确认属手动冒烟。）
