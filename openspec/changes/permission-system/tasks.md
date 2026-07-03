@@ -1,7 +1,7 @@
 ## 1. Spike（先做，卡点）
 
-- [ ] 1.1 验证 `PreActingEvent` 否决语义：写一个最小 hook，分别试 (a) `setToolUse` 改哨兵、(b) `Mono.error(...)`、(c) 返回原 event 但改参数，观察哪种能"工具不执行"且"拒绝原因回传模型可继续对话"。用 anthropic 模型跑一次真实工具调用验证。产出结论写回 design.md「Open Questions」。
-- [ ] 1.2 验证 hook 内阻塞式 `readerRef.readLine`（复用 McpConfirmer）不死锁 reactor 线程；必要时确定 `subscribeOn/publishOn` blocking scheduler 的接法。
+- [x] 1.1 验证 `PreActingEvent` 否决语义：`PermissionVetoSpikeIT`（真实 anthropic）证实**策略 B（`setToolUse` 改写为 deny 哨兵）**可干净否决——`spyExecuted=false`、`sawPreActing=true`、模型收拒绝结果后继续对话。结论已回写 design.md。附带确认工具名=方法名。
+- [x] 1.2 hook 内阻塞式确认：复用 `McpConfirmer` 的阻塞 `readerLine`（`McpTool` 现有工具执行中已同款阻塞、跑通有先例）；实现时确认交互放到 boundedElastic scheduler 以稳妥不占 reactor 线程。低风险，采信先例。
 
 ## 2. pig-agent-config：PermissionConfig
 

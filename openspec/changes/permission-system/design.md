@@ -33,13 +33,13 @@
 - **风险分级（`ToolRiskClassifier`）。** 默认按工具名映射：READ_ONLY（read/list/search/test/skills-list…）、WRITE（writeFile 及文件变更）、EXEC（shell executeCommand）、NETWORK（web fetch 出网）、MCP_ADMIN（mcp add/remove/edit）。`permissions.tool-overrides` 可重分类。未知工具**默认按 EXEC**（fail-safe，最严）。
 - **D-SEC 组合而非重复。** MCP_ADMIN 工具（`McpTool.addMcpServer`/`removeMcpServer`）已有 D-SEC 门（allow-add/allow-remove/白名单/人工确认）。权限 hook 对 MCP_ADMIN **不再重复弹确认**，仅按模式决定"是否进入 D-SEC"（plan 否决；ask/auto 放行给 D-SEC 自行门控；bypass 放行给 D-SEC——D-SEC 默认仍关，双保险）。
 - **逐命令粒度。** EXEC 确认时展示实际命令；`a` 记住**规范化命令键**（首 token，如 `git`；或整条命令，视实现 spike）写入 `allowlist.commands`。匹配用前缀/键相等，v1 不做正则 DSL。
-- **否决机制（承重，step-0 spike 定）。** 候选：(a) `setToolUse` 改为一个"权限拒绝"哨兵，让 toolkit 解析出拒绝结果回传模型；(b) 返回 `Mono.error(PermissionDeniedException)` 经 `handleInterrupt` 冒泡；(c) 让工具本身返回拒绝串（需工具配合，最不干净）。spike 选出既能"不执行"又能"把拒绝原因回传给模型继续对话"的最稳写法。
+- **否决机制（承重，step-0 spike 已定 → 策略 B，实证通过）。** `PermissionVetoSpikeIT` 用真实模型验证：高优先级 Hook 在 `PreActingEvent` 里 `pre.setToolUse(ToolUseBlock.builder().id(原id).name("__permission_denied__").input(Map.of()).build())`，把待执行工具**改写为只读 deny 哨兵工具**——结果 `spyExecuted=false`（真实工具不执行）、模型收到哨兵拒绝结果后继续对话。候选 (b) `Mono.error`/中断（不优雅、中断整回合）与 (c) 工具自返回拒绝（需工具配合）均被否。落地：注册内部 `PermissionDeniedTool`（`@Tool` 只读，返回按模式定制的拒绝/引导语），hook 拒绝时改写指向它。附带确认：AgentScope `@Tool` 工具名 = 方法名。
 - **交互确认在响应式流内阻塞。** 复用 `McpConfirmer`（现有 `McpTool` 已在工具执行中同款阻塞 `readerRef.readLine`，有先例）。spike 一并确认 hook 内阻塞不会死锁 reactor 线程（必要时 `subscribeOn`/`publishOn` 到 blocking scheduler）。
 - **非交互渠道兜底。** 渠道回合用 `permissions.channel-mode`（默认 `auto`）。当判定需要交互确认但**无 confirmer**（渠道无终端）时，**fail-closed 拒绝**并回传清晰说明（EXEC/MCP_ADMIN 在渠道 auto 下即属此列）。运维要让渠道完全放行须显式设 `channel-mode=bypass`。
 
 ## Risks / Trade-offs
 
-- **[承重] `PreActingEvent` 否决语义未验证** → step-0 spike；若三种写法都无法干净否决，回退：hook 改为在 `PreActingEvent` 把工具参数替换为拒绝 + 依赖工具侧读取"权限上下文"短路（次优，需最小工具改造）。
+- **[承重] `PreActingEvent` 否决语义** → ✅ 已由 `PermissionVetoSpikeIT` 实证：改写 `setToolUse` 指向 deny 哨兵可干净否决且模型可继续。承重风险解除。
 - **[兼容/意外] 默认 `ask` 改变现有行为** → 老用户升级后危险工具开始要确认（此前等同 bypass）。缓解：文档/首启提示明确说明，并提供 `/permission mode bypass` 一键恢复旧行为。
 - **[安全] `channel-mode=auto` 放行面** → 非交互渠道可自动跑 WRITE/NETWORK。缓解：EXEC/MCP_ADMIN 默认 fail-closed；`channel-mode` 可设 `deny`(=plan)/`ask`(无确认→全 fail-closed)/`bypass`。用户已知悉并选择 auto 为默认。
 - **[并发] 渠道线程与 REPL 并发读 `readerRef`** → 确认交互串行化（同一时刻仅一个回合等待输入）；渠道回合不走 `readerRef`（走 channel-mode 兜底），无争用。
@@ -53,6 +53,6 @@
 
 ## Open Questions
 
-- 否决机制最终写法（step-0 spike 结论）——决定 hook 是"改写 toolUse"还是"抛错中断"。
-- `a`（always）记住命令的粒度：首 token vs 整条命令（spike 时按实际 `ToolUseBlock.getInput()` 结构定）。
+- ~~否决机制最终写法~~ → 已定：改写 `toolUse` 指向 deny 哨兵（见 Decisions，`PermissionVetoSpikeIT` 实证）。
+- `a`（always）记住命令的粒度：首 token vs 整条命令（实现时按实际 `ToolUseBlock.getInput()` 结构定；spike 已确认工具名=方法名，命令在 `input` map 里）。
 - v2 是否引入 `exitPlanMode` 工具与计划卡片交互（对标 Claude Code 完整 plan→执行流）。
