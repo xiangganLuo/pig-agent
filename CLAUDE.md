@@ -112,26 +112,6 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 **两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**多 spec**：大需求在 `/ls:clarify` 拆成多个可独立上线的 spec，各自 `feat/<name>` 分支并行开发，`/ls:status` 汇总进度。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。完整指南 + 实战复盘见 `docs/ai-dev-pipeline.md`；规约基座见 `.claude/rules/common/development-workflow.md`。
 
-## gstack (REQUIRED — global install)
+## Skills
 
-**Before doing ANY work, verify gstack is installed:**
-
-```bash
-test -d ~/.claude/skills/gstack/bin && echo "GSTACK_OK" || echo "GSTACK_MISSING"
-```
-
-If GSTACK_MISSING: STOP. Do not proceed. Tell the user:
-
-> gstack is required for all AI-assisted work in this repo.
-> Install it:
-> ```bash
-> git clone --depth 1 https://github.com/garrytan/gstack.git ~/.claude/skills/gstack
-> cd ~/.claude/skills/gstack && ./setup --team
-> ```
-> Then restart your AI coding tool.
-
-Do not skip skills, ignore gstack errors, or work around missing gstack.
-
-Using gstack skills: After install, skills like /qa, /ship, /review, /investigate,
-and /browse are available. Use /browse for all web browsing.
-Use ~/.claude/skills/gstack/... for gstack file paths (the global path).
+Project-specific slash commands live in `.claude/commands/` (`/ls:*` AI dev pipeline, `/opsx:*` openspec workflow). See the AI 开发流水线 section above and `docs/ai-dev-pipeline.md`.
