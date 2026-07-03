@@ -5,9 +5,9 @@
 
 ## 2. pig-agent-config：PermissionConfig
 
-- [ ] 2.1 `PigAgentConfig` 新增 `permissions` 块：`mode`（默认 `ask`）、`channel-mode`（默认 `auto`）、`tool-overrides:Map<String,String>`、`allowlist`（`tools:List<String>`、`commands:List<String>`）。getter/setter + Jackson 注解，缺省安全。
-- [ ] 2.2 `PermissionMode` 枚举（`PLAN`/`ASK`/`AUTO`/`BYPASS`）+ 解析容错（未知值回退默认并告警，不崩）。
-- [ ] 2.3 单测：默认值、YAML 往返、未知 mode 容错、`tool-overrides`/`allowlist` 读写。
+- [x] 2.1 `PigAgentConfig` 新增 `permissions` 块：`mode`（默认 `ask`）、`channel-mode`（默认 `auto`）、`tool-overrides:Map<String,String>`、`allowlist`（`tools`/`commands`，可变集合便于 `/permission allow` 增删）。getter/setter + Jackson。
+- [x] 2.2 `PermissionMode` 枚举（`PLAN`/`ASK`/`AUTO`/`BYPASS`）+ `fromString` 容错（null/空/未知回退，不抛）；`PermissionConfig.resolveMode/resolveChannelMode`。
+- [x] 2.3 单测 `PermissionConfigTest`（5/5 PASS）：默认 ask/auto、容错解析、YAML 往返、缺省块回退、未知 mode 不崩。
 
 ## 3. pig-agent-core：权限判定 + Hook
 

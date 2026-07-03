@@ -11,6 +11,7 @@ public final class PigAgentConfig {
     @JsonProperty("channels") private Map<String, ChannelConfig> channels = Map.of();
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
+    @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -21,6 +22,7 @@ public final class PigAgentConfig {
     public Map<String, ChannelConfig> getChannels() { return channels; }
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
+    public PermissionConfig getPermissions() { return permissions; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -63,6 +65,38 @@ public final class PigAgentConfig {
         public void setMaxContextTokens(int t) { this.maxContextTokens = t; }
         public double getThreshold() { return threshold; }
         public void setThreshold(double t) { this.threshold = t; }
+    }
+
+    /** 工具权限体系配置（全局）。缺省 mode=ask、channel-mode=auto，向后兼容。 */
+    public static final class PermissionConfig {
+        @JsonProperty("mode") private String mode = "ask";
+        @JsonProperty("channel-mode") private String channelMode = "auto";
+        @JsonProperty("tool-overrides") private Map<String, String> toolOverrides = new java.util.LinkedHashMap<>();
+        @JsonProperty("allowlist") private Allowlist allowlist = new Allowlist();
+
+        public String getMode() { return mode; }
+        public void setMode(String m) { this.mode = m; }
+        public String getChannelMode() { return channelMode; }
+        public void setChannelMode(String m) { this.channelMode = m; }
+        public Map<String, String> getToolOverrides() { return toolOverrides; }
+        public void setToolOverrides(Map<String, String> m) { this.toolOverrides = m; }
+        public Allowlist getAllowlist() { return allowlist; }
+        public void setAllowlist(Allowlist a) { this.allowlist = a; }
+
+        /** 解析交互模式，未知值回退 ASK。 */
+        public PermissionMode resolveMode() { return PermissionMode.fromString(mode, PermissionMode.ASK); }
+        /** 解析非交互渠道模式，未知值回退 AUTO。 */
+        public PermissionMode resolveChannelMode() { return PermissionMode.fromString(channelMode, PermissionMode.AUTO); }
+
+        /** 持久化的"始终允许"清单：工具名 + 规范化命令键。 */
+        public static final class Allowlist {
+            @JsonProperty("tools") private java.util.List<String> tools = new java.util.ArrayList<>();
+            @JsonProperty("commands") private java.util.List<String> commands = new java.util.ArrayList<>();
+            public java.util.List<String> getTools() { return tools; }
+            public void setTools(java.util.List<String> t) { this.tools = t; }
+            public java.util.List<String> getCommands() { return commands; }
+            public void setCommands(java.util.List<String> c) { this.commands = c; }
+        }
     }
 
     public static final class McpConfig {
