@@ -21,11 +21,11 @@
 
 ## 4. pig-agent-cli：/permission 命令 + 接线
 
-- [ ] 4.1 `PermissionConfirmer`（复用/泛化 `McpConfirmer` 的 y/N，扩展第三态 `a`=always）经共享 `readerRef` 读取；无 reader 时 fail-closed。
-- [ ] 4.2 `/permission` 命令（`cli/repl/command/PermissionCommand.java`）：`status`（默认）/`mode <plan|ask|auto|bypass>`/`allow <tool|cmd…>`/`revoke <…>`/`reset`/`list`（展示风险表 + allowlist）。`ReplCommands.build()` 注册；更新 `/help`。
-- [ ] 4.3 `PigAgentCli` 接线：构造 `ToolPermissionHook`（`permissionSupplier` + confirmer + configManager），加入 `AgentFactory` 的 hooks 列表（置于 Logging hook 之前）。
-- [ ] 4.4 `/status` 增加当前权限模式展示；plan 模式回合结束时 REPL 提示"切 `/permission mode ask` 执行"。
-- [ ] 4.5 `PermissionCommand` 派发测试（DumbTerminal，`ReplCommandsTest` 新增 mode 切换 + status 渲染）。
+- [x] 4.1 `PermissionConfirmer` 实现（y=once/a=always/N=deny）经共享 `readerRef`；无 reader → fail-closed（`PermissionConfirmer.Outcome.DENY`）。`AllowlistWriter` 经 `configManager.updateConfig` 落盘。
+- [x] 4.2 `/permission` 命令（`cli/repl/command/PermissionCommand.java`）：`status`/`mode`/`channel-mode`/`allow`(默认命令键，`--tool` 加工具)/`revoke`/`reset`/`list`。`ReplCommands.build()` 注册 + `/help` 条目。
+- [x] 4.3 `PigAgentCli` 接线：注册 `PermissionDeniedTool` 哨兵；构造 `ToolPermissionHook`(config supplier + confirmer + writer)，置于 `AgentFactory` hooks 列表**首位**（早于 Logging）。
+- [x] 4.4 `/status` 增加 `Perms` 当前模式展示。（plan 回合结束的 REPL 提示归到 AgentRepl，见 6.x 收尾。）
+- [x] 4.5 `ReplCommandsTest` 8/8 PASS：新增 `/permission mode plan` 派发+持久化、非法 mode 拒绝、`/help` 含 `/permission`；全 cli 编译 BUILD SUCCESS。
 
 ## 5. pig-agent-channel：非交互兜底
 
