@@ -9,13 +9,15 @@
 - [x] 2.2 `PermissionMode` 枚举（`PLAN`/`ASK`/`AUTO`/`BYPASS`）+ `fromString` 容错（null/空/未知回退，不抛）；`PermissionConfig.resolveMode/resolveChannelMode`。
 - [x] 2.3 单测 `PermissionConfigTest`（5/5 PASS）：默认 ask/auto、容错解析、YAML 往返、缺省块回退、未知 mode 不崩。
 
-## 3. pig-agent-core：权限判定 + Hook
+## 3. 权限判定 + Hook（实际落在 `pig-agent-tools`，非 core）
 
-- [ ] 3.1 `ToolRiskClassifier`：工具名 → `ToolRisk`（READ_ONLY/WRITE/EXEC/NETWORK/MCP_ADMIN），内置默认表 + `tool-overrides` 覆盖，未知默认 EXEC（fail-safe）。
-- [ ] 3.2 `PermissionDecision`（ALLOW/DENY/ASK）+ `PermissionPolicy`：给定 mode + risk + allowlist → decision（纯函数，无 I/O，好测）。含 plan 全否决、auto 放行 WRITE/NETWORK、EXEC/MCP_ADMIN 规则、bypass 全放、allowlist 命中即 ALLOW。
-- [ ] 3.3 `ToolPermissionHook implements Hook`：`PreActingEvent` → 取工具名/参数 → classifier → policy → ALLOW 放行 / DENY 否决（step-0 写法）/ ASK 调 confirmer（y/n/a）；`a` 写 allowlist（工具或规范化命令键）经 `ConfigurationManager.updateConfig`。`priority()` 取小值。MCP_ADMIN 不重复弹窗（委托 D-SEC，仅按模式决定是否放行进入）。
-- [ ] 3.4 规范化命令键工具（EXEC 逐命令粒度）：从 `ToolUseBlock.getInput()` 取 command → 规范化键（首 token 或整条，依 1.1 结论）→ allowlist.commands 匹配。
-- [ ] 3.5 单测（CRITICAL，权限矩阵回归，纯函数无 LLM）：四模式 × 五风险类的 decision 全覆盖；allowlist 命中；未知工具按 EXEC；plan 否决可变工具；命令键匹配。
+> 放置调整：core 不依赖 config，为不给 core 增耦合，权限逻辑放 `pig-agent-tools`（已依赖 config+agentscope；`PermissionDeniedTool` 本就是 @Tool）。包 `io.pigagent.tool.permission`。
+
+- [x] 3.1 `ToolRisk` + `ToolRiskClassifier`：默认表 + `tool-overrides` 覆盖（容错），未知→EXEC（fail-safe）。
+- [x] 3.2 `PermissionDecision` + `PermissionPolicy.decide`（纯函数）：4 模式×5 风险矩阵、plan 全否决、auto 放行 WRITE/NETWORK、EXEC/MCP_ADMIN 规则、bypass 全放、allowlist 短路（plan 除外）。
+- [x] 3.3 `ToolPermissionHook implements Hook`（priority=0）：`PreActingEvent` → `PermissionResolver` → 否决则 `setToolUse` 改写为 `PermissionDeniedTool` 哨兵（策略 B）。判定核心抽到 `PermissionResolver`（confirmer/writer 注入，可纯测）；MCP_ADMIN 委托 D-SEC 不重复弹窗；渠道回合走 channel-mode。
+- [x] 3.4 `CommandKeys.of(input)`：EXEC 取 command 首 token 作规范化键 → allowlist.commands 匹配。
+- [x] 3.5 单测 19/19 PASS：`PermissionPolicyTest`(6，矩阵) + `PermissionResolverTest`(9，ASK 三态/allowlist/命令粒度/非交互 fail-closed) + `ToolRiskClassifierTest`(4)。Hook 适配器薄，由 resolver 测试 + spike IT 覆盖。
 
 ## 4. pig-agent-cli：/permission 命令 + 接线
 
