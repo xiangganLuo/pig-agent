@@ -92,6 +92,25 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 `.claude/rules/common/` contains enforced standards (coding style, code review, testing ≥80% coverage, security, git/dev workflow, agent orchestration). Notable points: prefer many small files (<800 lines, functions <50 lines), conventional-commit messages (`feat:`, `fix:`, `refactor:`, etc.), and run security checks before commits touching auth/input/filesystem/external calls.
 
+## AI 开发流水线（`/ls:*`）
+
+一条半自动的 AI 开发流水线，把既有能力串成标准流程（命令定义在 `.claude/commands/ls/`，复用 `/opsx:*` + `.claude/rules/common/`，不重造）。
+
+```
+需求澄清 → 特性分支(feat/bug/docs/opt) → spec 设计 → [编码⇄单测 内环] → 集成测试 外环 → openspec 归档
+```
+
+| 命令 | 阶段 | 门 | 职责 |
+|------|------|-----|------|
+| `/ls:clarify` | 需求澄清 + 建分支 | ⏸ 人工 | AskUserQuestion 问清需求；从 `origin/main` 拉 `<type>/<name>` 分支 |
+| `/ls:spec` | spec 设计 | ⏸ 人工审批 | 委托 `/opsx:propose` 生成 proposal/design/tasks + delta spec，`openspec validate --strict` |
+| `/ls:code` | 编码⇄单测（**内环**） | 自动 | 逐 task TDD：测试→实现→`mvn test`→勾选；组后 `mvn compile` |
+| `/ls:itest` | 集成测试（**外环**） | 自动 | 跑 `*IT` 真模型测试；失败回喂 `/ls:code`；连续 3 轮无进展升级人工 |
+| `/ls:archive` | openspec 归档 | ⏸ 人工确认 | 委托 `/opsx:archive`：同步主 spec + 移到 `changes/archive/` |
+| `/ls:dev` | 总控 | 半自动 | 端到端串联五阶段，尊重上述人工门 |
+
+**两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。规约基座见 `.claude/rules/common/development-workflow.md`。
+
 ## gstack (REQUIRED — global install)
 
 **Before doing ANY work, verify gstack is installed:**
