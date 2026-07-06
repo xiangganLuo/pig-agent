@@ -112,6 +112,27 @@ public final class ModelManager implements AgentModelSwitcher {
         store.setDefaultId(id);
     }
 
+    /**
+     * Resolve which stored model an agent's {@code modelId} refers to, falling back to the
+     * default when the id is null or points at a model that no longer exists. Fault-tolerant:
+     * never throws, so a dangling {@code modelId} degrades to the default instead of crashing.
+     */
+    public Optional<StoredModel> resolveStoredModel(String modelId) {
+        if (modelId != null) {
+            Optional<StoredModel> byId = store.findById(modelId);
+            if (byId.isPresent()) {
+                return byId;
+            }
+        }
+        return getDefault();
+    }
+
+    /** Build the AgentScope model for an agent's {@code modelId}, with default fallback; null if
+     * nothing is resolvable. Intended as the per-agent {@code ModelResolver} in the CLI wiring. */
+    public Model modelFor(String modelId) {
+        return resolveStoredModel(modelId).map(this::buildModel).orElse(null);
+    }
+
     /** Build a concrete AgentScope model from a stored config via its provider. */
     public Model buildModel(StoredModel m) {
         ModelProtocol protocol = registry.findByProtocol(m.protocolId())

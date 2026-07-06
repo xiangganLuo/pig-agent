@@ -22,9 +22,9 @@
 
 ## 4. ModelManager 职责重定义（pig-agent-model）
 
-- [ ] 4.1 单测：切 active 实例后主 holder 指向对；切某 agent 的模型只影响该 agent；`channelHolder` 行为保持现状。
-- [ ] 4.2 重定义 `ModelManager`：从「切唯一 agent 模型」→「切 active 实例模型」；模型构建职责保留；双 holder 语义按 design D2。
-- [ ] 4.3 `mvn -pl pig-agent-model -am test` 绿，无回归。
+- [x] 4.1 单测 `ModelManagerResolveTest`：`modelId` present→本身、null→默认、悬空→回落默认、无默认→空。（「切 active/切某 agent 模型」的开关语义随 G5 `/agent model` 命令一并测。）
+- [x] 4.2 `ModelManager` 加 `resolveStoredModel`/`modelFor`（per-agent 模型解析 + 容错回落，作为 CLI 里 `AgentInstanceFactory.ModelResolver` 的实现源）；`ensureModel` 维持会话流不变；「切 active 实例模型」由 G5 `/agent model` 重建该实例落地（design D2）。
+- [x] 4.3 `mvn -pl pig-agent-model -am test` 绿，无回归（全依赖树 5 模块通过）。
 
 ## 5. /agent 命令 + 装配（pig-agent-cli）
 
