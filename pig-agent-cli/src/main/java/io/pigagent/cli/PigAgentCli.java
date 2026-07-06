@@ -1,6 +1,7 @@
 package io.pigagent.cli;
 
 import io.agentscope.core.session.JsonSession;
+import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.channel.Channel;
 import io.pigagent.channel.ChannelAgentBridge;
@@ -245,7 +246,11 @@ public final class PigAgentCli {
         agentRegistry.register(new AgentInstance("default", defaultSpec, agentHolder.get()));
 
         AgentInstanceFactory agentInstanceFactory = new AgentInstanceFactory(
-                spec -> modelManager.modelFor(spec.modelId()),
+                spec -> {
+                    Model baseModel = modelManager.modelFor(spec.modelId());
+                    return interactiveRetry == null ? baseModel
+                            : new io.pigagent.core.retry.RetryingModel(baseModel, interactiveRetry);
+                },
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
                 spec -> List.of(
                         new ToolPermissionHook(() -> configManager.getConfig().getPermissions(),
