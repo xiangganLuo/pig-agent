@@ -20,6 +20,8 @@ import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
+import io.pigagent.core.retry.RetryPolicy;
+import io.pigagent.core.retry.TransientErrorClassifier;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
 import io.pigagent.mcp.JsonMcpStore;
@@ -194,10 +196,41 @@ public final class PigAgentCli {
         ToolPermissionHook permissionHook = new ToolPermissionHook(
                 () -> configManager.getConfig().getPermissions(), permissionConfirmer, allowlistWriter);
 
+        // Model retry: auto-retry transient upstream failures (5xx/timeout/network) per model.retry.
+        // Interactive retries print to the REPL terminal; channel retries log. The connectivity probe
+        // (ModelManager.test) builds its agent without a policy, so it stays fast-fail.
+        PigAgentConfig.RetryConfig rc = config.getModel().getRetry();
+        TransientErrorClassifier retryClassifier = new TransientErrorClassifier();
+        RetryPolicy interactiveRetry = new RetryPolicy(
+                rc.isEnabled(), rc.getMaxRetries(),
+                java.time.Duration.ofSeconds(rc.getPerAttemptTimeoutSeconds()),
+                java.time.Duration.ofMillis(rc.getFirstBackoffMs()),
+                java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
+                retryClassifier,
+                (attempt, max, cause, backoff) -> {
+                    String line = Ansi.warn(String.format("[retry %d/%d] %s, backing off %dms…",
+                            attempt, max, retryCauseSummary(cause), backoff.toMillis()));
+                    LineReader r = readerRef.get();
+                    if (r != null) {
+                        r.getTerminal().writer().println(line);
+                        r.getTerminal().writer().flush();
+                    } else {
+                        System.err.println(line);
+                    }
+                });
+        RetryPolicy channelRetry = new RetryPolicy(
+                rc.isEnabled(), rc.getMaxRetries(),
+                java.time.Duration.ofSeconds(rc.getPerAttemptTimeoutSeconds()),
+                java.time.Duration.ofMillis(rc.getFirstBackoffMs()),
+                java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
+                retryClassifier,
+                (attempt, max, cause, backoff) -> System.err.println(String.format(
+                        "[channel retry %d/%d] %s", attempt, max, retryCauseSummary(cause))));
+
         // Build the initial agent through a factory so the model can be swapped at runtime.
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory);
+                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, interactiveRetry);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
@@ -238,7 +271,7 @@ public final class PigAgentCli {
                 () -> configManager.getConfig().getPermissions(), null, null, true);
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory);
+                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, channelRetry);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
@@ -274,6 +307,19 @@ public final class PigAgentCli {
         new AgentRepl(agentHolder, agentRegistry, agentRepository, agentInstanceFactory,
                 configManager, registry, modelManager, compressionService,
                 mcpManager, bridges, sessionManager, workspace.getRootPath(), readerRef).run();
+    }
+
+    /** One-line, length-bounded summary of a retry cause for the visible retry notice. */
+    private static String retryCauseSummary(Throwable cause) {
+        if (cause == null) {
+            return "transient error";
+        }
+        String msg = cause.getMessage();
+        if (msg == null || msg.isBlank()) {
+            return cause.getClass().getSimpleName();
+        }
+        String oneLine = msg.replaceAll("\\s+", " ").strip();
+        return oneLine.length() > 80 ? oneLine.substring(0, 80) + "…" : oneLine;
     }
 
     private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder,
