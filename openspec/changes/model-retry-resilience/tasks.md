@@ -1,11 +1,11 @@
 ## 1. 瞬时错误分类 + 重试策略（pig-agent-core，先做核心逻辑）
 
-- [ ] 1.1 单测 `TransientErrorClassifierTest`：502/503/5xx → 可重试；`TimeoutException`/`IOException`/网络类 → 可重试；401/403/400/4xx → 不可重试；未知 → 保守判不可重试。
-- [ ] 1.2 实现 `io.pigagent.core.retry.TransientErrorClassifier`（基于状态码文本 + 异常类型）令 1.1 绿。
-- [ ] 1.3 单测 `RetryPolicyTest`：用 `Flux.error` 构造错误流，断言——可重试错误按 `Retry.backoff(maxRetries, first).maxBackoff(cap)` 重试到上限后抛出；不可重试错误立即透传不退避；重试次数不超上限。
-- [ ] 1.4 实现 `RetryPolicy`（封装 `retryWhen` + 分类 `filter` + 每次尝试 `timeout`）令 1.3 绿。
-- [ ] 1.5 单测 `RetryPolicyTest`（防重复输出）：早期失败（未发内容）→ 重试；已发内容后失败 → 不重试原样抛出（pre-emission 守卫）。
-- [ ] 1.6 `mvn -pl pig-agent-core -am test` 绿。
+- [x] 1.1 单测 `TransientErrorClassifierTest`：502/503/5xx → 可重试；`TimeoutException`/`IOException`/网络类 → 可重试；401/403/400/4xx → 不可重试；未知 → 保守判不可重试。（7/7）
+- [x] 1.2 实现 `io.pigagent.core.retry.TransientErrorClassifier`（状态码文本 + 异常类型，cause 链遍历，4xx 优先）令 1.1 绿。
+- [x] 1.3 单测 `RetryPolicyTest`：可重试错误重试到上限后抛出（subs=1+max）；不可重试立即透传；disabled 旁路；成功透传；listener 每次回调。（6/6）
+- [x] 1.4 实现 `RetryPolicy`（`retryWhen(Retry.backoff.maxBackoff)` + 分类 `filter` + 每次尝试 `timeout` + `enabled` 旁路 + RetryListener）令 1.3 绿。
+- [x] 1.5 单测 `RetryPolicyTest` pre-emission 守卫：早期失败重试、已发内容后失败不重试原样抛出（含 `containsExactly("partial")` 防重复）。
+- [x] 1.6 `mvn -pl pig-agent-core -am test` 绿（13/13 新测 + 无回归）。
 
 ## 2. 配置块 model.retry（pig-agent-config）
 
