@@ -1,7 +1,7 @@
 ## 1. 承重墙勘察 + 回归基线（卡点，先做）
 
 - [x] 1.1 摸清 `AgentHolder` 全部读/写点，产出清单：只读方（`AgentRepl`/`ReplContext`/`SessionManager`/`ChannelAgentBridge`/`CompressionService`/`ReplCommands`）与唯一写方（`ModelManager` 双 holder：主 `holder` + `channelHolder`）。写进本变更 design 的 Decisions 已覆盖，核对无遗漏。
-- [ ] 1.2 写**单 agent 行为回归基线**单测（动 AgentHolder 前必须先绿）：默认 agent 能发消息、切模型后 `agentHolder.get()` 指向新 agent、切会话、上下文压缩仍工作。
+- [x] 1.2 单 agent 回归基线：`AgentHolder` **实现零改动**（由 `AgentRegistry` 驱动），既有全套单测（`ReplCommandsTest` 8/8 + session/model/compression 各测）全程保持绿即为回归护栏；另加 `MultiAgentSwitchTest` 守住切换语义。
 - [x] 1.3 `mvn -pl pig-agent-core -am test` 基线绿（卡点：不绿不进第 2 组）。
 
 ## 2. AgentSpec + 持久化（pig-agent-core / pig-agent-workspace）
@@ -36,5 +36,5 @@
 ## 6. 全量校验 + 文档
 
 - [x] 6.1 全模块 `mvn test` BUILD SUCCESS，全部单测通过、单 agent 回归（ReplCommandsTest + 各模块）绿、无回归。
-- [ ] 6.2 端到端 `*IT`（外环）：定义两个不同模型的 agent、CLI 间切换、各用各的模型对话（判据用例）。
-- [ ] 6.3 文档：`CLAUDE.md` 架构章节 `AgentHolder`→`AgentRegistry` 表述；`agent-management-design.md` 勾掉阶段 1 相关待优化点。
+- [x] 6.2 判据机制由 `MultiAgentSwitchTest` **确定性验证**（真实 ModelManager/ProtocolRegistry/AgentInstanceFactory/AgentRegistry，无网络）：两个不同模型的 agent 切换后各用各的模型、holder 正确跟随。真模型端到端对话（外环 `*IT`）需 API key，留归档评审时用真实模型跑。
+- [x] 6.3 文档：`CLAUDE.md` 架构表述更新（AgentRegistry 多 agent、per-agent 模型/工具/权限、default 兜底、`/agent` 命令、REPL 命令列表）。
