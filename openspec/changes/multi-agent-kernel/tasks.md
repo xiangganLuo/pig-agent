@@ -1,13 +1,40 @@
-﻿## 1. 鎵块噸澧欏嫎瀵?+ 鍥炲綊鍩虹嚎锛堝崱鐐癸紝鍏堝仛锛?
-- [x] 1.1 鎽告竻 `AgentHolder` 鍏ㄩ儴璇?鍐欑偣锛屼骇鍑烘竻鍗曪細鍙鏂癸紙`AgentRepl`/`ReplContext`/`SessionManager`/`ChannelAgentBridge`/`CompressionService`/`ReplCommands`锛変笌鍞竴鍐欐柟锛坄ModelManager` 鍙?holder锛氫富 `holder` + `channelHolder`锛夈€傚啓杩涙湰鍙樻洿 design 鐨?Decisions 宸茶鐩栵紝鏍稿鏃犻仐婕忋€?- [ ] 1.2 鍐?*鍗?agent 琛屼负鍥炲綊鍩虹嚎**鍗曟祴锛堝姩 AgentHolder 鍓嶅繀椤诲厛缁匡級锛氶粯璁?agent 鑳藉彂娑堟伅銆佸垏妯″瀷鍚?`agentHolder.get()` 鎸囧悜鏂?agent銆佸垏浼氳瘽銆佷笂涓嬫枃鍘嬬缉浠嶅伐浣溿€?- [x] 1.3 `mvn -pl pig-agent-core -am test` 鍩虹嚎缁匡紙鍗＄偣锛氫笉缁夸笉杩涚 2 缁勶級銆?
-## 2. AgentSpec + 鎸佷箙鍖栵紙pig-agent-core / pig-agent-workspace锛?
-- [x] 2.1 鍗曟祴 `AgentSpecTest`锛歚withXxx` 涓嶆敼鍘熷璞★紱缂虹渷瀛楁榛樿鍊硷紙绌?toolNames=鍏ㄩ噺銆佺┖ modelId=榛樿妯″瀷锛夈€?- [x] 2.2 瀹炵幇 `io.pigagent.core.agent.AgentSpec`锛坮ecord锛屽瓧娈?id/name/sysPrompt/toolNames/permissionMode/modelId/maxIters + `withXxx`锛変护 2.1 缁裤€?- [x] 2.3 鍗曟祴 `AgentSpecRepositoryTest`锛歸rite鈫抮ead 瀛楁绛夊€煎線杩旓紱鍧忔枃浠惰烦杩?澶囦唤涓嶅穿鍒椾妇銆?- [x] 2.4 瀹炵幇 `AgentSpecRepository`锛坄workspace/agents/{id}.md` = YAML front-matter + 姝ｆ枃锛汮ackson YAML 搴忓垪鍖栵紱瀹归敊楠ㄦ灦浠?`FileSystemTaskRepository` 浣?*閲嶅啓 parse 涓嶄涪瀛楁**锛変护 2.3 缁匡紱`WorkspaceManager` 鍔?`agents/` 鐩綍銆?- [x] 2.5 `mvn -pl pig-agent-core -am test` 缁裤€?
-## 3. AgentInstance + AgentRegistry + per-agent 鏋勫缓锛坧ig-agent-core锛?
-- [ ] 3.1 鍗曟祴 `AgentRegistryTest`锛氭敞鍐?鍒囨崲 active锛沗AgentHolder` 瑙嗗浘闅?active 璧帮紱鏈煡 agentId 澶勭悊銆?- [ ] 3.2 瀹炵幇 `AgentInstance`锛坅gentId + AgentSpec + PigAgent + 鐢熷懡鍛ㄦ湡锛変笌 `AgentRegistry`锛坄Map<agentId, AgentInstance>` + active锛変护 3.1 缁裤€?- [ ] 3.3 鍗曟祴 `AgentInstanceBuilderTest`锛氭寜 `toolNames` 鏂板缓鍙楅檺 Toolkit锛堟湭鐭ュ悕蹇界暐锛夛紱hook 璇?`spec.permissionMode`锛涚嫭绔?`InMemoryMemory`锛沗modelId` 绌?鎮┖鍥炶惤榛樿銆?- [ ] 3.4 瀹炵幇 per-agent 鏋勫缓璺緞锛堜豢 `AgentFactory` 浣嗘瘡 agent 鏂板缓 Toolkit/hook/memory锛沗modelId` 鈫?`ModelStore`/`ProtocolRegistry` 寤?`Model`锛屽閿欏洖钀斤級浠?3.3 缁裤€?- [ ] 3.5 鏀?`AgentHolder` 涓?active 瀹炰緥瑙嗗浘锛堜繚鎸?`get()` 璇箟锛夛紱`mvn -pl pig-agent-core -am test` 缁匡紙鍚?1.2 鍥炲綊鍩虹嚎锛夈€?
-## 4. ModelManager 鑱岃矗閲嶅畾涔夛紙pig-agent-model锛?
-- [ ] 4.1 鍗曟祴锛氬垏 active 瀹炰緥鍚庝富 holder 鎸囧悜瀵癸紱鍒囨煇 agent 鐨勬ā鍨嬪彧褰卞搷璇?agent锛沗channelHolder` 琛屼负淇濇寔鐜扮姸銆?- [ ] 4.2 閲嶅畾涔?`ModelManager`锛氫粠銆屽垏鍞竴 agent 妯″瀷銆嶁啋銆屽垏 active 瀹炰緥妯″瀷銆嶏紱妯″瀷鏋勫缓鑱岃矗淇濈暀锛涘弻 holder 璇箟鎸?design D2銆?- [ ] 4.3 `mvn -pl pig-agent-model -am test` 缁匡紝鏃犲洖褰掋€?
-## 5. /agent 鍛戒护 + 瑁呴厤锛坧ig-agent-cli锛?
-- [ ] 5.1 鍗曟祴 `AgentCommandTest`锛堟垨 ReplCommands 灞傦級锛歚/agent list` 鍒楀嚭銆乣/agent use <id>` 鍒囨崲銆乣/agent new` 寤恒€乣/agent model <id> <modelId>` 鏀规ā鍨嬨€?- [ ] 5.2 瀹炵幇 `/agent list|use|new|model` 鍛戒护浠?5.1 缁匡紱`ReplContext` 鏆撮湶 `AgentRegistry`锛沗/help` 澧炶ˉ銆?- [ ] 5.3 `PigAgentCli` 瑁呴厤锛氬缓 `AgentRegistry`锛屽惎鍔ㄤ粠 `workspace/agents/` 杞藉叆锛?*绌虹洰褰曞厹搴曞缓榛樿 active agent**锛堢瓑浠蜂粖澶╁崟 agent锛夛紱`ToolPermissionHook` 鏀寔浠?spec 璇?permissionMode銆?- [ ] 5.4 `ToolPermissionHook` 鏀寔 per-agent 鏉冮檺妗ｏ紙鏋勯€犳椂鎺ュ彈 mode 鏉ユ簮锛岄粯璁や粛璇诲叏灞€ config 淇濇寔鍏煎锛夛紱鐩稿叧鍗曟祴銆?
-## 6. 鍏ㄩ噺鏍￠獙 + 鏂囨。
+## 1. 承重墙勘察 + 回归基线（卡点，先做）
 
-- [ ] 6.1 鍏ㄦā鍧?`mvn test` BUILD SUCCESS锛屽叏閮ㄥ崟娴嬮€氳繃銆佸崟 agent 鍥炲綊鍩虹嚎缁裤€佹棤鍥炲綊銆?- [ ] 6.2 绔埌绔?`*IT`锛堝鐜級锛氬畾涔変袱涓笉鍚屾ā鍨嬬殑 agent銆丆LI 闂村垏鎹€佸悇鐢ㄥ悇鐨勬ā鍨嬪璇濓紙鍒ゆ嵁鐢ㄤ緥锛夈€?- [ ] 6.3 鏂囨。锛歚CLAUDE.md` 鏋舵瀯绔犺妭 `AgentHolder`鈫抈AgentRegistry` 琛ㄨ堪锛沗agent-management-design.md` 鍕炬帀闃舵 1 鐩稿叧寰呬紭鍖栫偣銆?
+- [x] 1.1 摸清 `AgentHolder` 全部读/写点，产出清单：只读方（`AgentRepl`/`ReplContext`/`SessionManager`/`ChannelAgentBridge`/`CompressionService`/`ReplCommands`）与唯一写方（`ModelManager` 双 holder：主 `holder` + `channelHolder`）。写进本变更 design 的 Decisions 已覆盖，核对无遗漏。
+- [ ] 1.2 写**单 agent 行为回归基线**单测（动 AgentHolder 前必须先绿）：默认 agent 能发消息、切模型后 `agentHolder.get()` 指向新 agent、切会话、上下文压缩仍工作。
+- [x] 1.3 `mvn -pl pig-agent-core -am test` 基线绿（卡点：不绿不进第 2 组）。
+
+## 2. AgentSpec + 持久化（pig-agent-core / pig-agent-workspace）
+
+- [x] 2.1 单测 `AgentSpecTest`：`withXxx` 不改原对象；缺省字段默认值（空 toolNames=全量、空 modelId=默认模型）。
+- [x] 2.2 实现 `io.pigagent.core.agent.AgentSpec`（record，字段 id/name/sysPrompt/toolNames/permissionMode/modelId/maxIters + `withXxx`）令 2.1 绿。
+- [x] 2.3 单测 `AgentSpecRepositoryTest`：write→read 字段等值往返；坏文件跳过/备份不崩列举。
+- [x] 2.4 实现 `AgentSpecRepository`（`workspace/agents/{id}.md` = YAML front-matter + 正文；Jackson YAML 序列化；容错骨架仿 `FileSystemTaskRepository` 但**重写 parse 不丢字段**）令 2.3 绿；`WorkspaceManager` 加 `agents/` 目录。
+- [x] 2.5 `mvn -pl pig-agent-core -am test` 绿。
+
+## 3. AgentInstance + AgentRegistry + per-agent 构建（pig-agent-core）
+
+- [ ] 3.1 单测 `AgentRegistryTest`：注册/切换 active；`AgentHolder` 视图随 active 走；未知 agentId 处理。
+- [ ] 3.2 实现 `AgentInstance`（agentId + AgentSpec + PigAgent + 生命周期）与 `AgentRegistry`（`Map<agentId, AgentInstance>` + active）令 3.1 绿。
+- [ ] 3.3 单测 `AgentInstanceBuilderTest`：按 `toolNames` 新建受限 Toolkit（未知名忽略）；hook 读 `spec.permissionMode`；独立 `InMemoryMemory`；`modelId` 空/悬空回落默认。
+- [ ] 3.4 实现 per-agent 构建路径（仿 `AgentFactory` 但每 agent 新建 Toolkit/hook/memory；`modelId` → `ModelStore`/`ProtocolRegistry` 建 `Model`，容错回落）令 3.3 绿。
+- [ ] 3.5 改 `AgentHolder` 为 active 实例视图（保持 `get()` 语义）；`mvn -pl pig-agent-core -am test` 绿（含 1.2 回归基线）。
+
+## 4. ModelManager 职责重定义（pig-agent-model）
+
+- [ ] 4.1 单测：切 active 实例后主 holder 指向对；切某 agent 的模型只影响该 agent；`channelHolder` 行为保持现状。
+- [ ] 4.2 重定义 `ModelManager`：从「切唯一 agent 模型」→「切 active 实例模型」；模型构建职责保留；双 holder 语义按 design D2。
+- [ ] 4.3 `mvn -pl pig-agent-model -am test` 绿，无回归。
+
+## 5. /agent 命令 + 装配（pig-agent-cli）
+
+- [ ] 5.1 单测 `AgentCommandTest`（或 ReplCommands 层）：`/agent list` 列出、`/agent use <id>` 切换、`/agent new` 建、`/agent model <id> <modelId>` 改模型。
+- [ ] 5.2 实现 `/agent list|use|new|model` 命令令 5.1 绿；`ReplContext` 暴露 `AgentRegistry`；`/help` 增补。
+- [ ] 5.3 `PigAgentCli` 装配：建 `AgentRegistry`，启动从 `workspace/agents/` 载入；**空目录兜底建默认 active agent**（等价今天单 agent）；`ToolPermissionHook` 支持从 spec 读 permissionMode。
+- [ ] 5.4 `ToolPermissionHook` 支持 per-agent 权限档（构造时接受 mode 来源，默认仍读全局 config 保持兼容）；相关单测。
+
+## 6. 全量校验 + 文档
+
+- [ ] 6.1 全模块 `mvn test` BUILD SUCCESS，全部单测通过、单 agent 回归基线绿、无回归。
+- [ ] 6.2 端到端 `*IT`（外环）：定义两个不同模型的 agent、CLI 间切换、各用各的模型对话（判据用例）。
+- [ ] 6.3 文档：`CLAUDE.md` 架构章节 `AgentHolder`→`AgentRegistry` 表述；`agent-management-design.md` 勾掉阶段 1 相关待优化点。
