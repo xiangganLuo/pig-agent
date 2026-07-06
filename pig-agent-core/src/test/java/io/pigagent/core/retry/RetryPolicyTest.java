@@ -99,6 +99,40 @@ class RetryPolicyTest {
     }
 
     @Test
+    void timeoutDisabled_slowSuccess_isNotRetriedNorInterrupted() {
+        // Regression: a slow-but-healthy stream (large model, tools) must NOT be timed out and
+        // retried. With per-attempt timeout disabled (0), the slow success passes through with a
+        // single subscription — no false timeout, no re-subscription into a running agent.
+        AtomicInteger subs = new AtomicInteger();
+        Flux<String> slow = Flux.defer(() -> {
+            subs.incrementAndGet();
+            return Flux.just("ok").delayElements(Duration.ofMillis(50));
+        });
+        RetryPolicy noTimeout = new RetryPolicy(true, 5, Duration.ZERO, FAST, FAST,
+                new TransientErrorClassifier(), null);
+
+        List<String> out = noTimeout.apply(slow).collectList().block();
+
+        assertThat(out).containsExactly("ok");
+        assertThat(subs.get()).isEqualTo(1);
+    }
+
+    @Test
+    void errorRetryStillWorks_whenTimeoutDisabled() {
+        // Disabling the timeout must not disable transient-error retry (the real 502 use case).
+        AtomicInteger subs = new AtomicInteger();
+        Flux<String> source = Flux.defer(() -> {
+            subs.incrementAndGet();
+            return Flux.error(new RuntimeException("502 upstream_error"));
+        });
+        RetryPolicy noTimeout = new RetryPolicy(true, 3, Duration.ZERO, FAST, FAST,
+                new TransientErrorClassifier(), null);
+
+        assertThatThrownBy(() -> noTimeout.apply(source).blockLast()).isInstanceOf(Exception.class);
+        assertThat(subs.get()).isEqualTo(4); // 1 + 3 retries, timeout off but error-retry on
+    }
+
+    @Test
     void retryListener_invokedPerRetry() {
         List<Long> retryLog = new ArrayList<>();
         Flux<String> source = Flux.error(new RuntimeException("503 unavailable"));

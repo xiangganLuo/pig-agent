@@ -24,13 +24,17 @@
 - **WHEN** 模型调用返回 400（请求非法）
 - **THEN** 系统不重试，立即报告错误
 
-### Requirement: 每次尝试超时
+### Requirement: 每次尝试超时（可选，默认关闭）
 
-系统 SHALL 对每一次尝试施加 `per-attempt-timeout-seconds`（默认 10s）超时；在流式路径上，一次尝试超过该时限 MUST 判为超时（归入可重试的瞬时错误）。
+重试 SHALL 由**真实瞬时错误信号**（5xx/网络/IO）驱动，而非客户端计时。客户端每次尝试超时 SHALL 为**可选、默认关闭**（`per-attempt-timeout-seconds: 0`）：因当前 `ReActAgent` 不可中断，客户端超时无法安全落地——它会误伤慢但健康的大模型响应，且超时取消后底层 agent 仍在运行，重试重订阅会撞进「Agent is still running」。真正的硬超时留待可中断运行的 spike。
 
-#### Scenario: 单次尝试超时触发重试
-- **WHEN** 流式调用一次尝试超过 10s 未产出
-- **THEN** 该次判为超时失败，触发下一次重试（若未达上限）
+#### Scenario: 慢但健康的响应不被误重试
+- **WHEN** 一次流式响应因大上下文/工具而首个信号迟于若干秒到达，但最终正常产出
+- **THEN** 系统 MUST NOT 因超时而重试或中断它，正常返回该响应
+
+#### Scenario: 关闭超时不影响错误重试
+- **WHEN** `per-attempt-timeout-seconds` 为 0（默认）且模型返回 502（瞬时）
+- **THEN** 系统仍按瞬时错误重试
 
 ### Requirement: 防止重试导致重复输出
 

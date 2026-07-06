@@ -328,11 +328,11 @@ mvn exec:java -s  -pl pig-agent-cli
 model:
   provider: anthropic
   model-name: mimo-v2.5-pro
-  # 模型调用重试（瞬时错误自愈）——缺省即启用，可全部省略
+  # 模型调用重试（瞬时错误 5xx/网络 自愈）——缺省即启用，可全部省略
   retry:
     enabled: true                    # false 完全关闭（恢复旧行为）
     max-retries: 10                  # 最多重试次数
-    per-attempt-timeout-seconds: 10  # 每次尝试超时
+    per-attempt-timeout-seconds: 0   # 0=关闭（默认）。客户端超时与不可中断 agent 不兼容，会误伤慢模型，勿轻易开启
     first-backoff-ms: 500            # 首次退避
     max-backoff-ms: 8000             # 退避封顶（指数退避）
 

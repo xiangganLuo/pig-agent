@@ -56,7 +56,14 @@ public final class RetryPolicy {
         }
         AtomicBoolean emitted = new AtomicBoolean(false);
         Flux<T> attempt = source.doOnNext(x -> emitted.set(true));
-        if (perAttemptTimeout != null) {
+        // Per-attempt timeout is opt-in (> 0). It is DISABLED by default because a client-side
+        // timeout here is unsafe with the current non-interruptible ReActAgent: Flux.timeout only
+        // cancels the downstream subscription while the underlying agent keeps running, so a retry
+        // re-subscribes into a still-running agent ("Agent is still running"), and a slow-but-
+        // healthy model (large context, tools) legitimately exceeds short timeouts. A true
+        // per-attempt hard timeout waits on the interruptible-run spike. Retry is driven by real
+        // transient error signals (5xx/network), which arrive only after the agent has terminated.
+        if (perAttemptTimeout != null && !perAttemptTimeout.isZero() && !perAttemptTimeout.isNegative()) {
             attempt = attempt.timeout(perAttemptTimeout);
         }
         if (maxRetries <= 0) {

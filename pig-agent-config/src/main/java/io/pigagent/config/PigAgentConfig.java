@@ -47,7 +47,11 @@ public final class PigAgentConfig {
     public static final class RetryConfig {
         @JsonProperty("enabled") private boolean enabled = true;
         @JsonProperty("max-retries") private int maxRetries = 10;
-        @JsonProperty("per-attempt-timeout-seconds") private int perAttemptTimeoutSeconds = 10;
+        // 0 = disabled (default). A client-side per-attempt timeout is unsafe with the current
+        // non-interruptible ReActAgent (it would falsely trip on slow-but-healthy models and
+        // re-subscribe into a still-running agent). Kept as an opt-in knob pending the
+        // interruptible-run spike; leave at 0 unless you know what you're doing.
+        @JsonProperty("per-attempt-timeout-seconds") private int perAttemptTimeoutSeconds = 0;
         @JsonProperty("first-backoff-ms") private long firstBackoffMs = 500;
         @JsonProperty("max-backoff-ms") private long maxBackoffMs = 8000;
         public boolean isEnabled() { return enabled; }

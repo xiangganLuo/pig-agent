@@ -18,7 +18,7 @@ class RetryConfigTest {
         // Assert — enabled with the agreed defaults
         assertThat(retry.isEnabled()).isTrue();
         assertThat(retry.getMaxRetries()).isEqualTo(10);
-        assertThat(retry.getPerAttemptTimeoutSeconds()).isEqualTo(10);
+        assertThat(retry.getPerAttemptTimeoutSeconds()).isEqualTo(0); // disabled by default (unsafe w/ non-interruptible agent)
         assertThat(retry.getFirstBackoffMs()).isEqualTo(500);
         assertThat(retry.getMaxBackoffMs()).isEqualTo(8000);
     }
