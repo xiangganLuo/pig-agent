@@ -98,6 +98,8 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 ## AI 开发流水线（`/ls:*`）
 
+> **强制规约**：实现任何需求/特性/修复 MUST 走此流水线，不得跳阶段/越人工门/自行拍板拆分。硬性规则见 [`.claude/rules/common/ls-pipeline.md`](.claude/rules/common/ls-pipeline.md)。
+
 一条半自动的 AI 开发流水线，把既有能力串成标准流程（命令定义在 `.claude/commands/ls/`，复用 `/opsx:*` + `.claude/rules/common/`，不重造）。
 
 ```
@@ -114,7 +116,7 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 | `/ls:status` | 进度汇报 | 只读 | 跨 澄清/设计/规格/任务 维度统计所有活跃 spec（多 spec 并行视图 + 卡点） |
 | `/ls:dev` | 总控 | 半自动 | 端到端串联五阶段，尊重上述人工门 |
 
-**两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**多 spec**：大需求在 `/ls:clarify` 拆成多个可独立上线的 spec，各自 `feat/<name>` 分支并行开发，`/ls:status` 汇总进度。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。完整指南 + 实战复盘见 `docs/ai-dev-pipeline.md`；规约基座见 `.claude/rules/common/development-workflow.md`。
+**两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**多 spec**：大需求在 `/ls:clarify` 拆成多个可独立上线的 spec（拆分须人工审），各自 `feat/<name>` 分支——**依赖允许时并行，否则按依赖顺序推进**（后者在前者归档后才细化 tasks），`/ls:status` 汇总进度。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。完整指南 + 实战复盘见 `docs/ai-dev-pipeline.md`；规约基座见 `.claude/rules/common/development-workflow.md`。
 
 ## Skills
 
