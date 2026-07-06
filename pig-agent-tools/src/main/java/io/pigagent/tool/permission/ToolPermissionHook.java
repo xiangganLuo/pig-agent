@@ -20,20 +20,27 @@ import java.util.function.Supplier;
  */
 public final class ToolPermissionHook implements Hook {
 
+    /** Notified when a tool call is vetoed, so unattended runs can record it for「等你决定」. */
+    @FunctionalInterface
+    public interface DenialListener {
+        void onDenied(String toolName, String detail);
+    }
+
     private final Supplier<PermissionConfig> configSupplier;
     private final PermissionConfirmer confirmer;
     private final AllowlistWriter writer;
     private final boolean channel;
     private final Supplier<PermissionMode> modeOverride;
+    private final DenialListener denialListener;
 
     public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
                               PermissionConfirmer confirmer, AllowlistWriter writer) {
-        this(configSupplier, confirmer, writer, false, null);
+        this(configSupplier, confirmer, writer, false, null, null);
     }
 
     public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
                               PermissionConfirmer confirmer, AllowlistWriter writer, boolean channel) {
-        this(configSupplier, confirmer, writer, channel, null);
+        this(configSupplier, confirmer, writer, channel, null, null);
     }
 
     /**
@@ -44,11 +51,19 @@ public final class ToolPermissionHook implements Hook {
     public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
                               PermissionConfirmer confirmer, AllowlistWriter writer, boolean channel,
                               Supplier<PermissionMode> modeOverride) {
+        this(configSupplier, confirmer, writer, channel, modeOverride, null);
+    }
+
+    /** Unattended variant: {@code denialListener} is notified with (toolName, detail) on each veto. */
+    public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
+                              PermissionConfirmer confirmer, AllowlistWriter writer, boolean channel,
+                              Supplier<PermissionMode> modeOverride, DenialListener denialListener) {
         this.configSupplier = configSupplier;
         this.confirmer = confirmer;
         this.writer = writer;
         this.channel = channel;
         this.modeOverride = modeOverride;
+        this.denialListener = denialListener;
     }
 
     @Override
@@ -68,6 +83,9 @@ public final class ToolPermissionHook implements Hook {
                 boolean allow = PermissionResolver.resolve(
                         cfg, mode, tu.getName(), tu.getInput(), confirmer, writer);
                 if (!allow) {
+                    if (denialListener != null) {
+                        denialListener.onDenied(tu.getName(), String.valueOf(tu.getInput()));
+                    }
                     pre.setToolUse(ToolUseBlock.builder()
                             .id(tu.getId())
                             .name(PermissionDeniedTool.TOOL_NAME)
