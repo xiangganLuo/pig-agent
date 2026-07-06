@@ -107,7 +107,8 @@ public final class AgentSpecRepository {
             throw new IOException("Agent file missing id/name: " + file);
         }
         return new AgentSpec(fm.id, fm.name, parts[2], fm.toolNames,
-                fm.permissionMode, fm.modelId, fm.maxIters);
+                fm.permissionMode, fm.modelId, fm.maxIters,
+                fm.mandate, fm.schedule, fm.commandAllowlist, fm.timeoutSeconds, fm.lastRunAtEpochMs);
     }
 
     private void backup(Path file) {
@@ -127,6 +128,12 @@ public final class AgentSpecRepository {
         public String permissionMode;
         public String modelId;
         public int maxIters;
+        // autonomous (phase 2)
+        public String mandate;
+        public String schedule;
+        public List<String> commandAllowlist;
+        public int timeoutSeconds;
+        public long lastRunAtEpochMs;
 
         static FrontMatter from(AgentSpec spec) {
             FrontMatter fm = new FrontMatter();
@@ -136,6 +143,11 @@ public final class AgentSpecRepository {
             fm.permissionMode = spec.permissionMode();
             fm.modelId = spec.modelId();
             fm.maxIters = spec.maxIters();
+            fm.mandate = spec.mandate();
+            fm.schedule = spec.schedule();
+            fm.commandAllowlist = spec.commandAllowlist();
+            fm.timeoutSeconds = spec.timeoutSeconds();
+            fm.lastRunAtEpochMs = spec.lastRunAtEpochMs();
             return fm;
         }
     }
