@@ -12,6 +12,7 @@ public final class PigAgentConfig {
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
+    @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -23,6 +24,7 @@ public final class PigAgentConfig {
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
     public PermissionConfig getPermissions() { return permissions; }
+    public WebConfig getWeb() { return web; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -126,6 +128,22 @@ public final class PigAgentConfig {
             public java.util.List<String> getCommands() { return commands; }
             public void setCommands(java.util.List<String> c) { this.commands = c; }
         }
+    }
+
+    /**
+     * 本地 Web 控制台（{@code web-visualization}）。默认关闭；启用时嵌入式 HTTP server 随
+     * CLI 进程启停，MUST 仅绑本机（{@code host} 默认 127.0.0.1）——个人电脑、单用户、无 DB 的安全底线。
+     */
+    public static final class WebConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("host") private String host = "127.0.0.1";
+        @JsonProperty("port") private int port = 7317;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getHost() { return host; }
+        public void setHost(String h) { this.host = h; }
+        public int getPort() { return port; }
+        public void setPort(int p) { this.port = p; }
     }
 
     public static final class McpConfig {

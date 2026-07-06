@@ -193,6 +193,21 @@ ReActAgent 推理循环:
 | `DiscordChannel`     | Discord 通道（存根）                                 |
 | `ChannelRegistry`    | 通道注册中心                                         |
 
+### pig-agent-web — 本地 Web 控制台
+
+嵌入式本地 Web 控制台，作为 `AgentKernel` 门面的又一个 adapter（与 CLI 并列，零内核逻辑）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE，随 CLI 进程启停。
+
+| 类                     | 职责                                                        |
+| ---------------------- | ----------------------------------------------------------- |
+| `WebConsole`           | 嵌入式 HTTP server：绑本机、注册路由、`start`/`stop`        |
+| `AgentApiHandler`      | REST `/api/agents…` 直委托门面（list/get/create/use/run…）  |
+| `EventStreamHandler`   | SSE `/api/events` 订阅 `subscribeEvents()`，推 `KernelEvent` |
+| `StaticHandler`        | 静态前端 `/`（`resources/web/`，纯 HTML/JS，随 jar 打包）    |
+
+**启用与访问**：默认关闭。在 `application.yaml` 加 `web.enabled: true`（可选 `web.host`/`web.port`，默认 `127.0.0.1:7317`），启动后访问 `http://127.0.0.1:7317`。
+
+**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。切勿把 `web.host` 改成对外地址。
+
 ### pig-agent-onboarding — 引导向导
 
 

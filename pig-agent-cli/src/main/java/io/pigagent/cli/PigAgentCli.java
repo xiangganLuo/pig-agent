@@ -60,10 +60,12 @@ import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
+import io.pigagent.web.WebConsole;
 import io.pigagent.workspace.WorkspaceManager;
 
 import org.jline.reader.LineReader;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -311,6 +313,25 @@ public final class PigAgentCli {
             }
         }
 
+        // Optional local Web console: another AgentKernel adapter (REST + SSE), sharing the SAME
+        // kernel as the CLI. Loopback-only, single-user, no DB (WebConfig defaults off). Started here
+        // and stopped in the shutdown hook below.
+        WebConsole webConsole = null;
+        PigAgentConfig.WebConfig webCfg = config.getWeb();
+        if (webCfg.isEnabled()) {
+            webConsole = new WebConsole(agentKernel, webCfg.getHost(), webCfg.getPort());
+            try {
+                webConsole.start();
+                System.out.println(Ansi.success("Web console: ")
+                        + Ansi.info("http://" + webCfg.getHost() + ":" + webConsole.boundPort()));
+            } catch (IOException e) {
+                System.err.println(Ansi.warn("[Web] Failed to start console on "
+                        + webCfg.getHost() + ":" + webCfg.getPort() + " — " + e.getMessage()));
+                webConsole = null;
+            }
+        }
+        final WebConsole webConsoleRef = webConsole;
+
         // Channels get their own agent whose permission hook runs in channel mode (uses
         // permissions.channel-mode, no interactive confirmer → ASK fails closed). attachChannel
         // makes model switches rebuild it too so channels keep following the active model.
@@ -344,6 +365,9 @@ public final class PigAgentCli {
             System.err.println(Ansi.warn("\n[CLI] Shutting down..."));
             for (ChannelAgentBridge bridge : bridges) {
                 bridge.stop();
+            }
+            if (webConsoleRef != null) {
+                webConsoleRef.stop();
             }
             sessionManager.saveCurrent();
             agentSession.close();

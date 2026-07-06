@@ -53,6 +53,7 @@
         <module>pig-agent-config</module>
         <module>pig-agent-onboarding</module>
         <module>pig-agent-mcp</module>
+        <module>pig-agent-web</module>
         <module>pig-agent-cli</module>
     </modules>
 
@@ -169,6 +170,11 @@
             <dependency>
                 <groupId>io.pigagent</groupId>
                 <artifactId>pig-agent-mcp</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.pigagent</groupId>
+                <artifactId>pig-agent-web</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
