@@ -1,3 +1,22 @@
+## 待优化点落实追踪（来自设计文档两轮对抗评审的 10 项）
+
+设计文档 `docs/design/agent-management-design.md` 的「待优化点」表列了 10 项。本表把**属于阶段 1（本 spec）的每一项显式映射到落点 + 状态**，其余标注延后到哪个后续 spec，避免「评审发现项」在 spec 里无迹可循。
+
+| # | 待优化点 | 归属 | 落点 | 状态 |
+|---|----------|------|------|------|
+| 1 | `AgentHolder` 唯一写点是 `ModelManager`（双 holder），勿误当基座复用 | 阶段1 | Decision **D2** + Risks 第2条 + Context | ✅ 已落实 |
+| 2 | `AgentFactory`/`Toolkit`/`Hook`/`Memory` 全局单例，不能直接复用 | 阶段1 | Decision **D3** + tasks 3.4 / 5.3 | ✅ 已实现 |
+| 3 | `Toolkit` 无"取子集"API，须新建重注册 | 阶段1 | Decision **D3** + `AgentWiring.toolkitFor`（copy+removeTool）+ tasks 5.1 | ✅ 已实现 |
+| 4 | `ToolPermissionHook` 现读全局 config，需支持读 `spec.permissionMode` | 阶段1 | tasks 5.4（mode-override 构造器） | ✅ 已实现 |
+| 5 | `spec.modelId` 指向已删 `StoredModel` 会悬空 → 容错回落 | 阶段1 | Decision **D4** + tasks 4.1/4.2（`resolveStoredModel`） | ✅ 已实现 |
+| 6 | `TaskScheduler` 硬绑 `Task`；cron 只认 `*/N`，不支持定点 → 换 cron 库 | 阶段2 | 延后 `digital-employee` spec | ⏳ 延后 |
+| 7 | `PigAgent.call()` 同步 `.block()`，硬超时非 trivial → 先 spike | 阶段2 | 延后 `digital-employee` spec（task 0 spike） | ⏳ 延后 |
+| 8 | `CompositeLongTermMemory.setSessionMemory` 单 volatile 字段，多实例并发必踩 | 阶段2/3 | 本 spec Open Questions（非 active 无独立会话）；并发化延后 | ⏳ 延后 |
+| 9 | `SessionManager` 单活 + per-turn save 与 N 实例映射未定 | 阶段2/3 | 本 spec Open Questions（仅 active 走 session 流） | ⏳ 延后 |
+| 10 | Web 是独立大工程，塞进本设计会范围蔓延 → 切独立 spec | 独立 | 延后 `web-visualization` spec；本 spec Non-Goals 已排除 | ⏳ 延后 |
+
+阶段 1 的 5 项（#1-5）已全部落进下方 Decisions/tasks 并实现；#6-10 已明确延后到指定后续 spec，不遗留为无归属 backlog。
+
 ## Context
 
 内核现状：全系统只有一个 `AgentHolder`（单 `volatile PigAgent`）。运行时切模型 = `AgentFactory.create(model)` 重建 agent 后 `holder.set(...)`；所有消费方（REPL、session、channel、compression）通过 `agentHolder.get()` 读当前 agent。这套「单槽 + 重建」无法承载「多个各有模型/工具/权限的 agent 并存并切换」。

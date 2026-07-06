@@ -137,6 +137,21 @@ subscribeEvents() -> Flux<KernelEvent>        // 会话/运行/报告事件，�
 - **（可选深化）阶段 4 — agent 间委派/编排**
   sub-agent 即工具（一个 agent 能把另一个当工具调），仍进程内、无编排 DB。**明确标为可选**，视需要再做（守个人电脑简单性）。
 
+## Spec 拆分（多 spec，顺序依赖，逐个上线）
+
+> 本需求按 `/ls:clarify` 的原则拆成 **4 个 spec**，各为一个 openspec change。它们**相互依赖（顺序，非并行）**——后者以前者的产物为基座。分支 `feat/agent-management`。
+
+| 顺序 | openspec change | 对应阶段 | 依赖 | 状态 |
+|------|-----------------|---------|------|------|
+| 1 | `multi-agent-kernel` | 阶段1 多 agent 管理内核 + 每 agent 模型 | — | ✅ 实现完成，待归档评审 |
+| 2 | `digital-employee` | 阶段2 数字员工（自主/定时运行 + 晨报） | spec 1 归档 | 📄 proposal（tasks 待启动时细化） |
+| 3 | `agent-kernel-facade` | 阶段3 前端适配层（`AgentKernel` 门面 + CLI adapter） | spec 1 归档 | 📄 proposal |
+| 4 | `web-visualization` | 独立 Web 可视化控制台 | spec 3 归档 | 📄 proposal |
+
+（可选阶段 4「agent 间委派/编排」：YAGNI，暂不立 spec，需要时再拆。）
+
+**流程纪律**：每个 spec 独立走 `/ls:spec（细化 tasks + 人工审）→ /ls:code → /ls:itest → /ls:archive`；**后一个 spec 在前一个归档后才启动 tasks 细化**（依赖未定就写全 tasks 会返工）。跨 spec 的评审待优化点在各自 spec 的 `design.md` 里显式追踪（见内核 spec 的「待优化点落实追踪」表）。
+
 ## Open Questions
 
 1. **多 agent 深度（需你确认边界）**：阶段 1–3 只做「管理 + 运行多个独立 agent」，**agent 间委派/编排列为可选阶段 4，先不做**（YAGNI）。这个边界对吗？
@@ -161,7 +176,7 @@ CLI 随 `pig-agent-cli` 分发；（独立 Web spec 的）Web server **嵌入式
 
 ## Next Steps
 
-按 `/ls:spec` 拆分，建议 `feat/agent-management` 分支（多 spec 并行：内核 / 数字员工 / 适配层可各自一 spec）：
+按上方「Spec 拆分」的 4 个顺序 spec 逐个推进（分支 `feat/agent-management`；**顺序依赖，非并行**——后者以前者归档产物为基座）。当前 spec = `multi-agent-kernel`（阶段1）：
 
 **阶段 1（先做）**
 1. **摸清 `AgentHolder` 全部读/写点**（尤其 `ModelManager` 的双 holder + channel），产出替换清单——动承重墙前的第一铲。
@@ -182,22 +197,22 @@ CLI 随 `pig-agent-cli` 分发；（独立 Web spec 的）Web server **嵌入式
 **（独立后续 spec）Web 可视化**
 10. 嵌入式无 DB server 暴露 kernel API + 事件流；Web MVP：agent 管理 / 会话流 / 运行监控 / 晨报收件箱 / 「等你决定」审批。
 
-## 待优化点（两轮对抗评审发现，进 spec 前逐条补实）
+## 待优化点落实追踪（两轮对抗评审发现，已逐条落到各 spec）
 
-> 均为可修的落地细节，不动摇方向；评审总分两轮均 7/10，补实后可达 8.5+。
+> 均为可修的落地细节，不动摇方向；评审两轮均 7/10。**下表是每项的落点 + 状态**：阶段1 的项已在 `multi-agent-kernel` spec 实现（该 spec `design.md` 有对应「待优化点落实追踪」表），其余明确延后到指定后续 spec，无无归属 backlog。
 
-| # | 类别 | 问题 | 修法 | 落到 |
-|---|------|------|------|------|
-| 1 | 承重墙 | `AgentHolder` 唯一**写**点是 `ModelManager`，且它持双 holder（主 + channel）；曾被误当"基座复用" | 先产出完整读/写点清单，重定义 `ModelManager` 职责 | 阶段1 task 1/3 |
-| 2 | per-agent 化 | `AgentFactory`/`Toolkit`/`Hook`/`Memory` 全是全局单例，不能直接复用 | 仿 AgentFactory 但每 agent 新建受限 Toolkit + 独立 hook（读 `spec.permissionMode`）+ 独立 memory | 阶段1 task 4 |
-| 3 | Toolkit | 无"取子集"API（一次性全量注册） | 按 `toolNames` **新建** Toolkit 重注册白名单工具 | 阶段1 task 4 |
-| 4 | 权限 | `ToolPermissionHook` 现读全局 config mode | 改为读 `spec.permissionMode`（per-agent 权限档） | 阶段1 |
-| 5 | 容错 | `spec.modelId` 指向已删 `StoredModel` 会悬空 | 容错回落默认模型 | 阶段1 |
-| 6 | 调度 | `TaskScheduler` 硬绑 `Task` 生命周期；cron 只认 `*/N`，不支持定点 | 解耦通用 `schedule(id,TaskSchedule,Runnable)` + 换 cron-utils（原 Open Q 已升级为 task） | 阶段2 task 6 |
-| 7 | 超时 | `PigAgent.call()` 同步 `.block()`，硬超时非 trivial | 先 spike 验证能否真终止一次运行 | 阶段2 task 0 |
-| 8 | 并发/记忆 | `CompositeLongTermMemory.setSessionMemory` 单 `volatile` 字段，多实例必踩 | 每实例独立记忆 | Open Q3 |
-| 9 | 会话 | `SessionManager` 单活 + per-turn `saveCurrent` 与 N 实例映射未定 | 切走时存、非 active 不自动 per-turn 存 | Open Q2 |
-| 10 | 范围 | Web 是独立大工程，塞进本设计会范围蔓延 | 切成独立后续 spec，本设计到"门面 + CLI adapter"收尾 | 已切 |
+| # | 类别 | 问题 | 修法 | 落到 | 状态 |
+|---|------|------|------|------|------|
+| 1 | 承重墙 | `AgentHolder` 唯一**写**点是 `ModelManager`，且它持双 holder（主 + channel）；曾被误当"基座复用" | 完整读/写点清单，重定义 `ModelManager` 职责 | 内核 spec D2 / task 1,3 | ✅ 已实现 |
+| 2 | per-agent 化 | `AgentFactory`/`Toolkit`/`Hook`/`Memory` 全是全局单例，不能直接复用 | 仿 AgentFactory 但每 agent 新建受限 Toolkit + 独立 hook（读 `spec.permissionMode`）+ 独立 memory | 内核 spec D3 / task 4 | ✅ 已实现 |
+| 3 | Toolkit | 无"取子集"API（一次性全量注册） | 按 `toolNames` **新建** Toolkit 重注册白名单工具 | `AgentWiring.toolkitFor` / task 5 | ✅ 已实现 |
+| 4 | 权限 | `ToolPermissionHook` 现读全局 config mode | 改为读 `spec.permissionMode`（per-agent 权限档） | `ToolPermissionHook` mode-override / task 5.4 | ✅ 已实现 |
+| 5 | 容错 | `spec.modelId` 指向已删 `StoredModel` 会悬空 | 容错回落默认模型 | `ModelManager.resolveStoredModel` / task 4 | ✅ 已实现 |
+| 6 | 调度 | `TaskScheduler` 硬绑 `Task` 生命周期；cron 只认 `*/N`，不支持定点 | 解耦通用 `schedule(id,TaskSchedule,Runnable)` + 换 cron-utils | `digital-employee` spec | ⏳ 延后阶段2 |
+| 7 | 超时 | `PigAgent.call()` 同步 `.block()`，硬超时非 trivial | 先 spike 验证能否真终止一次运行 | `digital-employee` spec（task 0 spike） | ⏳ 延后阶段2 |
+| 8 | 并发/记忆 | `CompositeLongTermMemory.setSessionMemory` 单 `volatile` 字段，多实例必踩 | 每实例独立记忆 | 内核 spec Open Q + 阶段2/3 | ⏳ 延后 |
+| 9 | 会话 | `SessionManager` 单活 + per-turn `saveCurrent` 与 N 实例映射未定 | 切走时存、非 active 不自动 per-turn 存 | 内核 spec Open Q + 阶段2/3 | ⏳ 延后 |
+| 10 | 范围 | Web 是独立大工程，塞进本设计会范围蔓延 | 切成独立后续 spec | `web-visualization` spec | ✅ 已切 |
 
 ## What I noticed about how you think
 
