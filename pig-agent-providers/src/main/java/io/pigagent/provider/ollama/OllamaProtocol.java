@@ -2,19 +2,17 @@ package io.pigagent.provider.ollama;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.OllamaChatModel;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import java.util.List;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
 
-public final class OllamaProvider implements AgentOnboardingProvider {
+/** Local Ollama protocol (self-hosted, no API key). */
+public final class OllamaProtocol implements ModelProtocol {
     private static final String DEFAULT_BASE_URL = "http://localhost:11434";
 
-    @Override public String providerId() { return "ollama"; }
+    @Override public String protocolId() { return "ollama"; }
     @Override public String displayName() { return "Ollama (Local)"; }
     @Override public String description() { return "Local self-hosted models via Ollama"; }
-    @Override public List<String> requiredCredentialKeys() { return List.of(); }
     @Override public String defaultModelName() { return "llama3.2"; }
-    @Override public boolean isAvailable() { return true; }
     @Override public boolean requiresApiKey() { return false; }
     @Override public boolean supportsBaseUrl() { return true; }
 

@@ -32,8 +32,8 @@ Requires **Java 17** and Maven 3.9+. Models are configured **interactively on fi
 
 > The README's build commands show a trailing `-s ` settings flag — that is a stale leftover; no custom Maven settings file is used. Use the plain commands above.
 
-### Provider client SDKs
-AgentScope declares the provider SDKs as **optional**, so they are added explicitly in `pig-agent-providers/pom.xml` (versions matched to AgentScope 1.0.12 in the parent POM properties): `com.anthropic:anthropic-java` 2.14.0, `com.openai:openai-java` 4.28.0 (OpenAI + Mimo), `com.google.genai:google-genai` 1.45.0, `com.alibaba:dashscope-sdk-java` 2.22.9. A missing one surfaces as `NoClassDefFoundError`/unresolved import (e.g. `com.anthropic.client.AnthropicClient`) when that provider builds its model.
+### Protocol client SDKs
+The provider module is organized by **protocol standard**, not vendor: 5 `ModelProtocol` implementations (`openai` / `anthropic` / `gemini` / `ollama` / `dashscope`). Any OpenAI-compatible vendor (Xiaomi mimo, DeepSeek, Kimi, Qwen-compat, …) is reached through the `openai` protocol + that vendor's base URL — no per-vendor class. AgentScope declares the SDKs as **optional**, so they are added explicitly in `pig-agent-providers/pom.xml` (versions matched to AgentScope 1.0.12 in the parent POM properties): `com.anthropic:anthropic-java` 2.14.0, `com.openai:openai-java` 4.28.0 (covers the `openai` protocol incl. all compatible vendors), `com.google.genai:google-genai` 1.45.0, `com.alibaba:dashscope-sdk-java` 2.22.9. A missing one surfaces as `NoClassDefFoundError`/unresolved import (e.g. `com.anthropic.client.AnthropicClient`) when that protocol builds its model.
 
 ## Module Layout
 
@@ -41,8 +41,8 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 | Module | Responsibility | Key types |
 |--------|---------------|-----------|
-| `pig-agent-core` | Agent wrapper + rebuildable agent, hooks, two-tier memory, compression, provider SPI | `PigAgent`, `AgentHolder`, `AgentFactory`, `LoggingHook`, `ToolCallLoggingHook`, `FileSystemLongTermMemory`, `CompositeLongTermMemory`, `compression/CompressionService`, `AgentOnboardingProvider`, `ModelSpec`, `ProviderCredentials` |
-| `pig-agent-providers` | LLM provider impls + registry (depends on the provider SDKs) | `AnthropicProvider`, `OpenAiProvider`, `OllamaProvider`, `GeminiProvider`, `DashScopeProvider`, `MimoProvider`, `ProviderRegistry` |
+| `pig-agent-core` | Agent wrapper + rebuildable agent, hooks, two-tier memory, compression, protocol SPI | `PigAgent`, `AgentHolder`, `AgentFactory`, `LoggingHook`, `ToolCallLoggingHook`, `FileSystemLongTermMemory`, `CompositeLongTermMemory`, `compression/CompressionService`, `protocol/ModelProtocol`, `protocol/ModelSpec`, `ProviderCredentials` |
+| `pig-agent-providers` | Model protocol impls + registry (depends on the protocol SDKs) | `OpenAiProtocol`, `AnthropicProtocol`, `GeminiProtocol`, `OllamaProtocol`, `DashScopeProtocol`, `ProtocolRegistry` |
 | `pig-agent-model` | Multiple saved model configs, connectivity test, runtime switching | `StoredModel`, `ModelStore`, `JsonModelStore`, `ModelManager` |
 | `pig-agent-session` | Independent conversation sessions + per-session temp memory | `Session`, `SessionManager`, `SessionRepository`, `FileSystemSessionRepository`, `AgentModelSwitcher` |
 | `pig-agent-tools` | `@Tool`-annotated built-in tools | `ShellTools`, `FileSystemTools`, `SmartWebFetchTool`, `BraveWebSearchTool`, `TaskTool`, `CheckListTool`, `SkillsTool`, `ToolDiscovery` (Lucene) |
@@ -75,7 +75,7 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 **Extension is via SPIs, not core edits:**
 - New tool: a class with `@Tool`/`@ToolParam` methods → `toolkit.registration().tool(new MyTool()).apply()`.
 - New hook: implement `io.agentscope.core.hook.Hook` (1.x event model: `PreReasoningEvent`/`PostReasoningEvent`/`PreActingEvent`/`PostActingEvent`; lower `priority()` runs earlier; return `Mono.just(event)`).
-- New LLM provider: implement `AgentOnboardingProvider` — note `createModel(ModelSpec spec)` (apiKey + optional baseUrl + modelName), plus `supportsBaseUrl()`/`requiresApiKey()` — and register on `ProviderRegistry` in `PigAgentCli`.
+- New model protocol: implement `ModelProtocol` (`io.pigagent.core.protocol`) — note `protocolId()` + `createModel(ModelSpec spec)` (apiKey + optional baseUrl + modelName), plus `supportsBaseUrl()`/`requiresApiKey()` — and register on `ProtocolRegistry` in `PigAgentCli`. Adding a new *vendor* on an existing protocol (e.g. another OpenAI-compatible endpoint) needs **no code** — the user just picks the protocol and enters its base URL.
 - New channel: implement `Channel`, register on `ChannelRegistry`; `ChannelAgentBridge` (holds an `AgentHolder`) routes channel messages through the agent.
 - MCP servers are managed dynamically (see below); their tools auto-register into the Toolkit and can be hot-added/removed without restart.
 

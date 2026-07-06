@@ -18,13 +18,12 @@ import io.pigagent.mcp.McpServerSpec;
 import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
-import io.pigagent.provider.anthropic.AnthropicProvider;
-import io.pigagent.provider.dashscope.DashScopeProvider;
-import io.pigagent.provider.gemini.GeminiProvider;
-import io.pigagent.provider.mimo.MimoProvider;
-import io.pigagent.provider.ollama.OllamaProvider;
-import io.pigagent.provider.openai.OpenAiProvider;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.anthropic.AnthropicProtocol;
+import io.pigagent.provider.dashscope.DashScopeProtocol;
+import io.pigagent.provider.gemini.GeminiProtocol;
+import io.pigagent.provider.ollama.OllamaProtocol;
+import io.pigagent.provider.openai.OpenAiProtocol;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.FileSystemSessionRepository;
 import io.pigagent.session.Session;
 import io.pigagent.session.SessionManager;
@@ -50,7 +49,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 全链路集成测试：用真实 anthropic 模型（经 deepthink）构建与 {@code PigAgentCli} 同构的
+ * 全链路集成测试：用真实 anthropic 模型（经自定义 baseUrl）构建与 {@code PigAgentCli} 同构的
  * agent + 工具集 + 会话/MCP 基础设施，逐模块验证核心功能跑通。
  *
  * <p>命名为 {@code *IT}，不进默认 {@code mvn test}（会真实调用 LLM、耗 token）；
@@ -78,17 +77,16 @@ class FullLinkAgentIT {
 
     @BeforeEach
     void buildRealAgent() throws Exception {
-        // 真实 models.json（anthropic + deepthink baseUrl），其余目录隔离到临时工作区。
+        // 真实 models.json（anthropic + 自定义 baseUrl），其余目录隔离到临时工作区。
         Path realModels = Path.of(System.getProperty("user.home"), ".pig-agent", "workspace", "models.json");
         assertThat(realModels).as("需要已配置的 anthropic models.json").exists();
 
-        ProviderRegistry registry = new ProviderRegistry();
-        registry.register(new MimoProvider());
-        registry.register(new AnthropicProvider());
-        registry.register(new OpenAiProvider());
-        registry.register(new OllamaProvider());
-        registry.register(new GeminiProvider());
-        registry.register(new DashScopeProvider());
+        ProtocolRegistry registry = new ProtocolRegistry();
+        registry.register(new OpenAiProtocol());
+        registry.register(new AnthropicProtocol());
+        registry.register(new GeminiProtocol());
+        registry.register(new OllamaProtocol());
+        registry.register(new DashScopeProtocol());
 
         modelManager = new ModelManager(registry, new JsonModelStore(realModels));
         StoredModel def = modelManager.getDefault().orElseThrow();

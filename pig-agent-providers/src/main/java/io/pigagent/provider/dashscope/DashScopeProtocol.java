@@ -2,15 +2,14 @@ package io.pigagent.provider.dashscope;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.DashScopeChatModel;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import java.util.List;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
 
-public final class DashScopeProvider implements AgentOnboardingProvider {
-    @Override public String providerId() { return "dashscope"; }
+/** DashScope native protocol (Alibaba Cloud, Qwen series). */
+public final class DashScopeProtocol implements ModelProtocol {
+    @Override public String protocolId() { return "dashscope"; }
     @Override public String displayName() { return "DashScope (Qwen)"; }
-    @Override public String description() { return "Qwen series models by Alibaba Cloud"; }
-    @Override public List<String> requiredCredentialKeys() { return List.of("DASHSCOPE_API_KEY"); }
+    @Override public String description() { return "Alibaba Cloud DashScope native protocol (Qwen series)"; }
     @Override public String defaultModelName() { return "qwen-max"; }
 
     @Override
