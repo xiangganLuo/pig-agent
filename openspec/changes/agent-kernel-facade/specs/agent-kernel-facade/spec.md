@@ -32,6 +32,18 @@
 - **WHEN** 新增一个入口消费门面 API + 事件流
 - **THEN** 无需改动 `AgentRegistry`/`AgentInstanceFactory` 等内核内部代码
 
+### Requirement: 渠道为门面可见的独立轨道
+
+渠道（Telegram/Discord 等）SHALL 运行在**自己的 agent holder + channel-mode 权限轨道**上，MUST NOT 成为门面可切换（`useAgent`）的内核 agent —— 以免无 confirmer 的渠道 agent 经 `/agent use` 泄漏到交互会话。渠道回合 SHALL 经 `AgentKernel` 暴露为**可见**事件（供 Web/状态观测），但其路由与模型切换轨道保持独立。
+
+#### Scenario: 渠道活动经门面可见但不可切换
+- **WHEN** 一条渠道消息到达
+- **THEN** `AgentKernel.subscribeEvents()` 收到一个标记为该渠道的会话事件（如 `channel:<id>`），而该渠道 agent 不出现在 `listAgents()`/`useAgent` 的可切换集合中
+
+#### Scenario: 无门面时渠道仍工作
+- **WHEN** 渠道桥未注入 `AgentKernel`
+- **THEN** 渠道照常路由消息到其专用 holder，仅不产生门面可见事件
+
 ### Requirement: CLI 经门面且行为不变
 
 `AgentRepl`/`ReplCommands` SHALL 改为经 `AgentKernel` 驱动；改造后交互命令与对话流行为 MUST 与改造前一致。

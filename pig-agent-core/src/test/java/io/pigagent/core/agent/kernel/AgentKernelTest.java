@@ -75,6 +75,20 @@ class AgentKernelTest {
     }
 
     @Test
+    void noteChannelChat_isFacadeVisible_asChannelTaggedEvent(@TempDir Path dir) {
+        AgentKernel kernel = kernel(dir);
+        List<KernelEvent> events = new CopyOnWriteArrayList<>();
+        kernel.subscribeEvents().subscribe(events::add);
+
+        kernel.noteChannelChat("telegram");
+
+        assertThat(events).singleElement().satisfies(e -> {
+            assertThat(e.type()).isEqualTo(KernelEvent.Type.CHAT_STARTED);
+            assertThat(e.agentId()).isEqualTo("channel:telegram"); // separate-track marker
+        });
+    }
+
+    @Test
     void noSubscriber_emissionsDoNotError(@TempDir Path dir) {
         AgentKernel kernel = kernel(dir);
         // No subscriber; creating agents (which emits) must not throw.

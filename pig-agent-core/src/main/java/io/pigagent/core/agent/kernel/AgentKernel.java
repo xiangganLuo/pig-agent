@@ -117,6 +117,16 @@ public final class AgentKernel {
         return report;
     }
 
+    /**
+     * D4: a channel turn is surfaced through the façade for observability (Web SSE, status), but the
+     * channel keeps its OWN agent holder + channel-mode permission track — it is deliberately NOT a
+     * switchable kernel agent (that would leak the no-confirmer channel agent into {@code /agent use}).
+     * So the channel is "façade-visible, separate-track": events flow, ownership does not.
+     */
+    public void noteChannelChat(String channelId) {
+        emit(KernelEvent.Type.CHAT_STARTED, "channel:" + channelId, channelId);
+    }
+
     /** Subscribe to kernel lifecycle events (hot, multicast). */
     public Flux<KernelEvent> subscribeEvents() {
         return events.asFlux();

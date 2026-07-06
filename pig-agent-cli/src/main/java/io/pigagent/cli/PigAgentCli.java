@@ -338,7 +338,7 @@ public final class PigAgentCli {
         CompressionService compressionService = new CompressionService(
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
 
-        List<ChannelAgentBridge> bridges = startChannels(channelAgentHolder, config.getChannels());
+        List<ChannelAgentBridge> bridges = startChannels(channelAgentHolder, agentKernel, config.getChannels());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.err.println(Ansi.warn("\n[CLI] Shutting down..."));
@@ -388,7 +388,7 @@ public final class PigAgentCli {
         return oneLine.length() > 80 ? oneLine.substring(0, 80) + "…" : oneLine;
     }
 
-    private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder,
+    private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder, AgentKernel agentKernel,
                                                           Map<String, PigAgentConfig.ChannelConfig> channelConfigs) {
         List<ChannelAgentBridge> bridges = new ArrayList<>();
         for (var entry : channelConfigs.entrySet()) {
@@ -406,7 +406,7 @@ public final class PigAgentCli {
             };
             if (channel == null) continue;
 
-            ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel);
+            ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
             bridge.start();
             bridges.add(bridge);
             System.out.println(Ansi.success("Channel started: ") + Ansi.info(channel.displayName()));
