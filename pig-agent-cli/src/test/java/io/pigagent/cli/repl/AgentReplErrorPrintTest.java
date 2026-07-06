@@ -41,8 +41,8 @@ class AgentReplErrorPrintTest {
                 .streams(new ByteArrayInputStream(new byte[0]), out)
                 .build();
 
-        AgentRepl repl = new AgentRepl(holder, null, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>());
+        AgentRepl repl = new AgentRepl(holder, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, new AtomicReference<>());
 
         // Act
         repl.streamToAgent("hello", terminal);

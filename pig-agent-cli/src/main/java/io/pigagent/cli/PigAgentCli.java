@@ -18,6 +18,8 @@ import io.pigagent.core.agent.AgentRegistry;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.runner.AgentRunner;
+import io.pigagent.core.agent.runner.FileReportWriter;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
@@ -42,6 +44,7 @@ import io.pigagent.session.SessionManager;
 import io.pigagent.session.SessionRepository;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
+import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.checklist.CheckListTool;
 import io.pigagent.tool.mcp.McpConfirmer;
@@ -269,6 +272,40 @@ public final class PigAgentCli {
             }
         }
 
+        // Digital employee: agents with a schedule run their mandate unattended via a scheduled
+        // AgentRunner. Each run uses an ISOLATED one-shot agent (never the active instance),
+        // fail-closed permissions merged with the agent's commandAllowlist, and denied dangerous
+        // actions feed the report's「等你决定」. Reports land in workspace/reports/; lastRunAt is saved.
+        AgentRunner.AgentBuilder autonomousBuilder = (spec, recorder) -> {
+            Model runModel = new io.pigagent.core.retry.RetryingModel(
+                    modelManager.modelFor(spec.modelId()), interactiveRetry);
+            ToolPermissionHook unattended = new ToolPermissionHook(
+                    () -> mergedPermissionConfig(configManager.getConfig().getPermissions(),
+                            spec.commandAllowlist()),
+                    null, null, false,
+                    () -> AgentWiring.permissionModeOf(spec.permissionMode()),
+                    recorder::record);
+            return PigAgent.builder()
+                    .name(spec.name()).sysPrompt(spec.sysPrompt())
+                    .model(runModel)
+                    .toolkit(AgentWiring.toolkitFor(toolkit, spec.toolNames()))
+                    .hooks(List.of(unattended, new LoggingHook(), new ToolCallLoggingHook()))
+                    .build();
+        };
+        AgentRunner agentRunner = new AgentRunner(
+                autonomousBuilder,
+                new FileReportWriter(workspace.getReportsDir()),
+                (spec, epoch) -> agentRepository.save(spec.withLastRunAtEpochMs(epoch)),
+                null);
+        for (AgentSpec s : agentRegistry.list().stream().map(i -> i.spec()).toList()) {
+            if (s.isAutonomous()) {
+                taskScheduler.schedule("agent:" + s.id(), TaskSchedule.cron(s.schedule()),
+                        () -> agentRunner.run(s));
+                System.out.println(Ansi.success("Digital employee scheduled: ")
+                        + Ansi.info(s.name() + " [" + s.schedule() + "]"));
+            }
+        }
+
         // Channels get their own agent whose permission hook runs in channel mode (uses
         // permissions.channel-mode, no interactive confirmer → ASK fails closed). attachChannel
         // makes model switches rebuild it too so channels keep following the active model.
@@ -310,8 +347,28 @@ public final class PigAgentCli {
         }));
 
         new AgentRepl(agentHolder, agentRegistry, agentRepository, agentInstanceFactory,
+                agentRunner, workspace.getReportsDir(),
                 configManager, registry, modelManager, compressionService,
                 mcpManager, bridges, sessionManager, workspace.getRootPath(), readerRef).run();
+    }
+
+    /** A permission config whose command allowlist merges the global list with an agent's own
+     *  {@code commandAllowlist}, so an unattended run may execute the few commands it declares. */
+    private static PigAgentConfig.PermissionConfig mergedPermissionConfig(
+            PigAgentConfig.PermissionConfig base, List<String> extraCommands) {
+        PigAgentConfig.PermissionConfig cfg = new PigAgentConfig.PermissionConfig();
+        cfg.setMode(base.getMode());
+        cfg.setChannelMode(base.getChannelMode());
+        cfg.setToolOverrides(base.getToolOverrides());
+        PigAgentConfig.PermissionConfig.Allowlist al = new PigAgentConfig.PermissionConfig.Allowlist();
+        List<String> commands = new ArrayList<>(base.getAllowlist().getCommands());
+        if (extraCommands != null) {
+            commands.addAll(extraCommands);
+        }
+        al.setCommands(commands);
+        al.setTools(base.getAllowlist().getTools());
+        cfg.setAllowlist(al);
+        return cfg;
     }
 
     /** One-line, length-bounded summary of a retry cause for the visible retry notice. */

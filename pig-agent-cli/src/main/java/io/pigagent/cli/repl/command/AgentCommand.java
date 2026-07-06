@@ -22,7 +22,7 @@ public final class AgentCommand implements Runnable {
     private final ReplContext ctx;
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<action>",
-            description = "list | use | new | model")
+            description = "list | use | new | model | run | report")
     String action;
 
     @Parameters(index = "1..*", paramLabel = "<args>")
@@ -41,11 +41,60 @@ public final class AgentCommand implements Runnable {
             case "use", "switch" -> use(t);
             case "new" -> create(t);
             case "model" -> setModel(t);
+            case "run" -> runNow(t);
+            case "report" -> report(t);
             case "help" -> usage(t);
             default -> {
                 Ansi.println(t, Ansi.error("Unknown action: " + act));
                 usage(t);
             }
+        }
+    }
+
+    /** Manually trigger one autonomous run of an agent's mandate now. */
+    private void runNow(Terminal t) {
+        if (args == null || args.length == 0) {
+            Ansi.println(t, Ansi.warn("Usage: /agent run <id>"));
+            return;
+        }
+        String id = args[0];
+        io.pigagent.core.agent.AgentSpec spec = ctx.agentRepository().findById(id).orElse(null);
+        if (spec == null) {
+            Ansi.println(t, Ansi.error("No such agent (needs a saved spec): " + id));
+            return;
+        }
+        if (spec.mandate() == null || spec.mandate().isBlank()) {
+            Ansi.println(t, Ansi.warn("Agent '" + id + "' has no mandate; nothing to run."));
+            return;
+        }
+        Ansi.println(t, Ansi.dim("Running '" + id + "' …"));
+        ctx.agentRunner().run(spec).ifPresentOrElse(
+                r -> Ansi.println(t, Ansi.success("Done (" + r.outcome() + "). ")
+                        + Ansi.dim("See /agent report.")),
+                () -> Ansi.println(t, Ansi.warn("Skipped: a run is already in progress.")));
+    }
+
+    /** List recent morning reports. */
+    private void report(Terminal t) {
+        java.nio.file.Path dir = ctx.reportsDir();
+        if (dir == null || !java.nio.file.Files.isDirectory(dir)) {
+            Ansi.println(t, Ansi.dim("No reports yet."));
+            return;
+        }
+        Ansi.println(t, Ansi.heading("Reports (" + dir + "):"));
+        try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(dir, 2)) {
+            java.util.List<java.nio.file.Path> files = walk
+                    .filter(p -> p.toString().endsWith(".md"))
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .limit(20).toList();
+            if (files.isEmpty()) {
+                Ansi.println(t, Ansi.dim("  (none)"));
+            }
+            for (java.nio.file.Path p : files) {
+                Ansi.println(t, "  " + Ansi.info(dir.relativize(p).toString()));
+            }
+        } catch (java.io.IOException e) {
+            Ansi.println(t, Ansi.error("Failed to list reports: " + e.getMessage()));
         }
     }
 
@@ -134,5 +183,7 @@ public final class AgentCommand implements Runnable {
         Ansi.println(t, Ansi.dim("  use <id>                   switch the active agent"));
         Ansi.println(t, Ansi.dim("  new <id> <name> [modelId]  create + register a new agent"));
         Ansi.println(t, Ansi.dim("  model <id> <modelId>       change an agent's model"));
+        Ansi.println(t, Ansi.dim("  run <id>                   run a digital-employee mandate now"));
+        Ansi.println(t, Ansi.dim("  report                     list recent morning reports"));
     }
 }

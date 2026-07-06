@@ -50,6 +50,8 @@ public final class AgentRepl {
     private final AgentRegistry agentRegistry;
     private final AgentSpecRepository agentRepository;
     private final AgentInstanceFactory instanceFactory;
+    private final io.pigagent.core.agent.runner.AgentRunner agentRunner;
+    private final Path reportsDir;
     private final ConfigurationManager configManager;
     private final ProtocolRegistry registry;
     private final ModelManager modelManager;
@@ -62,6 +64,7 @@ public final class AgentRepl {
 
     public AgentRepl(AgentHolder agentHolder, AgentRegistry agentRegistry,
                      AgentSpecRepository agentRepository, AgentInstanceFactory instanceFactory,
+                     io.pigagent.core.agent.runner.AgentRunner agentRunner, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
@@ -70,6 +73,8 @@ public final class AgentRepl {
         this.agentRegistry = agentRegistry;
         this.agentRepository = agentRepository;
         this.instanceFactory = instanceFactory;
+        this.agentRunner = agentRunner;
+        this.reportsDir = reportsDir;
         this.configManager = configManager;
         this.registry = registry;
         this.modelManager = modelManager;
@@ -89,7 +94,7 @@ public final class AgentRepl {
 
             AtomicBoolean running = new AtomicBoolean(true);
             ReplContext ctx = new ReplContext(agentHolder, agentRegistry, agentRepository, instanceFactory,
-                    configManager, registry, modelManager,
+                    agentRunner, reportsDir, configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
 
             DefaultParser parser = replParser();

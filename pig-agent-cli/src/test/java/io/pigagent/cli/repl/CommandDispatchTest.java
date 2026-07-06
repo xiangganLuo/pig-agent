@@ -41,7 +41,7 @@ class CommandDispatchTest {
                 .build();
         AtomicBoolean running = new AtomicBoolean(true);
         ReplContext ctx = new ReplContext(
-                null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
                 terminal, running, new AtomicReference<LineReader>());
 
         DefaultParser parser = AgentRepl.replParser();

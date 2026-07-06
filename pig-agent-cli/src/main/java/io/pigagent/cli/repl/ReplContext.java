@@ -6,6 +6,7 @@ import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.AgentInstanceFactory;
 import io.pigagent.core.agent.AgentRegistry;
 import io.pigagent.core.agent.AgentSpecRepository;
+import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -14,6 +15,7 @@ import io.pigagent.session.SessionManager;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,6 +33,8 @@ public record ReplContext(
         AgentRegistry agentRegistry,
         AgentSpecRepository agentRepository,
         AgentInstanceFactory instanceFactory,
+        AgentRunner agentRunner,
+        Path reportsDir,
         ConfigurationManager configManager,
         ProtocolRegistry registry,
         ModelManager modelManager,

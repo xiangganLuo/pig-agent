@@ -61,6 +61,8 @@ class ReplCommandsTest {
                 null, // agentRegistry
                 null, // agentRepository
                 null, // instanceFactory
+                null, // agentRunner
+                null, // reportsDir
                 configManager,
                 null, // registry
                 null, // modelManager
