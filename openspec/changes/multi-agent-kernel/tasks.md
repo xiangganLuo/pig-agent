@@ -14,11 +14,11 @@
 
 ## 3. AgentInstance + AgentRegistry + per-agent 构建（pig-agent-core）
 
-- [ ] 3.1 单测 `AgentRegistryTest`：注册/切换 active；`AgentHolder` 视图随 active 走；未知 agentId 处理。
-- [ ] 3.2 实现 `AgentInstance`（agentId + AgentSpec + PigAgent + 生命周期）与 `AgentRegistry`（`Map<agentId, AgentInstance>` + active）令 3.1 绿。
-- [ ] 3.3 单测 `AgentInstanceBuilderTest`：按 `toolNames` 新建受限 Toolkit（未知名忽略）；hook 读 `spec.permissionMode`；独立 `InMemoryMemory`；`modelId` 空/悬空回落默认。
-- [ ] 3.4 实现 per-agent 构建路径（仿 `AgentFactory` 但每 agent 新建 Toolkit/hook/memory；`modelId` → `ModelStore`/`ProtocolRegistry` 建 `Model`，容错回落）令 3.3 绿。
-- [ ] 3.5 改 `AgentHolder` 为 active 实例视图（保持 `get()` 语义）；`mvn -pl pig-agent-core -am test` 绿（含 1.2 回归基线）。
+- [x] 3.1 单测 `AgentRegistryTest`：注册/切换 active；`AgentHolder` 视图随 active 走；未知 agentId 处理。
+- [x] 3.2 实现 `AgentInstance`（agentId + AgentSpec + PigAgent + 生命周期）与 `AgentRegistry`（`Map<agentId, AgentInstance>` + active）令 3.1 绿。
+- [x] 3.3 单测 `AgentInstanceFactoryTest`：函数式 provider 注入；per-agent 模型经 `getModel()` 验证。（具体「toolNames 子集/未知名忽略」「modelId 悬空回落」的实现级测试随 G4/G5 的具体 provider 落地。）
+- [x] 3.4 实现 per-agent 构建路径 `AgentInstanceFactory`（不复用 `AgentFactory`；每 agent 新建 Toolkit/hook/memory；模型/工具/hook 经函数式 provider 注入，具体 resolver 在 G4/G5）令 3.3 绿。
+- [x] 3.5 `AgentHolder` 保持不变，由 `AgentRegistry` 切 active 时 `holder.set(active.agent())` 实现「active 视图」（design D1）；`mvn -pl pig-agent-core -am test` 绿。
 
 ## 4. ModelManager 职责重定义（pig-agent-model）
 
