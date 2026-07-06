@@ -2,15 +2,18 @@ package io.pigagent.provider.openai;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.OpenAIChatModel;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import java.util.List;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
 
-public final class OpenAiProvider implements AgentOnboardingProvider {
-    @Override public String providerId() { return "openai"; }
-    @Override public String displayName() { return "OpenAI (GPT)"; }
-    @Override public String description() { return "GPT series models by OpenAI"; }
-    @Override public List<String> requiredCredentialKeys() { return List.of("OPENAI_API_KEY"); }
+/**
+ * OpenAI-compatible protocol. Besides OpenAI itself, every OpenAI-compatible vendor
+ * (Xiaomi mimo, DeepSeek, Kimi, Qwen-compat, …) is reached through this protocol by
+ * supplying that vendor's base URL — no per-vendor class needed.
+ */
+public final class OpenAiProtocol implements ModelProtocol {
+    @Override public String protocolId() { return "openai"; }
+    @Override public String displayName() { return "OpenAI-compatible"; }
+    @Override public String description() { return "OpenAI protocol; also mimo/DeepSeek/Kimi/Qwen-compat via base URL"; }
     @Override public String defaultModelName() { return "gpt-4o"; }
     @Override public boolean supportsBaseUrl() { return true; }
 

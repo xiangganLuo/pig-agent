@@ -92,22 +92,21 @@ ReActAgent 推理循环:
 | `LoggingHook`             | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件                 |
 | `ToolCallLoggingHook`     | 工具调用 Hook，打印工具名称和执行状态                                      |
 | `FileMemory`              | 文件持久化内存，会话历史保存到磁盘                                         |
-| `AgentOnboardingProvider` | LLM 提供商接口，定义凭证校验、模型创建等标准方法                           |
+| `ModelProtocol`           | 模型协议标准接口（`io.pigagent.core.protocol`），定义 `protocolId`、模型创建等标准方法 |
 | `ProviderCredentials`     | 不可变凭证容器，copy-on-write 语义                                         |
 
-### pig-agent-providers — LLM 提供商
+### pig-agent-providers — 模型协议
 
-支持 6 个 LLM 提供商，通过环境变量配置 API Key：
+按**协议标准**（而非厂商）组织，共 5 套协议。具体模型由用户经"选协议 + 填 baseUrl / API key / 模型名"配置；任何 OpenAI 兼容厂商（小米 mimo、DeepSeek、Kimi、通义-compat 等）都走 `openai` 协议 + 各自 baseUrl，无需新增代码。
 
 
-| 提供商      | 环境变量            | 默认模型                   |
-| ----------- | ------------------- | -------------------------- |
-| MiMo (小米) | `MIMO_API_KEY`      | mimo-v2.5-pro              |
-| Anthropic   | `ANTHROPIC_API_KEY` | claude-sonnet-4-5-20250929 |
-| OpenAI      | `OPENAI_API_KEY`    | gpt-4o                     |
-| Ollama      | 无需 (本地运行)     | llama3                     |
-| Gemini      | `GEMINI_API_KEY`    | gemini-1.5-pro             |
-| DashScope   | `DASHSCOPE_API_KEY` | qwen-max                   |
+| 协议        | 底层 Model            | 默认模型          | 说明                                            |
+| ----------- | --------------------- | ----------------- | ----------------------------------------------- |
+| openai      | `OpenAIChatModel`     | gpt-4o            | OpenAI 兼容协议，吃掉 mimo/DeepSeek/Kimi 等厂商 |
+| anthropic   | `AnthropicChatModel`  | claude-sonnet-4-6 | Anthropic messages 协议                         |
+| gemini      | `GeminiChatModel`     | gemini-2.0-flash  | Google Gemini 协议                              |
+| ollama      | `OllamaChatModel`     | llama3.2          | 本地自托管，无需 API key                        |
+| dashscope   | `DashScopeChatModel`  | qwen-max          | 阿里云 DashScope 原生协议（通义千问）           |
 
 ### pig-agent-tools — 内置工具
 
@@ -231,17 +230,18 @@ pig-agent/
 │       │   ├── LoggingHook.java
 │       │   └── ToolCallLoggingHook.java
 │       ├── memory/FileMemory.java
-│       └── provider/
-│           ├── AgentOnboardingProvider.java
-│           └── ProviderCredentials.java
-├── pig-agent-providers/             # LLM 提供商
+│       ├── protocol/
+│       │   ├── ModelProtocol.java
+│       │   └── ModelSpec.java
+│       └── provider/ProviderCredentials.java
+├── pig-agent-providers/             # 模型协议
 │   └── src/main/java/io/pigagent/provider/
-│       ├── anthropic/AnthropicProvider.java
-│       ├── openai/OpenAiProvider.java
-│       ├── ollama/OllamaProvider.java
-│       ├── gemini/GeminiProvider.java
-│       ├── dashscope/DashScopeProvider.java
-│       └── registry/ProviderRegistry.java
+│       ├── openai/OpenAiProtocol.java
+│       ├── anthropic/AnthropicProtocol.java
+│       ├── gemini/GeminiProtocol.java
+│       ├── ollama/OllamaProtocol.java
+│       ├── dashscope/DashScopeProtocol.java
+│       └── registry/ProtocolRegistry.java
 ├── pig-agent-tools/                 # 内置工具
 │   └── src/main/java/io/pigagent/tool/
 │       ├── shell/ShellTools.java
@@ -401,28 +401,36 @@ public final class MyHook implements Hook {
 }
 ```
 
-### 3. 自定义 LLM 提供商
+### 3. 自定义模型协议
 
-实现 `AgentOnboardingProvider` 接口：
+> 接入某个**已有协议**的新厂商（例如又一个 OpenAI 兼容端点）**无需写代码**——用户在 onboarding / `/model add` 里选协议并填 baseUrl 即可。只有引入一套**全新协议**时才需实现下面的接口。
+
+实现 `ModelProtocol` 接口（`io.pigagent.core.protocol`）：
 
 ```java
-public final class MyProvider implements AgentOnboardingProvider {
+public final class MyProtocol implements ModelProtocol {
 
     @Override
-    public String providerId() { return "my-provider"; }
+    public String protocolId() { return "my-protocol"; }
 
     @Override
-    public String displayName() { return "My LLM Provider"; }
+    public String displayName() { return "My Protocol"; }
 
     @Override
-    public List<String> requiredCredentialKeys() {
-        return List.of("MY_API_KEY");
-    }
+    public String description() { return "My model protocol"; }
 
     @Override
-    public Model createModel(ProviderCredentials credentials) {
+    public String defaultModelName() { return "my-model"; }
+
+    @Override
+    public boolean supportsBaseUrl() { return true; }
+
+    @Override
+    public Model createModel(ModelSpec spec) {
         return MyChatModel.builder()
-                .apiKey(credentials.get("MY_API_KEY"))
+                .apiKey(spec.apiKey())
+                .baseUrl(spec.baseUrl())
+                .modelName(spec.modelName())
                 .build();
     }
 }
@@ -431,7 +439,7 @@ public final class MyProvider implements AgentOnboardingProvider {
 在 `PigAgentCli.java` 中注册：
 
 ```java
-registry.register(new MyProvider());
+registry.register(new MyProtocol());
 ```
 
 ### 4. 自定义通道
@@ -612,7 +620,7 @@ WantedBy=multi-user.target
 ## 设计原则
 
 - **不可变数据** — `Task`、`ProviderCredentials` 等核心类型均为 record，通过 `withXxx()` 生成新实例
-- **接口抽象** — `AgentOnboardingProvider`、`Channel`、`TaskRepository` 等均为接口，方便替换实现
+- **接口抽象** — `ModelProtocol`、`Channel`、`TaskRepository` 等均为接口，方便替换实现
 - **Hook 扩展** — 通过 `Hook` 接口拦截 Agent 生命周期事件，无需修改核心代码
 - **配置驱动** — YAML 配置文件 + 变更监听器，支持运行时动态调整
 

@@ -8,7 +8,7 @@ import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
-import io.pigagent.core.provider.AgentOnboardingProvider;
+import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.session.Session;
@@ -51,7 +51,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new TasksCommand(ctx));
         cmd.addSubcommand(new SkillsCommand(ctx));
         cmd.addSubcommand(new ConfigCommand(ctx));
-        cmd.addSubcommand(new ProvidersCommand(ctx));
+        cmd.addSubcommand(new ProtocolsCommand(ctx));
         cmd.addSubcommand(new ModelCommand(ctx));
         cmd.addSubcommand(new ChannelsCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
@@ -89,7 +89,7 @@ public final class ReplCommands {
             entry(t, "/tasks", "List all tasks");
             entry(t, "/skills", "List available skills");
             entry(t, "/config", "Show current configuration");
-            entry(t, "/providers", "List all LLM provider types");
+            entry(t, "/protocols", "List all model protocol types");
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
             entry(t, "/channels", "Show connected channels and status");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
@@ -157,23 +157,23 @@ public final class ReplCommands {
         }
     }
 
-    @Command(name = "/providers", description = "List all LLM providers and availability")
-    static final class ProvidersCommand implements Runnable {
+    @Command(name = "/protocols", description = "List all model protocol types")
+    static final class ProtocolsCommand implements Runnable {
         private final ReplContext ctx;
 
-        ProvidersCommand(ReplContext ctx) {
+        ProtocolsCommand(ReplContext ctx) {
             this.ctx = ctx;
         }
 
         @Override
         public void run() {
             String current = ctx.modelManager().getCurrentModel()
-                    .map(StoredModel::providerId).orElse(null);
+                    .map(StoredModel::protocolId).orElse(null);
             Terminal t = ctx.terminal();
-            Ansi.println(t, Ansi.heading("Provider types:"));
-            for (AgentOnboardingProvider p : ctx.registry().getAllProviders()) {
-                String marker = p.providerId().equals(current) ? Ansi.bold(" (active)", Color.GREEN) : "";
-                Ansi.println(t, String.format("  %-12s  %-20s", p.providerId(), p.displayName())
+            Ansi.println(t, Ansi.heading("Protocol types:"));
+            for (ModelProtocol p : ctx.registry().getAllProtocols()) {
+                String marker = p.protocolId().equals(current) ? Ansi.bold(" (active)", Color.GREEN) : "";
+                Ansi.println(t, String.format("  %-12s  %-20s", p.protocolId(), p.displayName())
                         + Ansi.dim("  " + p.description()) + marker);
             }
         }
@@ -241,22 +241,22 @@ public final class ReplCommands {
                 Ansi.println(t, Ansi.error("Interactive input is unavailable."));
                 return;
             }
-            List<AgentOnboardingProvider> providers = ctx.registry().getAllProviders();
-            Ansi.println(t, Ansi.heading("Add model — choose a provider:"));
-            for (int i = 0; i < providers.size(); i++) {
-                AgentOnboardingProvider p = providers.get(i);
+            List<ModelProtocol> protocols = ctx.registry().getAllProtocols();
+            Ansi.println(t, Ansi.heading("Add model — choose a protocol:"));
+            for (int i = 0; i < protocols.size(); i++) {
+                ModelProtocol p = protocols.get(i);
                 Ansi.println(t, String.format("  %d) %-18s %s", i + 1, p.displayName(), p.description()));
             }
-            AgentOnboardingProvider provider;
+            ModelProtocol protocol;
             try {
-                int idx = Integer.parseInt(reader.readLine("Provider number: ").trim()) - 1;
-                provider = providers.get(idx);
+                int idx = Integer.parseInt(reader.readLine("Protocol number: ").trim()) - 1;
+                protocol = protocols.get(idx);
             } catch (Exception e) {
                 Ansi.println(t, Ansi.error("Invalid selection."));
                 return;
             }
             String apiKey = null;
-            if (provider.requiresApiKey()) {
+            if (protocol.requiresApiKey()) {
                 apiKey = reader.readLine("API key: ").trim();
                 if (apiKey.isBlank()) {
                     Ansi.println(t, Ansi.error("API key is required."));
@@ -264,17 +264,17 @@ public final class ReplCommands {
                 }
             }
             String baseUrl = null;
-            if (provider.supportsBaseUrl()) {
+            if (protocol.supportsBaseUrl()) {
                 baseUrl = reader.readLine("Base URL (optional): ").trim();
                 if (baseUrl.isBlank()) {
                     baseUrl = null;
                 }
             }
-            String modelName = reader.readLine("Model name [" + provider.defaultModelName() + "]: ").trim();
+            String modelName = reader.readLine("Model name [" + protocol.defaultModelName() + "]: ").trim();
             if (modelName.isBlank()) {
-                modelName = provider.defaultModelName();
+                modelName = protocol.defaultModelName();
             }
-            StoredModel m = StoredModel.create(provider.providerId(), apiKey, baseUrl, modelName);
+            StoredModel m = StoredModel.create(protocol.protocolId(), apiKey, baseUrl, modelName);
             Ansi.println(t, Ansi.dim("Testing " + m.label() + " ..."));
             ModelManager.TestResult test = mm.test(m);
             if (!test.ok()) {

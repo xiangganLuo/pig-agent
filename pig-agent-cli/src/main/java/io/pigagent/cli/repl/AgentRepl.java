@@ -11,7 +11,7 @@ import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.SessionManager;
 import org.jline.console.SystemRegistry;
 import org.jline.console.impl.SystemRegistryImpl;
@@ -45,7 +45,7 @@ public final class AgentRepl {
 
     private final AgentHolder agentHolder;
     private final ConfigurationManager configManager;
-    private final ProviderRegistry registry;
+    private final ProtocolRegistry registry;
     private final ModelManager modelManager;
     private final CompressionService compressionService;
     private final McpManager mcpManager;
@@ -54,7 +54,7 @@ public final class AgentRepl {
     private final Path workDir;
     private final AtomicReference<LineReader> readerRef;
 
-    public AgentRepl(AgentHolder agentHolder, ConfigurationManager configManager, ProviderRegistry registry,
+    public AgentRepl(AgentHolder agentHolder, ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
                      AtomicReference<LineReader> readerRef) {

@@ -14,8 +14,8 @@ import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
-import io.pigagent.provider.anthropic.AnthropicProvider;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.anthropic.AnthropicProtocol;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.tool.permission.PermissionDeniedTool;
 import io.pigagent.tool.permission.ToolPermissionHook;
 import org.junit.jupiter.api.Test;
@@ -53,8 +53,8 @@ class PermissionEnforcementIT {
         Path realModels = Path.of(System.getProperty("user.home"), ".pig-agent", "workspace", "models.json");
         assertThat(realModels).as("需要已配置的 anthropic models.json").exists();
 
-        ProviderRegistry registry = new ProviderRegistry();
-        registry.register(new AnthropicProvider());
+        ProtocolRegistry registry = new ProtocolRegistry();
+        registry.register(new AnthropicProtocol());
         ModelManager modelManager = new ModelManager(registry, new JsonModelStore(realModels));
         StoredModel def = modelManager.getDefault().orElseThrow();
         Model model = modelManager.buildModel(def);

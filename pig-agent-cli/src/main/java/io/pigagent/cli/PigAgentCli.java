@@ -23,13 +23,12 @@ import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.onboarding.OnboardingWizard;
-import io.pigagent.provider.anthropic.AnthropicProvider;
-import io.pigagent.provider.dashscope.DashScopeProvider;
-import io.pigagent.provider.gemini.GeminiProvider;
-import io.pigagent.provider.mimo.MimoProvider;
-import io.pigagent.provider.ollama.OllamaProvider;
-import io.pigagent.provider.openai.OpenAiProvider;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.anthropic.AnthropicProtocol;
+import io.pigagent.provider.dashscope.DashScopeProtocol;
+import io.pigagent.provider.gemini.GeminiProtocol;
+import io.pigagent.provider.ollama.OllamaProtocol;
+import io.pigagent.provider.openai.OpenAiProtocol;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.FileSystemSessionRepository;
 import io.pigagent.session.SessionManager;
 import io.pigagent.session.SessionRepository;
@@ -89,13 +88,12 @@ public final class PigAgentCli {
         ConfigurationManager configManager = new ConfigurationManager(configPath);
         PigAgentConfig config = configManager.getConfig();
 
-        ProviderRegistry registry = new ProviderRegistry();
-        registry.register(new MimoProvider());
-        registry.register(new AnthropicProvider());
-        registry.register(new OpenAiProvider());
-        registry.register(new OllamaProvider());
-        registry.register(new GeminiProvider());
-        registry.register(new DashScopeProvider());
+        ProtocolRegistry registry = new ProtocolRegistry();
+        registry.register(new OpenAiProtocol());
+        registry.register(new AnthropicProtocol());
+        registry.register(new GeminiProtocol());
+        registry.register(new OllamaProtocol());
+        registry.register(new DashScopeProtocol());
 
         // Model store + manager. No default model → force onboarding (cannot be skipped).
         JsonModelStore modelStore = new JsonModelStore(workspace.getModelsFile());

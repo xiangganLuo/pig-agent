@@ -2,15 +2,14 @@ package io.pigagent.provider.gemini;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.GeminiChatModel;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import java.util.List;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
 
-public final class GeminiProvider implements AgentOnboardingProvider {
-    @Override public String providerId() { return "gemini"; }
+/** Google Gemini protocol. */
+public final class GeminiProtocol implements ModelProtocol {
+    @Override public String protocolId() { return "gemini"; }
     @Override public String displayName() { return "Google Gemini"; }
-    @Override public String description() { return "Gemini series models by Google"; }
-    @Override public List<String> requiredCredentialKeys() { return List.of("GEMINI_API_KEY"); }
+    @Override public String description() { return "Google Gemini protocol (Gemini series)"; }
     @Override public String defaultModelName() { return "gemini-2.0-flash"; }
 
     @Override

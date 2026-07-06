@@ -116,7 +116,7 @@ public final class JsonModelStore implements ModelStore {
     @JsonIgnoreProperties(ignoreUnknown = true)
     static final class Entry {
         public String id;
-        public String providerId;
+        public String protocolId;
         public String apiKey;
         public String baseUrl;
         public String modelName;
@@ -124,7 +124,7 @@ public final class JsonModelStore implements ModelStore {
         static Entry from(StoredModel m) {
             Entry e = new Entry();
             e.id = m.id();
-            e.providerId = m.providerId();
+            e.protocolId = m.protocolId();
             e.apiKey = m.apiKey();
             e.baseUrl = m.baseUrl();
             e.modelName = m.modelName();
@@ -132,7 +132,7 @@ public final class JsonModelStore implements ModelStore {
         }
 
         StoredModel toModel() {
-            return new StoredModel(id, providerId, apiKey, baseUrl, modelName);
+            return new StoredModel(id, protocolId, apiKey, baseUrl, modelName);
         }
     }
 }

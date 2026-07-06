@@ -2,15 +2,14 @@ package io.pigagent.provider.anthropic;
 
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.AnthropicChatModel;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import java.util.List;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
 
-public final class AnthropicProvider implements AgentOnboardingProvider {
-    @Override public String providerId() { return "anthropic"; }
+/** Anthropic (Claude) protocol. */
+public final class AnthropicProtocol implements ModelProtocol {
+    @Override public String protocolId() { return "anthropic"; }
     @Override public String displayName() { return "Anthropic (Claude)"; }
-    @Override public String description() { return "Claude series models by Anthropic"; }
-    @Override public List<String> requiredCredentialKeys() { return List.of("ANTHROPIC_API_KEY"); }
+    @Override public String description() { return "Anthropic messages protocol (Claude series)"; }
     @Override public String defaultModelName() { return "claude-sonnet-4-6"; }
     @Override public boolean supportsBaseUrl() { return true; }
 

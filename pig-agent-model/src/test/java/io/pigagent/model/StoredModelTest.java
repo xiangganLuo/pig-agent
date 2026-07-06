@@ -10,7 +10,7 @@ class StoredModelTest {
     void createGeneratesIdAndLabel() {
         StoredModel m = StoredModel.create("openai", "key", null, "gpt-4o");
         assertThat(m.id()).isNotBlank();
-        assertThat(m.providerId()).isEqualTo("openai");
+        assertThat(m.protocolId()).isEqualTo("openai");
         assertThat(m.label()).isEqualTo("openai / gpt-4o");
     }
 

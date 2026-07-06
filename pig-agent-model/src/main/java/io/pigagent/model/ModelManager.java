@@ -7,9 +7,9 @@ import io.agentscope.core.model.Model;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
-import io.pigagent.core.provider.AgentOnboardingProvider;
-import io.pigagent.core.provider.ModelSpec;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.core.protocol.ModelSpec;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.AgentModelSwitcher;
 
 import java.util.List;
@@ -17,7 +17,7 @@ import java.util.Optional;
 
 /**
  * Global model management + runtime switching. Saves/loads model configs via {@link ModelStore},
- * builds AgentScope models through the matching {@link AgentOnboardingProvider}, runs a
+ * builds AgentScope models through the matching {@link ModelProtocol}, runs a
  * connectivity probe before committing to a model, and rebuilds the live agent (through an
  * {@link AgentHolder} + {@link AgentFactory}) when the active model changes — without touching
  * conversation or memory. Implements {@link AgentModelSwitcher} so the session layer can request
@@ -36,7 +36,7 @@ public final class ModelManager implements AgentModelSwitcher {
         }
     }
 
-    private final ProviderRegistry registry;
+    private final ProtocolRegistry registry;
     private final ModelStore store;
 
     private AgentHolder holder;
@@ -48,7 +48,7 @@ public final class ModelManager implements AgentModelSwitcher {
     private AgentHolder channelHolder;
     private AgentFactory channelFactory;
 
-    public ModelManager(ProviderRegistry registry, ModelStore store) {
+    public ModelManager(ProtocolRegistry registry, ModelStore store) {
         this.registry = registry;
         this.store = store;
     }
@@ -68,7 +68,7 @@ public final class ModelManager implements AgentModelSwitcher {
 
     /** True once at least one model is saved and a resolvable default exists. */
     public boolean isConfigured() {
-        return getDefault().map(m -> registry.findById(m.providerId()).isPresent()).orElse(false);
+        return getDefault().map(m -> registry.findByProtocol(m.protocolId()).isPresent()).orElse(false);
     }
 
     public List<StoredModel> list() {
@@ -114,9 +114,9 @@ public final class ModelManager implements AgentModelSwitcher {
 
     /** Build a concrete AgentScope model from a stored config via its provider. */
     public Model buildModel(StoredModel m) {
-        AgentOnboardingProvider provider = registry.findById(m.providerId())
-                .orElseThrow(() -> new IllegalStateException("Unknown provider: " + m.providerId()));
-        return provider.createModel(new ModelSpec(m.providerId(), m.apiKey(), m.baseUrl(), m.modelName()));
+        ModelProtocol protocol = registry.findByProtocol(m.protocolId())
+                .orElseThrow(() -> new IllegalStateException("Unknown protocol: " + m.protocolId()));
+        return protocol.createModel(new ModelSpec(m.protocolId(), m.apiKey(), m.baseUrl(), m.modelName()));
     }
 
     /** Lightweight connectivity test: build the model and issue a tiny probe request. */

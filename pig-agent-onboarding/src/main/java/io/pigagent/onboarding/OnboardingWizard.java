@@ -1,9 +1,9 @@
 package io.pigagent.onboarding;
 
-import io.pigagent.core.provider.AgentOnboardingProvider;
+import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.registry.ProtocolRegistry;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -11,19 +11,19 @@ import java.io.InputStreamReader;
 import java.util.List;
 
 /**
- * First-run model setup. Interactively guides the user to pick a provider, enter the API key
+ * First-run model setup. Interactively guides the user to pick a protocol, enter the API key
  * (and optional base URL / model version), runs a connectivity test, and saves the result as
  * the global default model. There is no way to skip — the loop repeats until one model is
  * successfully configured, and no partial config is saved on failure.
  */
 public final class OnboardingWizard {
 
-    private final ProviderRegistry providerRegistry;
+    private final ProtocolRegistry protocolRegistry;
     private final ModelManager modelManager;
     private final BufferedReader reader;
 
-    public OnboardingWizard(ProviderRegistry providerRegistry, ModelManager modelManager) {
-        this.providerRegistry = providerRegistry;
+    public OnboardingWizard(ProtocolRegistry protocolRegistry, ModelManager modelManager) {
+        this.protocolRegistry = protocolRegistry;
         this.modelManager = modelManager;
         this.reader = new BufferedReader(new InputStreamReader(System.in));
     }
@@ -34,12 +34,12 @@ public final class OnboardingWizard {
 
         while (true) {
             try {
-                AgentOnboardingProvider provider = selectProvider();
-                String apiKey = promptApiKey(provider);
-                String baseUrl = promptBaseUrl(provider);
-                String modelName = promptModelName(provider);
+                ModelProtocol protocol = selectProtocol();
+                String apiKey = promptApiKey(protocol);
+                String baseUrl = promptBaseUrl(protocol);
+                String modelName = promptModelName(protocol);
 
-                StoredModel model = StoredModel.create(provider.providerId(), apiKey,
+                StoredModel model = StoredModel.create(protocol.protocolId(), apiKey,
                         baseUrl == null || baseUrl.isBlank() ? null : baseUrl, modelName);
 
                 System.out.println("\nTesting connection to " + model.label() + " ...");
@@ -62,32 +62,32 @@ public final class OnboardingWizard {
         }
     }
 
-    private AgentOnboardingProvider selectProvider() throws IOException {
-        List<AgentOnboardingProvider> providers = providerRegistry.getAllProviders();
-        System.out.println("Select a model provider:");
-        for (int i = 0; i < providers.size(); i++) {
-            AgentOnboardingProvider p = providers.get(i);
+    private ModelProtocol selectProtocol() throws IOException {
+        List<ModelProtocol> protocols = protocolRegistry.getAllProtocols();
+        System.out.println("Select a model protocol:");
+        for (int i = 0; i < protocols.size(); i++) {
+            ModelProtocol p = protocols.get(i);
             System.out.printf("  %d) %-18s %s%n", i + 1, p.displayName(), p.description());
         }
-        String input = readLine("Provider number: ");
+        String input = readLine("Protocol number: ");
         int idx;
         try {
             idx = Integer.parseInt(input.trim()) - 1;
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Please enter a valid number.");
         }
-        if (idx < 0 || idx >= providers.size()) {
+        if (idx < 0 || idx >= protocols.size()) {
             throw new IllegalArgumentException("Number out of range.");
         }
-        return providers.get(idx);
+        return protocols.get(idx);
     }
 
-    private String promptApiKey(AgentOnboardingProvider provider) throws IOException {
-        if (!provider.requiresApiKey()) {
+    private String promptApiKey(ModelProtocol protocol) throws IOException {
+        if (!protocol.requiresApiKey()) {
             return null;
         }
         while (true) {
-            String key = readLine("API key for " + provider.displayName() + ": ").trim();
+            String key = readLine("API key for " + protocol.displayName() + ": ").trim();
             if (!key.isBlank()) {
                 return key;
             }
@@ -95,15 +95,15 @@ public final class OnboardingWizard {
         }
     }
 
-    private String promptBaseUrl(AgentOnboardingProvider provider) throws IOException {
-        if (!provider.supportsBaseUrl()) {
+    private String promptBaseUrl(ModelProtocol protocol) throws IOException {
+        if (!protocol.supportsBaseUrl()) {
             return null;
         }
         return readLine("Custom base URL / endpoint (optional, press Enter to skip): ").trim();
     }
 
-    private String promptModelName(AgentOnboardingProvider provider) throws IOException {
-        String def = provider.defaultModelName();
+    private String promptModelName(ModelProtocol protocol) throws IOException {
+        String def = protocol.defaultModelName();
         String input = readLine("Model name [" + def + "]: ").trim();
         return input.isBlank() ? def : input;
     }

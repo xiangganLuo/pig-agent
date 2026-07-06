@@ -6,7 +6,7 @@ import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
-import io.pigagent.provider.registry.ProviderRegistry;
+import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.SessionManager;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public record ReplContext(
         AgentHolder agentHolder,
         ConfigurationManager configManager,
-        ProviderRegistry registry,
+        ProtocolRegistry registry,
         ModelManager modelManager,
         CompressionService compressionService,
         McpManager mcpManager,
