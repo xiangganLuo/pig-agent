@@ -19,7 +19,7 @@
 
 ## Decisions
 
-- **D1：重试实现为可复用的 reactive 重试算子，应用在 `PigAgent` 的流式/调用边界。** 交互与渠道都经 `PigAgent` 发起，故在此单点包裹即同时覆盖两者；`/model test` 的 `probe` 走不套重试的构造/路径。备选：在每个调用点各自包裹 —— 重复且易漏，否决。
+- **D1（itest 修订）：重试实现为 `Model` 装饰器 `RetryingModel`，不在 agent 流式层。** 原计划包 `PigAgent.stream`（即 `reactAgent.stream`）——**itest 实测证伪**：`ReActAgent` 单飞，重试重订阅 `reactAgent.stream()` 会重入仍在运行的 agent → `ErrorEvent: Agent is still running`。改为装饰 `Model`：`RetryingModel implements Model`，`stream()` 用 `Flux.defer(() -> delegate.stream(...))` + `RetryPolicy.apply` 重试**底层 HTTP 调用**，发生在**一次 ReActAgent 调用内部**——agent 只调一次 `model.stream()`，重试对它透明，单飞状态永不被重入。`AgentFactory.create` 在有 policy 时包 `RetryingModel`，单点覆盖交互 + 渠道；`/model test` 的 probe 不经 `AgentFactory`、无 policy → 结构性豁免。
 - **D2：仅重试瞬时错误。** 分类器 `TransientErrorClassifier`：HTTP 5xx（含 502/503）、超时（`TimeoutException`）、网络/IO（`IOException`/连接类）判为可重试；4xx（尤其 401/403/400）与其余判为不可重试。分类基于异常消息/类型（AgentScope 抛的是带状态码的流错误，按消息含 `502`/`503`/`5xx` + 异常类型识别）。
 - **D3（itest 修订）：客户端每次尝试超时默认关闭；重试由错误信号驱动。** 原计划用 `Flux.timeout(10s)` 每次尝试超时，**itest 实测证伪**：`claude-opus-4-8` + 大上下文 + 工具，首个信号常迟于 10s → 误判超时；且 `Flux.timeout` 只取消下游订阅，底层 `ReActAgent` 仍在跑，重试重订阅撞进「Agent is still running」。故改为：`per-attempt-timeout-seconds` **默认 0（关闭）**，`RetryPolicy` 仅当值 >0 才应用 `timeout`；重试由**真实瞬时错误信号**（502/网络/IO，错误到达时 agent 已终止 → 重订阅安全）驱动。真正的硬超时留待可中断运行的 spike。这不影响核心目标——502 自愈本就靠错误信号，不需超时。
 - **D4：指数退避 + 封顶。** `retryWhen(Retry.backoff(maxRetries, firstBackoff).maxBackoff(cap))`；默认 `firstBackoff=0.5s`、`cap=8s`、`maxRetries=10`。仅对 D2 判定可重试的错误退避重试；不可重试错误经 `filter` 直接透传。
@@ -30,7 +30,8 @@
 ## Risks / Trade-offs
 
 - [重订阅导致重复输出] → D5 的 pre-emission 守卫：已流出内容后不重试。单测覆盖“中途失败不重试、早期失败才重试”。
-- [客户端超时 + 不可中断 agent = 误伤 + 重入崩溃]（itest 实测）→ D3：超时默认关闭，重试改由错误信号驱动；硬超时留待可中断运行 spike（复用 `digital-employee` 的 task 0）。回归测试 `RetryPolicyTest.timeoutDisabled_slowSuccess_isNotRetriedNorInterrupted` 守住"慢但健康不误重试"。
+- [在 agent 流式层重试会重入单飞 ReActAgent → "Agent is still running"]（itest 实测）→ D1：重试下沉到 `Model` 装饰层，重订阅的是底层 HTTP 调用而非 agent；`ModelRetryWiringTest` 经 `AgentFactory`→`RetryingModel`→真 `ReActAgent` 验证 agent 正常完成、不重入。
+- [客户端超时 + 不可中断 agent = 误伤慢模型]（itest 实测）→ D3：超时默认关闭，重试改由错误信号驱动；硬超时留待可中断运行 spike（复用 `digital-employee` 的 task 0）。回归测试 `RetryPolicyTest.timeoutDisabled_slowSuccess_isNotRetriedNorInterrupted`。
 - [瞬时/永久错误分类误判] → D2 基于状态码+异常类型；单测覆盖 502→重试、401→不重试、超时→重试、400→不重试。误判偏保守（拿不准当不可重试，快速失败）。
 - [重试放大上游负载] → 指数退避+封顶+上限 10 次，最坏总等待有界（约 0.5+1+2+4+8×… 封顶后线性，数十秒级）；且仅瞬时错误触发。
 - [超时/重试拖慢“本该快速失败”的场景] → `/model test` 明确不套重试；`enabled:false` 可全局关闭。

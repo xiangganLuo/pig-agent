@@ -22,7 +22,7 @@
 
 ## Impact
 
-- **代码**：`pig-agent-core`（新增 `retry/` 重试策略 + 瞬时错误分类；在 `PigAgent.stream`/`call` 边界应用）；`pig-agent-config`（`model.retry` 配置块）；`pig-agent-cli`（重试提示渲染）；`pig-agent-channel`（渠道 agent 同享重试）。
+- **代码**：`pig-agent-core`（新增 `retry/`：`TransientErrorClassifier` + `RetryPolicy` + `RetryingModel` 装饰器；`AgentFactory` 在有 policy 时包 `RetryingModel`——重试在**一次 agent 调用内部**的底层 model.stream 上，不重入单飞 agent）；`pig-agent-config`（`model.retry` 配置块）；`pig-agent-cli`（构建 policy + 重试提示渲染）；交互 + 渠道经 `AgentFactory` 单点覆盖。
 - **配置**：`application.yaml` 新增 `model.retry`；缺省即上述默认值，向后兼容（无配置=用默认）。
 - **风险/限制**：每次尝试超时在 `stream()`（Flux）路径用 `Flux.timeout` 干净落地；`call()` 阻塞路径的硬超时受既有「同步 `.block()` 难中断」限制（与 `digital-employee` 的超时 spike 同源），首版对阻塞路径超时为**尽力而为**，重试本身照常。
 - **不改动**：模型协议 SPI、`models.json`、`/model test` 的快速失败语义。

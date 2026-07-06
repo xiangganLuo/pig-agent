@@ -2,6 +2,7 @@ package io.pigagent.core.retry;
 
 import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.EventType;
+import io.agentscope.core.hook.Hook;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
@@ -9,6 +10,7 @@ import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
+import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.PigAgent;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -21,13 +23,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * End-to-end (offline, deterministic) wiring test: a fake {@link Model} drives the real
- * {@link PigAgent#stream} path so we prove the {@link RetryPolicy} re-subscribes down to the
- * model on transient failures and gives up on permanent ones — without any live LLM.
+ * End-to-end (offline) wiring: an agent built via {@link AgentFactory} with a retry policy wraps
+ * its model in a {@link RetryingModel}. A transient model failure is retried <em>inside</em> the
+ * single agent invocation, so the real {@code ReActAgent} completes normally and is never
+ * re-entered ("Agent is still running").
  */
 class ModelRetryWiringTest {
 
-    /** Model that fails transiently the first {@code failFirst} calls, then returns text. */
     static final class FakeModel implements Model {
         final AtomicInteger calls = new AtomicInteger();
         private final int failFirst;
@@ -49,18 +51,16 @@ class ModelRetryWiringTest {
             if (n <= failFirst) {
                 return Flux.error(new RuntimeException(errorMessage));
             }
-            ChatResponse resp = ChatResponse.builder()
+            return Flux.just(ChatResponse.builder()
                     .content(List.of(TextBlock.builder().text("hello from fake").build()))
-                    .finishReason("stop")
-                    .build();
-            return Flux.just(resp);
+                    .finishReason("stop").build());
         }
     }
 
-    private RetryPolicy policy(int maxRetries) {
-        return new RetryPolicy(true, maxRetries, Duration.ofSeconds(30),
-                Duration.ofMillis(1), Duration.ofMillis(1),
-                new TransientErrorClassifier(), null);
+    private AgentFactory factory(int maxRetries) {
+        RetryPolicy policy = new RetryPolicy(true, maxRetries, Duration.ZERO,
+                Duration.ofMillis(1), Duration.ofMillis(1), new TransientErrorClassifier(), null);
+        return new AgentFactory("t", "s", null, List.<Hook>of(), null, policy);
     }
 
     private Msg userMsg() {
@@ -69,17 +69,13 @@ class ModelRetryWiringTest {
     }
 
     @Test
-    void transientFailures_areRetried_untilModelSucceeds() {
-        // Arrange — fail twice (502) then succeed.
+    void transientFailures_retriedUnderneath_agentCompletesNormally() {
         FakeModel model = new FakeModel(2, "502 upstream_error");
-        PigAgent agent = PigAgent.builder()
-                .name("t").sysPrompt("s").model(model).retryPolicy(policy(5)).build();
+        PigAgent agent = factory(5).create(model);
 
-        // Act — consume the stream to completion.
         List<Event> events = agent.stream(userMsg()).collectList().block();
 
-        // Assert — the model was re-invoked past its failures and a result came through.
-        assertThat(model.calls.get()).isGreaterThanOrEqualTo(3); // 2 failures + at least one success
+        assertThat(model.calls.get()).isGreaterThanOrEqualTo(3); // retried under the agent
         String text = events == null ? "" : events.stream()
                 .filter(e -> e.getType() == EventType.AGENT_RESULT)
                 .map(e -> e.getMessage().getTextContent())
@@ -88,13 +84,10 @@ class ModelRetryWiringTest {
     }
 
     @Test
-    void permanentFailure_isNotRetried() {
-        // Arrange — always 401 (permanent).
+    void permanentFailure_notRetried() {
         FakeModel model = new FakeModel(Integer.MAX_VALUE, "401 Unauthorized");
-        PigAgent agent = PigAgent.builder()
-                .name("t").sysPrompt("s").model(model).retryPolicy(policy(5)).build();
+        PigAgent agent = factory(5).create(model);
 
-        // Act + Assert — fails fast, model called exactly once (no retry).
         assertThatThrownBy(() -> agent.stream(userMsg()).blockLast()).isInstanceOf(Exception.class);
         assertThat(model.calls.get()).isEqualTo(1);
     }

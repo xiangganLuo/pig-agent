@@ -5,6 +5,7 @@ import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.core.retry.RetryPolicy;
+import io.pigagent.core.retry.RetryingModel;
 
 import java.util.List;
 
@@ -40,16 +41,20 @@ public final class AgentFactory {
         this.retryPolicy = retryPolicy;
     }
 
-    /** Build a fresh agent using the given model and the shared configuration. */
+    /**
+     * Build a fresh agent using the given model and the shared configuration. When a retry policy
+     * is set, the model is wrapped in a {@link RetryingModel} so transient failures are retried
+     * <em>inside</em> a single agent invocation (never by re-subscribing the single-flight agent).
+     */
     public PigAgent create(Model model) {
+        Model effectiveModel = retryPolicy == null ? model : new RetryingModel(model, retryPolicy);
         return PigAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
-                .model(model)
+                .model(effectiveModel)
                 .toolkit(toolkit)
                 .hooks(hooks)
                 .longTermMemory(longTermMemory)
-                .retryPolicy(retryPolicy)
                 .build();
     }
 }
