@@ -4,6 +4,7 @@ import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
+import io.pigagent.core.retry.RetryPolicy;
 
 import java.util.List;
 
@@ -22,14 +23,21 @@ public final class AgentFactory {
     private final Toolkit toolkit;
     private final List<Hook> hooks;
     private final LongTermMemory longTermMemory;
+    private final RetryPolicy retryPolicy; // nullable
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory) {
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, null);
+    }
+
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
         this.hooks = hooks;
         this.longTermMemory = longTermMemory;
+        this.retryPolicy = retryPolicy;
     }
 
     /** Build a fresh agent using the given model and the shared configuration. */
@@ -41,6 +49,7 @@ public final class AgentFactory {
                 .toolkit(toolkit)
                 .hooks(hooks)
                 .longTermMemory(longTermMemory)
+                .retryPolicy(retryPolicy)
                 .build();
     }
 }

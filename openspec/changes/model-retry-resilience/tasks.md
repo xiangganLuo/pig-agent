@@ -15,12 +15,12 @@
 
 ## 3. 应用到模型调用边界（pig-agent-core / cli / channel）
 
-- [ ] 3.1 在 `PigAgent.stream`（+ 必要时 `call`）边界应用 `RetryPolicy`，`enabled:false` 时旁路；`/model test` 的 probe 走不套重试路径。
-- [ ] 3.2 重试可见回调：core 暴露重试事件回调；`AgentRepl` 渲染 `[retry k/N] …` 提示；渠道路径同享重试（核对 `ChannelAgentBridge` 走 stream/call 后接入）。
-- [ ] 3.3 单测：`enabled:false` 完全旁路（不重试）；`/model test` 不重试快速失败。
-- [ ] 3.4 全模块 `mvn test` BUILD SUCCESS，无回归。
+- [x] 3.1 `PigAgent.stream` 应用 `RetryPolicy`（builder 加 `retryPolicy`，null=不重试）；`enabled:false` 由 `RetryPolicy.apply` 旁路；`ModelManager.test` 的 probe 无 policy 且用 `call()`→结构性豁免。
+- [x] 3.2 重试可见：`RetryPolicy.RetryListener` 回调；`PigAgentCli` 交互版打印 `[retry k/N] cause, backing off Nms…` 到终端、渠道版记 stderr；`AgentFactory` 加 `retryPolicy` 参数贯通交互 + 渠道（两者都走 `stream()`，单点覆盖）。
+- [x] 3.3 `enabled:false` 旁路由 `RetryPolicyTest.disabled_bypassesRetryEntirely` 覆盖；`/model test` 豁免为结构性（probe 不带 policy）。
+- [x] 3.4 全模块 `mvn test` BUILD SUCCESS，无回归。
 
-## 4. 集成测试（外环）+ 文档
+## 4. 集成测试 + 文档
 
-- [ ] 4.1 端到端 `*IT`：mock/注入一个前 N 次抛 502、之后成功的模型，断言交互对话最终成功且重试次数符合预期；再断言 401 立即失败不重试。
-- [ ] 4.2 文档：`CLAUDE.md` 模型章节补 `model.retry` 说明；`README`（中文）配置示例补 `model.retry` 块。
+- [x] 4.1 端到端**离线确定性**测试 `ModelRetryWiringTest`（假 `Model` 驱动真实 `PigAgent.stream`/`ReActAgent`）：前 2 次 502→重试到成功且响应正常；401→不重试模型仅调 1 次。比真上游 502 的 IT 更强（可复现、无需 key）。
+- [x] 4.2 文档：`CLAUDE.md` 加 Model retry 段（分类/策略/pre-emission/豁免/配置）；`README` 配置示例补 `model.retry` 块（含中文注释）。

@@ -9,6 +9,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.session.Session;
 import io.agentscope.core.tool.Toolkit;
+import io.pigagent.core.retry.RetryPolicy;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -23,11 +24,13 @@ public final class PigAgent {
     private final ReActAgent reactAgent;
     private final String agentName;
     private final Model model;
+    private final RetryPolicy retryPolicy; // nullable: no retry when absent (e.g. connectivity probe)
 
-    private PigAgent(ReActAgent reactAgent, String agentName, Model model) {
+    private PigAgent(ReActAgent reactAgent, String agentName, Model model, RetryPolicy retryPolicy) {
         this.reactAgent = Objects.requireNonNull(reactAgent, "reactAgent");
         this.agentName = Objects.requireNonNull(agentName, "agentName");
         this.model = Objects.requireNonNull(model, "model");
+        this.retryPolicy = retryPolicy;
     }
 
     public static Builder builder() {
@@ -39,7 +42,8 @@ public final class PigAgent {
     }
 
     public Flux<io.agentscope.core.agent.Event> stream(Msg userMsg) {
-        return reactAgent.stream(userMsg);
+        Flux<io.agentscope.core.agent.Event> events = reactAgent.stream(userMsg);
+        return retryPolicy == null ? events : retryPolicy.apply(events);
     }
 
     public String getAgentName() {
@@ -81,6 +85,7 @@ public final class PigAgent {
         private Toolkit toolkit;
         private List<io.agentscope.core.hook.Hook> hooks;
         private LongTermMemory longTermMemory;
+        private RetryPolicy retryPolicy;
 
         private Builder() {}
 
@@ -114,6 +119,12 @@ public final class PigAgent {
             return this;
         }
 
+        /** Optional retry policy for {@link #stream}; when absent, calls are not retried. */
+        public Builder retryPolicy(RetryPolicy retryPolicy) {
+            this.retryPolicy = retryPolicy;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -136,7 +147,7 @@ public final class PigAgent {
             }
 
             ReActAgent reactAgent = reactBuilder.build();
-            return new PigAgent(reactAgent, name, model);
+            return new PigAgent(reactAgent, name, model, retryPolicy);
         }
     }
 }
