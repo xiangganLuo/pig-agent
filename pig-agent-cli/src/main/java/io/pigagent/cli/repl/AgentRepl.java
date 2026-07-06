@@ -133,7 +133,8 @@ public final class AgentRepl {
         }
     }
 
-    private void streamToAgent(String input, Terminal terminal) {
+    // Package-private for the error-rendering regression test (AgentReplErrorPrintTest).
+    void streamToAgent(String input, Terminal terminal) {
         Msg userMsg = Msg.builder().name("user").role(MsgRole.USER)
                 .content(TextBlock.builder().text(input).build()).build();
 
@@ -152,11 +153,11 @@ public final class AgentRepl {
                 if (!finalResponse.isEmpty()) {
                     Ansi.println(terminal, Ansi.info(finalResponse.toString()));
                 }
-            }).doOnError(e ->
-                    Ansi.println(terminal, Ansi.error("\nError: " + e.getMessage()))
-            ).blockLast();
+            }).blockLast();
         } catch (Exception e) {
-            Ansi.println(terminal, Ansi.error("Error: " + e.getMessage()));
+            // blockLast() re-throws the reactive error, so print it here only — printing in
+            // both doOnError and this catch is what caused the duplicated "Error:" lines.
+            Ansi.println(terminal, Ansi.error("\nError: " + e.getMessage()));
         }
         Ansi.println(terminal, "");
     }
