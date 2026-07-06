@@ -8,6 +8,9 @@ import io.pigagent.cli.Ansi;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentInstanceFactory;
+import io.pigagent.core.agent.AgentRegistry;
+import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -44,6 +47,9 @@ import java.util.function.Supplier;
 public final class AgentRepl {
 
     private final AgentHolder agentHolder;
+    private final AgentRegistry agentRegistry;
+    private final AgentSpecRepository agentRepository;
+    private final AgentInstanceFactory instanceFactory;
     private final ConfigurationManager configManager;
     private final ProtocolRegistry registry;
     private final ModelManager modelManager;
@@ -54,11 +60,16 @@ public final class AgentRepl {
     private final Path workDir;
     private final AtomicReference<LineReader> readerRef;
 
-    public AgentRepl(AgentHolder agentHolder, ConfigurationManager configManager, ProtocolRegistry registry,
+    public AgentRepl(AgentHolder agentHolder, AgentRegistry agentRegistry,
+                     AgentSpecRepository agentRepository, AgentInstanceFactory instanceFactory,
+                     ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
                      AtomicReference<LineReader> readerRef) {
         this.agentHolder = agentHolder;
+        this.agentRegistry = agentRegistry;
+        this.agentRepository = agentRepository;
+        this.instanceFactory = instanceFactory;
         this.configManager = configManager;
         this.registry = registry;
         this.modelManager = modelManager;
@@ -77,10 +88,11 @@ public final class AgentRepl {
                 .system(true).jna(true).jansi(false).build()) {
 
             AtomicBoolean running = new AtomicBoolean(true);
-            ReplContext ctx = new ReplContext(agentHolder, configManager, registry, modelManager,
+            ReplContext ctx = new ReplContext(agentHolder, agentRegistry, agentRepository, instanceFactory,
+                    configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
 
-            DefaultParser parser = new DefaultParser();
+            DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
             CommandLine cmd = ReplCommands.build(ctx, factory);
             PicocliCommands picocliCommands = new PicocliCommands(cmd);
@@ -131,6 +143,19 @@ public final class AgentRepl {
                 }
             }
         }
+    }
+
+    /**
+     * The REPL line parser. Slash commands are the command names ({@code /help}, {@code /model}…),
+     * but JLine's default {@code regexCommand} only recognizes names starting with a letter, so
+     * {@code getCommand("/help")} yields "" and {@link SystemRegistry} raises "Invalid command".
+     * Allowing an optional leading {@code /} in the command regex makes the whole slash-command
+     * tree dispatch. Shared with tests so the config can't silently drift.
+     */
+    static DefaultParser replParser() {
+        DefaultParser parser = new DefaultParser();
+        parser.setRegexCommand("/?[a-zA-Z][a-zA-Z0-9_-]*");
+        return parser;
     }
 
     // Package-private for the error-rendering regression test (AgentReplErrorPrintTest).

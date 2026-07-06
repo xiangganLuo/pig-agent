@@ -3,6 +3,9 @@ package io.pigagent.cli.repl;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentInstanceFactory;
+import io.pigagent.core.agent.AgentRegistry;
+import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -25,6 +28,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public record ReplContext(
         AgentHolder agentHolder,
+        AgentRegistry agentRegistry,
+        AgentSpecRepository agentRepository,
+        AgentInstanceFactory instanceFactory,
         ConfigurationManager configManager,
         ProtocolRegistry registry,
         ModelManager modelManager,

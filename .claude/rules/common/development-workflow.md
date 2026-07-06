@@ -2,6 +2,8 @@
 
 > This file extends [common/git-workflow.md](./git-workflow.md) with the full feature development process that happens before git operations.
 
+> **强制流程入口**：实现任何需求/特性/修复，MUST 走 `/ls:*` 半自动流水线——见 [ls-pipeline.md](./ls-pipeline.md)（澄清→spec→[code⇄itest]→归档，三道人工门不得越过）。本文件描述的是流水线各阶段**内部**的做法（研究复用、TDD、评审）。
+
 The Feature Implementation Workflow describes the development pipeline: research, planning, TDD, code review, and then committing to git.
 
 ## Feature Implementation Workflow

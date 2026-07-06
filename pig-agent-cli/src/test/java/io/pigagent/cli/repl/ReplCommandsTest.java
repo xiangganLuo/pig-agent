@@ -58,6 +58,9 @@ class ReplCommandsTest {
         AtomicBoolean running = new AtomicBoolean(true);
         ReplContext ctx = new ReplContext(
                 null, // agentHolder
+                null, // agentRegistry
+                null, // agentRepository
+                null, // instanceFactory
                 configManager,
                 null, // registry
                 null, // modelManager

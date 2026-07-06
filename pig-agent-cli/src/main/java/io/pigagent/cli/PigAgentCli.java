@@ -1,6 +1,7 @@
 package io.pigagent.cli;
 
 import io.agentscope.core.session.JsonSession;
+import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.channel.Channel;
 import io.pigagent.channel.ChannelAgentBridge;
@@ -11,6 +12,11 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentInstance;
+import io.pigagent.core.agent.AgentInstanceFactory;
+import io.pigagent.core.agent.AgentRegistry;
+import io.pigagent.core.agent.AgentSpec;
+import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.hook.LoggingHook;
@@ -230,6 +236,39 @@ public final class PigAgentCli {
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
 
+        // Multi-agent registry: the default agent (built above) is instance "default" and active;
+        // additional saved agents (workspace/agents/) are built per-spec with their own model /
+        // tool subset / permission mode. AgentHolder stays a live view of the active instance, so
+        // every existing reader (REPL/session/channel/compression) is unaffected.
+        AgentRegistry agentRegistry = new AgentRegistry(agentHolder);
+        AgentSpec defaultSpec = new AgentSpec("default", config.getAgent().getName(), sysPrompt,
+                List.of(), null, defaultModel.id(), config.getAgent().getMaxIters());
+        agentRegistry.register(new AgentInstance("default", defaultSpec, agentHolder.get()));
+
+        AgentInstanceFactory agentInstanceFactory = new AgentInstanceFactory(
+                spec -> {
+                    Model baseModel = modelManager.modelFor(spec.modelId());
+                    return interactiveRetry == null ? baseModel
+                            : new io.pigagent.core.retry.RetryingModel(baseModel, interactiveRetry);
+                },
+                spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
+                spec -> List.of(
+                        new ToolPermissionHook(() -> configManager.getConfig().getPermissions(),
+                                permissionConfirmer, allowlistWriter, false,
+                                () -> AgentWiring.permissionModeOf(spec.permissionMode())),
+                        new LoggingHook(), new ToolCallLoggingHook()),
+                memory);
+        AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
+        for (AgentSpec s : agentRepository.findAll()) {
+            if (!"default".equals(s.id())) {
+                try {
+                    agentRegistry.register(agentInstanceFactory.create(s));
+                } catch (Exception e) {
+                    System.err.println(Ansi.warn("[Agent] Failed to load '" + s.id() + "': " + e.getMessage()));
+                }
+            }
+        }
+
         // Channels get their own agent whose permission hook runs in channel mode (uses
         // permissions.channel-mode, no interactive confirmer → ASK fails closed). attachChannel
         // makes model switches rebuild it too so channels keep following the active model.
@@ -270,7 +309,8 @@ public final class PigAgentCli {
             mcpManager.closeAll();
         }));
 
-        new AgentRepl(agentHolder, configManager, registry, modelManager, compressionService,
+        new AgentRepl(agentHolder, agentRegistry, agentRepository, agentInstanceFactory,
+                configManager, registry, modelManager, compressionService,
                 mcpManager, bridges, sessionManager, workspace.getRootPath(), readerRef).run();
     }
 

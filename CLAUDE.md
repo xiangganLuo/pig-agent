@@ -41,7 +41,7 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 | Module | Responsibility | Key types |
 |--------|---------------|-----------|
-| `pig-agent-core` | Agent wrapper + rebuildable agent, hooks, two-tier memory, compression, protocol SPI | `PigAgent`, `AgentHolder`, `AgentFactory`, `LoggingHook`, `ToolCallLoggingHook`, `FileSystemLongTermMemory`, `CompositeLongTermMemory`, `compression/CompressionService`, `protocol/ModelProtocol`, `protocol/ModelSpec`, `ProviderCredentials` |
+| `pig-agent-core` | Agent wrapper + rebuildable agent, multi-agent registry, hooks, two-tier memory, compression, protocol SPI | `PigAgent`, `AgentHolder`, `AgentFactory`, `AgentSpec`, `AgentRegistry`, `AgentInstance`, `AgentInstanceFactory`, `AgentSpecRepository`, `LoggingHook`, `ToolCallLoggingHook`, `FileSystemLongTermMemory`, `CompositeLongTermMemory`, `compression/CompressionService`, `protocol/ModelProtocol`, `protocol/ModelSpec`, `ProviderCredentials` |
 | `pig-agent-providers` | Model protocol impls + registry (depends on the protocol SDKs) | `OpenAiProtocol`, `AnthropicProtocol`, `GeminiProtocol`, `OllamaProtocol`, `DashScopeProtocol`, `ProtocolRegistry` |
 | `pig-agent-model` | Multiple saved model configs, connectivity test, runtime switching | `StoredModel`, `ModelStore`, `JsonModelStore`, `ModelManager` |
 | `pig-agent-session` | Independent conversation sessions + per-session temp memory | `Session`, `SessionManager`, `SessionRepository`, `FileSystemSessionRepository`, `AgentModelSwitcher` |
@@ -60,7 +60,9 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 **The agent is swappable at runtime.** AgentScope's `Model` is fixed at build time, so to switch models without restarting, the `PigAgent` is built via `AgentFactory.create(model)` and stored in a mutable `AgentHolder`. Everything (REPL, channels, session manager, compression) reads the current agent through the holder. `ModelManager.ensureModel(...)` rebuilds the agent on a model switch; the session layer reloads the conversation afterward.
 
-**REPL flow:** `AgentRepl` builds a JLine `Terminal` (jna provider, `jansi(false)`) and a picocli command tree (`ReplCommands`) via `picocli-shell-jline3`. A line starting with `/` is dispatched to a picocli subcommand (`/model`, `/session`, `/memory`, `/compress`, `/tasks`, `/help`, …); anything else is streamed to the agent (`PigAgent.stream` → `ReActAgent`). Output is colored with **Jansi as a string builder only** — `AnsiConsole.systemInstall()` is intentionally NOT called (it double-wraps `System.out` and garbles output on Windows when JLine owns the terminal). See `cli/Ansi.java`.
+**Multiple agents (`agent-management`, phase 1).** The single `AgentHolder` is driven by an `AgentRegistry` (`Map<agentId, AgentInstance>`): the holder is a **live view of the active instance**, so every existing reader stays unchanged. Each agent is a declarative, immutable `AgentSpec` — its own model (`modelId` → `ModelManager.modelFor`, fault-tolerant fallback to default), tool subset (`AgentWiring.toolkitFor` = `Toolkit.copy()` + `removeTool` by whitelist), and permission mode (per-agent `ToolPermissionHook` mode-override) — persisted at `workspace/agents/{id}.md` (`AgentSpecRepository`, YAML front-matter + prompt body) and built by `AgentInstanceFactory` (per-agent toolkit/hooks/memory; NOT the shared `AgentFactory`). On an empty `agents/`, a `default` instance equivalent to the old single agent is bootstrapped, so single-agent behavior is unchanged. Operate via `/agent list|use|new|model`. Design: `docs/design/agent-management-design.md`; change: `openspec/changes/multi-agent-kernel/`.
+
+**REPL flow:** `AgentRepl` builds a JLine `Terminal` (jna provider, `jansi(false)`) and a picocli command tree (`ReplCommands`) via `picocli-shell-jline3`. A line starting with `/` is dispatched to a picocli subcommand (`/model`, `/agent`, `/session`, `/memory`, `/compress`, `/tasks`, `/help`, …); anything else is streamed to the agent (`PigAgent.stream` → `ReActAgent`). Output is colored with **Jansi as a string builder only** — `AnsiConsole.systemInstall()` is intentionally NOT called (it double-wraps `System.out` and garbles output on Windows when JLine owns the terminal). See `cli/Ansi.java`.
 
 **Sessions** (`SessionManager`): each conversation is isolated. Conversation history persists via AgentScope's `JsonSession` under `workspace/sessions/{id}/`; lightweight metadata (`Session` record) is stored as `meta.json` by `FileSystemSessionRepository`. Switching = save current → `clearMemory` → `loadIfExists(target)` (no agent rebuild unless the model differs). `current-session-id` in config restores the last session on startup.
 
@@ -98,6 +100,8 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 
 ## AI 开发流水线（`/ls:*`）
 
+> **强制规约**：实现任何需求/特性/修复 MUST 走此流水线，不得跳阶段/越人工门/自行拍板拆分。硬性规则见 [`.claude/rules/common/ls-pipeline.md`](.claude/rules/common/ls-pipeline.md)。
+
 一条半自动的 AI 开发流水线，把既有能力串成标准流程（命令定义在 `.claude/commands/ls/`，复用 `/opsx:*` + `.claude/rules/common/`，不重造）。
 
 ```
@@ -114,7 +118,7 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 12 modules
 | `/ls:status` | 进度汇报 | 只读 | 跨 澄清/设计/规格/任务 维度统计所有活跃 spec（多 spec 并行视图 + 卡点） |
 | `/ls:dev` | 总控 | 半自动 | 端到端串联五阶段，尊重上述人工门 |
 
-**两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**多 spec**：大需求在 `/ls:clarify` 拆成多个可独立上线的 spec，各自 `feat/<name>` 分支并行开发，`/ls:status` 汇总进度。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。完整指南 + 实战复盘见 `docs/ai-dev-pipeline.md`；规约基座见 `.claude/rules/common/development-workflow.md`。
+**两层 loop engine**：内环 = 编码⇄单测（`/ls:code`，快、离线）；外环 = 任务→内环→集成测试（`/ls:itest`，慢、真模型），失败回环至绿。**半自动**：澄清/spec/归档人工把门，编码+测试自动推进。**多 spec**：大需求在 `/ls:clarify` 拆成多个可独立上线的 spec（拆分须人工审），各自 `feat/<name>` 分支——**依赖允许时并行，否则按依赖顺序推进**（后者在前者归档后才细化 tasks），`/ls:status` 汇总进度。**分支前缀**：`feat`/`bug`/`docs`/`opt`（`bug/` 分支的提交信息仍用 conventional-commit `fix:`）。完整指南 + 实战复盘见 `docs/ai-dev-pipeline.md`；规约基座见 `.claude/rules/common/development-workflow.md`。
 
 ## Skills
 
