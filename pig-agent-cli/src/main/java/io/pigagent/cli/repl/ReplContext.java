@@ -3,10 +3,7 @@ package io.pigagent.cli.repl;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
-import io.pigagent.core.agent.AgentInstanceFactory;
-import io.pigagent.core.agent.AgentRegistry;
-import io.pigagent.core.agent.AgentSpecRepository;
-import io.pigagent.core.agent.runner.AgentRunner;
+import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -23,17 +20,15 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Immutable bundle of collaborators shared with every REPL command.
  *
- * <p>The agent is reached via {@link AgentHolder} (not a fixed reference) so commands always
- * see the current agent after a runtime model switch. {@code running} lets {@code /quit} stop
- * the loop; {@code readerRef} (set by {@link AgentRepl} after the reader is built) is used for
- * interactive confirmation prompts.
+ * <p>Agent management goes through the {@link AgentKernel} façade (not the internal registry /
+ * repository / factory), so the CLI is just one adapter over the kernel. The active agent is read
+ * via {@link AgentHolder} (the kernel keeps it pointed at the active instance) so commands always
+ * see the current agent after a switch. {@code running} lets {@code /quit} stop the loop;
+ * {@code readerRef} (set by {@link AgentRepl}) is used for interactive confirmation prompts.
  */
 public record ReplContext(
         AgentHolder agentHolder,
-        AgentRegistry agentRegistry,
-        AgentSpecRepository agentRepository,
-        AgentInstanceFactory instanceFactory,
-        AgentRunner agentRunner,
+        AgentKernel agentKernel,
         Path reportsDir,
         ConfigurationManager configManager,
         ProtocolRegistry registry,

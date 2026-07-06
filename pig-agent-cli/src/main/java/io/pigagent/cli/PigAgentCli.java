@@ -18,6 +18,7 @@ import io.pigagent.core.agent.AgentRegistry;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.agent.runner.FileReportWriter;
 import io.pigagent.core.compression.CompressionService;
@@ -297,6 +298,10 @@ public final class PigAgentCli {
                 new FileReportWriter(workspace.getReportsDir()),
                 (spec, epoch) -> agentRepository.save(spec.withLastRunAtEpochMs(epoch)),
                 null);
+        // The kernel façade: the CLI (and future Web) drive agent management through this, not the
+        // internal registry/repository/factory/runner directly.
+        AgentKernel agentKernel = new AgentKernel(
+                agentRegistry, agentRepository, agentInstanceFactory, agentRunner);
         for (AgentSpec s : agentRegistry.list().stream().map(i -> i.spec()).toList()) {
             if (s.isAutonomous()) {
                 taskScheduler.schedule("agent:" + s.id(), TaskSchedule.cron(s.schedule()),
@@ -346,8 +351,7 @@ public final class PigAgentCli {
             mcpManager.closeAll();
         }));
 
-        new AgentRepl(agentHolder, agentRegistry, agentRepository, agentInstanceFactory,
-                agentRunner, workspace.getReportsDir(),
+        new AgentRepl(agentHolder, agentKernel, workspace.getReportsDir(),
                 configManager, registry, modelManager, compressionService,
                 mcpManager, bridges, sessionManager, workspace.getRootPath(), readerRef).run();
     }

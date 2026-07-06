@@ -8,9 +8,7 @@ import io.pigagent.cli.Ansi;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
-import io.pigagent.core.agent.AgentInstanceFactory;
-import io.pigagent.core.agent.AgentRegistry;
-import io.pigagent.core.agent.AgentSpecRepository;
+import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -47,10 +45,7 @@ import java.util.function.Supplier;
 public final class AgentRepl {
 
     private final AgentHolder agentHolder;
-    private final AgentRegistry agentRegistry;
-    private final AgentSpecRepository agentRepository;
-    private final AgentInstanceFactory instanceFactory;
-    private final io.pigagent.core.agent.runner.AgentRunner agentRunner;
+    private final AgentKernel agentKernel;
     private final Path reportsDir;
     private final ConfigurationManager configManager;
     private final ProtocolRegistry registry;
@@ -62,18 +57,13 @@ public final class AgentRepl {
     private final Path workDir;
     private final AtomicReference<LineReader> readerRef;
 
-    public AgentRepl(AgentHolder agentHolder, AgentRegistry agentRegistry,
-                     AgentSpecRepository agentRepository, AgentInstanceFactory instanceFactory,
-                     io.pigagent.core.agent.runner.AgentRunner agentRunner, Path reportsDir,
+    public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
                      AtomicReference<LineReader> readerRef) {
         this.agentHolder = agentHolder;
-        this.agentRegistry = agentRegistry;
-        this.agentRepository = agentRepository;
-        this.instanceFactory = instanceFactory;
-        this.agentRunner = agentRunner;
+        this.agentKernel = agentKernel;
         this.reportsDir = reportsDir;
         this.configManager = configManager;
         this.registry = registry;
@@ -93,8 +83,8 @@ public final class AgentRepl {
                 .system(true).jna(true).jansi(false).build()) {
 
             AtomicBoolean running = new AtomicBoolean(true);
-            ReplContext ctx = new ReplContext(agentHolder, agentRegistry, agentRepository, instanceFactory,
-                    agentRunner, reportsDir, configManager, registry, modelManager,
+            ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
+                    configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
 
             DefaultParser parser = replParser();
