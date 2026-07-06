@@ -31,10 +31,35 @@ public final class PigAgentConfig {
     public static final class ModelConfig {
         @JsonProperty("provider") private String provider = "anthropic";
         @JsonProperty("model-name") private String modelName = "claude-sonnet-4-6";
+        @JsonProperty("retry") private RetryConfig retry = new RetryConfig();
         public String getProvider() { return provider; }
         public void setProvider(String p) { this.provider = p; }
         public String getModelName() { return modelName; }
         public void setModelName(String n) { this.modelName = n; }
+        public RetryConfig getRetry() { return retry; }
+        public void setRetry(RetryConfig r) { this.retry = r; }
+    }
+
+    /**
+     * 模型调用重试（瞬时错误自愈）。缺省启用，向后兼容——无配置即用默认值；
+     * {@code enabled: false} 完全旁路重试，等同旧行为。
+     */
+    public static final class RetryConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        @JsonProperty("max-retries") private int maxRetries = 10;
+        @JsonProperty("per-attempt-timeout-seconds") private int perAttemptTimeoutSeconds = 10;
+        @JsonProperty("first-backoff-ms") private long firstBackoffMs = 500;
+        @JsonProperty("max-backoff-ms") private long maxBackoffMs = 8000;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getMaxRetries() { return maxRetries; }
+        public void setMaxRetries(int m) { this.maxRetries = m; }
+        public int getPerAttemptTimeoutSeconds() { return perAttemptTimeoutSeconds; }
+        public void setPerAttemptTimeoutSeconds(int s) { this.perAttemptTimeoutSeconds = s; }
+        public long getFirstBackoffMs() { return firstBackoffMs; }
+        public void setFirstBackoffMs(long ms) { this.firstBackoffMs = ms; }
+        public long getMaxBackoffMs() { return maxBackoffMs; }
+        public void setMaxBackoffMs(long ms) { this.maxBackoffMs = ms; }
     }
 
     public static final class AgentConfig {

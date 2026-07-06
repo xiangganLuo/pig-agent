@@ -9,9 +9,9 @@
 
 ## 2. 配置块 model.retry（pig-agent-config）
 
-- [ ] 2.1 单测：`model.retry` 反序列化默认值（enabled=true/max-retries=10/per-attempt-timeout=10/退避默认）；缺省块用默认；`enabled:false` 可读。
-- [ ] 2.2 在 `PigAgentConfig` 加 `model.retry` 配置类 + 默认值令 2.1 绿。
-- [ ] 2.3 `mvn -pl pig-agent-config -am test` 绿。
+- [x] 2.1 单测 `RetryConfigTest`：默认值（enabled=true/max-retries=10/timeout=10/backoff 500·8000）；缺省块用默认；`enabled:false` 与自定义值可读。（3/3）
+- [x] 2.2 `PigAgentConfig.ModelConfig` 加 `retry` 块 + `RetryConfig`（含默认值 + getter/setter）令 2.1 绿。
+- [x] 2.3 `mvn -pl pig-agent-config -am test` 绿。
 
 ## 3. 应用到模型调用边界（pig-agent-core / cli / channel）
 
