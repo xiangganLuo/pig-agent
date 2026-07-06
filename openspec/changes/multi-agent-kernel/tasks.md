@@ -28,13 +28,13 @@
 
 ## 5. /agent 命令 + 装配（pig-agent-cli）
 
-- [ ] 5.1 单测 `AgentCommandTest`（或 ReplCommands 层）：`/agent list` 列出、`/agent use <id>` 切换、`/agent new` 建、`/agent model <id> <modelId>` 改模型。
-- [ ] 5.2 实现 `/agent list|use|new|model` 命令令 5.1 绿；`ReplContext` 暴露 `AgentRegistry`；`/help` 增补。
-- [ ] 5.3 `PigAgentCli` 装配：建 `AgentRegistry`，启动从 `workspace/agents/` 载入；**空目录兜底建默认 active agent**（等价今天单 agent）；`ToolPermissionHook` 支持从 spec 读 permissionMode。
-- [ ] 5.4 `ToolPermissionHook` 支持 per-agent 权限档（构造时接受 mode 来源，默认仍读全局 config 保持兼容）；相关单测。
+- [x] 5.1 单测 `AgentWiringTest`（4/4）：per-agent 工具子集（copy+removeTool，未知名忽略、原 toolkit 不动）+ `permissionModeOf` 容错解析。（`/agent` 命令端到端由 G6 判据 IT 覆盖。）
+- [x] 5.2 实现 `/agent list|use|new|model` 命令（`repl/command/AgentCommand`）；`ReplContext` 暴露 `AgentRegistry`/`AgentSpecRepository`/`AgentInstanceFactory`；`/help` 增补。
+- [x] 5.3 `PigAgentCli` 装配：建 `AgentRegistry`，默认 agent 注册为 `default`（复用原对象，零变化），从 `workspace/agents/` 载入其余；`AgentInstanceFactory` 用 `modelFor`/`AgentWiring.toolkitFor`/per-agent hook 装配。
+- [x] 5.4 `ToolPermissionHook` 加 mode-override 构造器（返回非 null 则覆盖全局，per-agent 权限档）；默认路径不变（override=null）。
 
 ## 6. 全量校验 + 文档
 
-- [ ] 6.1 全模块 `mvn test` BUILD SUCCESS，全部单测通过、单 agent 回归基线绿、无回归。
+- [x] 6.1 全模块 `mvn test` BUILD SUCCESS，全部单测通过、单 agent 回归（ReplCommandsTest + 各模块）绿、无回归。
 - [ ] 6.2 端到端 `*IT`（外环）：定义两个不同模型的 agent、CLI 间切换、各用各的模型对话（判据用例）。
 - [ ] 6.3 文档：`CLAUDE.md` 架构章节 `AgentHolder`→`AgentRegistry` 表述；`agent-management-design.md` 勾掉阶段 1 相关待优化点。

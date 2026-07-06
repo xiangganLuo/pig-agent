@@ -24,18 +24,31 @@ public final class ToolPermissionHook implements Hook {
     private final PermissionConfirmer confirmer;
     private final AllowlistWriter writer;
     private final boolean channel;
+    private final Supplier<PermissionMode> modeOverride;
 
     public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
                               PermissionConfirmer confirmer, AllowlistWriter writer) {
-        this(configSupplier, confirmer, writer, false);
+        this(configSupplier, confirmer, writer, false, null);
     }
 
     public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
                               PermissionConfirmer confirmer, AllowlistWriter writer, boolean channel) {
+        this(configSupplier, confirmer, writer, channel, null);
+    }
+
+    /**
+     * Per-agent variant: when {@code modeOverride} yields a non-null {@link PermissionMode} it
+     * takes precedence over the global/channel mode, so an agent's own {@code permissionMode}
+     * governs its tool calls. A null result falls back to the global/channel mode.
+     */
+    public ToolPermissionHook(Supplier<PermissionConfig> configSupplier,
+                              PermissionConfirmer confirmer, AllowlistWriter writer, boolean channel,
+                              Supplier<PermissionMode> modeOverride) {
         this.configSupplier = configSupplier;
         this.confirmer = confirmer;
         this.writer = writer;
         this.channel = channel;
+        this.modeOverride = modeOverride;
     }
 
     @Override
@@ -49,7 +62,9 @@ public final class ToolPermissionHook implements Hook {
             ToolUseBlock tu = pre.getToolUse();
             if (tu != null && !PermissionDeniedTool.TOOL_NAME.equals(tu.getName())) {
                 PermissionConfig cfg = configSupplier.get();
-                PermissionMode mode = channel ? cfg.resolveChannelMode() : cfg.resolveMode();
+                PermissionMode override = modeOverride != null ? modeOverride.get() : null;
+                PermissionMode mode = override != null ? override
+                        : (channel ? cfg.resolveChannelMode() : cfg.resolveMode());
                 boolean allow = PermissionResolver.resolve(
                         cfg, mode, tu.getName(), tu.getInput(), confirmer, writer);
                 if (!allow) {

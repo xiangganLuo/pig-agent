@@ -4,6 +4,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
+import io.pigagent.cli.repl.command.AgentCommand;
 import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
 import io.pigagent.config.PigAgentConfig;
@@ -53,6 +54,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new ConfigCommand(ctx));
         cmd.addSubcommand(new ProtocolsCommand(ctx));
         cmd.addSubcommand(new ModelCommand(ctx));
+        cmd.addSubcommand(new AgentCommand(ctx));
         cmd.addSubcommand(new ChannelsCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
         cmd.addSubcommand(new McpCommand(ctx));
@@ -91,6 +93,7 @@ public final class ReplCommands {
             entry(t, "/config", "Show current configuration");
             entry(t, "/protocols", "List all model protocol types");
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
+            entry(t, "/agent <action>", "Manage agents (list|use|new|model)");
             entry(t, "/channels", "Show connected channels and status");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
