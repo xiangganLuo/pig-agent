@@ -92,7 +92,7 @@ public final class AgentRepl {
                     configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
 
-            DefaultParser parser = new DefaultParser();
+            DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
             CommandLine cmd = ReplCommands.build(ctx, factory);
             PicocliCommands picocliCommands = new PicocliCommands(cmd);
@@ -143,6 +143,19 @@ public final class AgentRepl {
                 }
             }
         }
+    }
+
+    /**
+     * The REPL line parser. Slash commands are the command names ({@code /help}, {@code /model}…),
+     * but JLine's default {@code regexCommand} only recognizes names starting with a letter, so
+     * {@code getCommand("/help")} yields "" and {@link SystemRegistry} raises "Invalid command".
+     * Allowing an optional leading {@code /} in the command regex makes the whole slash-command
+     * tree dispatch. Shared with tests so the config can't silently drift.
+     */
+    static DefaultParser replParser() {
+        DefaultParser parser = new DefaultParser();
+        parser.setRegexCommand("/?[a-zA-Z][a-zA-Z0-9_-]*");
+        return parser;
     }
 
     private void streamToAgent(String input, Terminal terminal) {

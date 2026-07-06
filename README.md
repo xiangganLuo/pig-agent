@@ -1,4 +1,4 @@
-<div align="center">
+span
 
 <img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
 
@@ -86,27 +86,27 @@ ReActAgent 推理循环:
 ### pig-agent-core — Agent 核心
 
 
-| 类                        | 职责                                                                       |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `PigAgent`                | 核心 Agent，封装 AgentScope 的 ReActAgent，提供`call()` 和 `stream()` 接口 |
-| `LoggingHook`             | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件                 |
-| `ToolCallLoggingHook`     | 工具调用 Hook，打印工具名称和执行状态                                      |
-| `FileMemory`              | 文件持久化内存，会话历史保存到磁盘                                         |
-| `ModelProtocol`           | 模型协议标准接口（`io.pigagent.core.protocol`），定义 `protocolId`、模型创建等标准方法 |
-| `ProviderCredentials`     | 不可变凭证容器，copy-on-write 语义                                         |
+| 类                    | 职责                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| `PigAgent`            | 核心 Agent，封装 AgentScope 的 ReActAgent，提供`call()` 和 `stream()` 接口             |
+| `LoggingHook`         | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件                             |
+| `ToolCallLoggingHook` | 工具调用 Hook，打印工具名称和执行状态                                                  |
+| `FileMemory`          | 文件持久化内存，会话历史保存到磁盘                                                     |
+| `ModelProtocol`       | 模型协议标准接口（`io.pigagent.core.protocol`），定义 `protocolId`、模型创建等标准方法 |
+| `ProviderCredentials` | 不可变凭证容器，copy-on-write 语义                                                     |
 
 ### pig-agent-providers — 模型协议
 
 按**协议标准**（而非厂商）组织，共 5 套协议。具体模型由用户经"选协议 + 填 baseUrl / API key / 模型名"配置；任何 OpenAI 兼容厂商（小米 mimo、DeepSeek、Kimi、通义-compat 等）都走 `openai` 协议 + 各自 baseUrl，无需新增代码。
 
 
-| 协议        | 底层 Model            | 默认模型          | 说明                                            |
-| ----------- | --------------------- | ----------------- | ----------------------------------------------- |
-| openai      | `OpenAIChatModel`     | gpt-4o            | OpenAI 兼容协议，吃掉 mimo/DeepSeek/Kimi 等厂商 |
-| anthropic   | `AnthropicChatModel`  | claude-sonnet-4-6 | Anthropic messages 协议                         |
-| gemini      | `GeminiChatModel`     | gemini-2.0-flash  | Google Gemini 协议                              |
-| ollama      | `OllamaChatModel`     | llama3.2          | 本地自托管，无需 API key                        |
-| dashscope   | `DashScopeChatModel`  | qwen-max          | 阿里云 DashScope 原生协议（通义千问）           |
+| 协议      | 底层 Model           | 默认模型          | 说明                                            |
+| --------- | -------------------- | ----------------- | ----------------------------------------------- |
+| openai    | `OpenAIChatModel`    | gpt-4o            | OpenAI 兼容协议，吃掉 mimo/DeepSeek/Kimi 等厂商 |
+| anthropic | `AnthropicChatModel` | claude-sonnet-4-6 | Anthropic messages 协议                         |
+| gemini    | `GeminiChatModel`    | gemini-2.0-flash  | Google Gemini 协议                              |
+| ollama    | `OllamaChatModel`    | llama3.2          | 本地自托管，无需 API key                        |
+| dashscope | `DashScopeChatModel` | qwen-max          | 阿里云 DashScope 原生协议（通义千问）           |
 
 ### pig-agent-tools — 内置工具
 
@@ -137,12 +137,12 @@ ReActAgent 推理循环:
 ### pig-agent-mcp — MCP 集成
 
 
-| 类             | 职责                                                       |
-| -------------- | ---------------------------------------------------------- |
-| `McpManager`   | MCP 服务器运行时增删改查、启停、连通测试，实时注册/注销工具 |
-| `McpServerSpec`| 不可变服务器配置（record，`withXxx` 拷贝）                  |
-| `McpStore`     | 持久化接口                                                 |
-| `JsonMcpStore` | `workspace/mcp.json` 实现（按名作键，坏文件备份后从空开始） |
+| 类              | 职责                                                        |
+| --------------- | ----------------------------------------------------------- |
+| `McpManager`    | MCP 服务器运行时增删改查、启停、连通测试，实时注册/注销工具 |
+| `McpServerSpec` | 不可变服务器配置（record，`withXxx` 拷贝）                  |
+| `McpStore`      | 持久化接口                                                  |
+| `JsonMcpStore`  | `workspace/mcp.json` 实现（按名作键，坏文件备份后从空开始） |
 
 支持的 MCP 传输方式：
 
@@ -538,12 +538,13 @@ channels:
 
 对标 Claude Code / opencode / hermes 的权限级别，为工具执行加一道统一安全门（`ToolPermissionHook`，在 `PreActingEvent` 逐次判定）。四种全局**模式**：
 
-| 模式 | 行为 |
-|------|------|
-| `plan` | 只读：否决所有可变工具，agent 只产出计划 |
+
+| 模式          | 行为                                                   |
+| ------------- | ------------------------------------------------------ |
+| `plan`        | 只读：否决所有可变工具，agent 只产出计划               |
 | `ask`（默认） | 逐次确认可变工具（`y` 本次 / `a` 始终允许 / `N` 拒绝） |
-| `auto` | 自动放行写文件/网络，仍确认执行 shell / MCP 管理 |
-| `bypass` | 全部放行、无提示（完全信任 / 恢复旧行为） |
+| `auto`        | 自动放行写文件/网络，仍确认执行 shell / MCP 管理       |
+| `bypass`      | 全部放行、无提示（完全信任 / 恢复旧行为）              |
 
 工具按风险分级（只读 / 写 / 执行 / 网络 / MCP 管理；未知工具按最严处理）。`a`（始终允许）会持久化到 `permissions.allowlist`（工具名或命令首 token）。运维命令：
 
