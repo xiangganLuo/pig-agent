@@ -43,6 +43,8 @@ public final class ToolRegistrar {
     public static final class Result {
         /** Tool names successfully registered this pass. */
         public final Set<String> registered = new LinkedHashSet<>();
+        /** Tool instances successfully registered this pass (for downstream availability gating). */
+        public final List<Object> instances = new ArrayList<>();
         /** Tool names a manual tool overrode (removed an auto impl and replaced it). */
         public final Set<String> overrides = new LinkedHashSet<>();
         /** Tool names skipped because of an unexpected same-name duplicate (kept the first). */
@@ -158,6 +160,7 @@ public final class ToolRegistrar {
         try {
             toolkit.registration().tool(tool).apply();
             result.registered.addAll(names);
+            result.instances.add(tool);
         } catch (Throwable t) {
             log.warn("Tool registration failed, skipping {}: {}", tool.getClass().getName(), t.toString());
             result.failures.add(tool.getClass().getName());

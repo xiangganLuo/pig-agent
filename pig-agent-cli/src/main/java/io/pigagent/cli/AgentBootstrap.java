@@ -59,6 +59,8 @@ import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.spi.ToolContext;
 import io.pigagent.tool.spi.ToolRegistrar;
+import io.pigagent.tool.availability.ToolAvailabilityGate;
+import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
@@ -107,6 +109,7 @@ public final class AgentBootstrap {
         public final AgentKernel agentKernel;
         public final SessionManager sessionManager;
         public final CompressionService compressionService;
+        public final ToolAvailabilityReport availabilityReport;
         public final AtomicReference<LineReader> readerRef;
         private final JsonSession agentSession;
         private final TaskScheduler taskScheduler;
@@ -115,7 +118,8 @@ public final class AgentBootstrap {
                          ProtocolRegistry registry, ModelManager modelManager, TaskManager taskManager,
                          McpManager mcpManager, AgentHolder agentHolder, AgentHolder channelAgentHolder,
                          AgentKernel agentKernel, SessionManager sessionManager,
-                         CompressionService compressionService, AtomicReference<LineReader> readerRef,
+                         CompressionService compressionService, ToolAvailabilityReport availabilityReport,
+                         AtomicReference<LineReader> readerRef,
                          JsonSession agentSession, TaskScheduler taskScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
@@ -129,6 +133,7 @@ public final class AgentBootstrap {
             this.agentKernel = agentKernel;
             this.sessionManager = sessionManager;
             this.compressionService = compressionService;
+            this.availabilityReport = availabilityReport;
             this.readerRef = readerRef;
             this.agentSession = agentSession;
             this.taskScheduler = taskScheduler;
@@ -191,22 +196,33 @@ public final class AgentBootstrap {
         Toolkit toolkit = new Toolkit();
         // Builtin tools are auto-discovered via SPI (ServiceLoader, change tool-autoregister) — a new
         // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
-        // to fall back to the pure-manual registration below (legacy behavior).
+        // to fall back to the pure-manual registration below (legacy behavior). Either way we keep the
+        // registered instances so the availability gate (tool-availability) can inspect them below.
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir());
+        List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
             log.info("Tools auto-registered: {}", reg.registered);
+            builtinTools = reg.instances;
         } else {
             log.info("Tool auto-register disabled — using manual registration (fallback)");
-            toolkit.registration().tool(new TaskTool(taskManager)).apply();
-            toolkit.registration().tool(new ShellTools()).apply();
-            toolkit.registration().tool(new FileSystemTools()).apply();
-            toolkit.registration().tool(new SmartWebFetchTool()).apply();
-            toolkit.registration().tool(new BraveWebSearchTool()).apply();
-            toolkit.registration().tool(new CheckListTool()).apply();
-            toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
-            toolkit.registration().tool(new PermissionDeniedTool()).apply();
+            builtinTools = List.of(
+                    new TaskTool(taskManager),
+                    new ShellTools(),
+                    new FileSystemTools(),
+                    new SmartWebFetchTool(),
+                    new BraveWebSearchTool(),
+                    new CheckListTool(),
+                    new SkillsTool(workspace.getSkillsDir()),
+                    new PermissionDeniedTool());
+            for (Object tool : builtinTools) {
+                toolkit.registration().tool(tool).apply();
+            }
         }
+
+        // First-line availability filter: unavailable tools never enter the schema handed to the
+        // model (prevents hallucinated calls, saves tokens). Orthogonal to the permission veto.
+        ToolAvailabilityReport availabilityReport = ToolAvailabilityGate.applyTo(toolkit, builtinTools);
 
         McpManager mcpManager = new McpManager();
 
@@ -426,8 +442,8 @@ public final class AgentBootstrap {
                 new SessionLineageWriter(sessionRepository));
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
-                agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService, readerRef,
-                agentSession, taskScheduler);
+                agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
+                availabilityReport, readerRef, agentSession, taskScheduler);
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own

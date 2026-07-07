@@ -14,6 +14,7 @@ import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.session.Session;
 import io.pigagent.session.SessionManager;
+import io.pigagent.tool.availability.ToolAvailabilityReport;
 import org.fusesource.jansi.Ansi.Color;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
@@ -499,6 +500,24 @@ public final class ReplCommands {
             long mcpConnected = ctx.mcpManager().list().stream().filter(s -> s.connected()).count();
             Ansi.println(t, line("MCP", ctx.mcpManager().list().size() + " configured, "
                     + mcpConnected + " connected"));
+            renderHiddenTools(t, ctx.availabilityReport());
+        }
+
+        /**
+         * Show tools hidden from the model because their availability preconditions are unmet, with the
+         * missing-prerequisite reason (a variable name, never a credential value).
+         */
+        private static void renderHiddenTools(Terminal t, ToolAvailabilityReport report) {
+            List<ToolAvailabilityReport.Hidden> hidden =
+                    report == null ? List.of() : report.hidden();
+            if (hidden.isEmpty()) {
+                Ansi.println(t, line("Tools", "all available"));
+                return;
+            }
+            Ansi.println(t, line("Tools", hidden.size() + " hidden (unavailable)"));
+            for (ToolAvailabilityReport.Hidden h : hidden) {
+                Ansi.println(t, "    " + Ansi.dim(h.toolName() + " — " + h.reason()));
+            }
         }
     }
 
