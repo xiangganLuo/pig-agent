@@ -1,16 +1,18 @@
 package io.pigagent.core.agent;
 
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.InMemoryMemory;
 import io.agentscope.core.memory.LongTermMemory;
-import io.agentscope.core.memory.LongTermMemoryMode;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.session.Session;
 import io.agentscope.core.tool.Toolkit;
+import io.pigagent.core.memory.EphemeralMemoryContextHook;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -123,16 +125,22 @@ public final class PigAgent {
                     .model(model)
                     .memory(new InMemoryMemory());
 
+            // Long-term memory is injected on the user side, ephemerally, via our own hook — NOT
+            // through AgentScope's STATIC_CONTROL wiring, whose PreCallEvent injection is persisted
+            // into the conversation history and accumulates every turn. See EphemeralMemoryContextHook.
+            List<Hook> effectiveHooks = new ArrayList<>();
+            if (hooks != null) {
+                effectiveHooks.addAll(hooks);
+            }
             if (longTermMemory != null) {
-                reactBuilder.longTermMemory(longTermMemory);
-                reactBuilder.longTermMemoryMode(LongTermMemoryMode.STATIC_CONTROL);
+                effectiveHooks.add(new EphemeralMemoryContextHook(longTermMemory));
             }
 
             if (toolkit != null) {
                 reactBuilder.toolkit(toolkit);
             }
-            if (hooks != null && !hooks.isEmpty()) {
-                reactBuilder.hooks(hooks);
+            if (!effectiveHooks.isEmpty()) {
+                reactBuilder.hooks(effectiveHooks);
             }
 
             ReActAgent reactAgent = reactBuilder.build();
