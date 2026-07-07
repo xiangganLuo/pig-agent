@@ -42,7 +42,7 @@ class AgentReplErrorPrintTest {
                 .build();
 
         AgentRepl repl = new AgentRepl(holder, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>());
+                null, new AtomicReference<>(), null);
 
         // Act
         repl.streamToAgent("hello", terminal);

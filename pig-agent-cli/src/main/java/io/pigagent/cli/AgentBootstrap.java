@@ -53,6 +53,8 @@ import io.pigagent.tool.permission.PermissionDeniedTool;
 import io.pigagent.tool.permission.ToolPermissionHook;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
+import io.pigagent.tool.availability.ToolAvailabilityGate;
+import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
@@ -98,6 +100,7 @@ public final class AgentBootstrap {
         public final AgentKernel agentKernel;
         public final SessionManager sessionManager;
         public final CompressionService compressionService;
+        public final ToolAvailabilityReport availabilityReport;
         public final AtomicReference<LineReader> readerRef;
         private final JsonSession agentSession;
         private final TaskScheduler taskScheduler;
@@ -106,7 +109,8 @@ public final class AgentBootstrap {
                          ProtocolRegistry registry, ModelManager modelManager, TaskManager taskManager,
                          McpManager mcpManager, AgentHolder agentHolder, AgentHolder channelAgentHolder,
                          AgentKernel agentKernel, SessionManager sessionManager,
-                         CompressionService compressionService, AtomicReference<LineReader> readerRef,
+                         CompressionService compressionService, ToolAvailabilityReport availabilityReport,
+                         AtomicReference<LineReader> readerRef,
                          JsonSession agentSession, TaskScheduler taskScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
@@ -120,6 +124,7 @@ public final class AgentBootstrap {
             this.agentKernel = agentKernel;
             this.sessionManager = sessionManager;
             this.compressionService = compressionService;
+            this.availabilityReport = availabilityReport;
             this.readerRef = readerRef;
             this.agentSession = agentSession;
             this.taskScheduler = taskScheduler;
@@ -180,14 +185,24 @@ public final class AgentBootstrap {
         taskScheduler.scheduleAll();
 
         Toolkit toolkit = new Toolkit();
-        toolkit.registration().tool(new TaskTool(taskManager)).apply();
-        toolkit.registration().tool(new ShellTools()).apply();
-        toolkit.registration().tool(new FileSystemTools()).apply();
-        toolkit.registration().tool(new SmartWebFetchTool()).apply();
-        toolkit.registration().tool(new BraveWebSearchTool()).apply();
-        toolkit.registration().tool(new CheckListTool()).apply();
-        toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
+        // Built-in tools. Any that declares a ToolAvailability precondition (e.g. webSearch →
+        // BRAVE_API_KEY) is filtered out of the model schema below when unavailable.
+        List<Object> builtinTools = List.of(
+                new TaskTool(taskManager),
+                new ShellTools(),
+                new FileSystemTools(),
+                new SmartWebFetchTool(),
+                new BraveWebSearchTool(),
+                new CheckListTool(),
+                new SkillsTool(workspace.getSkillsDir()));
+        for (Object tool : builtinTools) {
+            toolkit.registration().tool(tool).apply();
+        }
         toolkit.registration().tool(new PermissionDeniedTool()).apply();
+
+        // First-line availability filter: unavailable tools never enter the schema handed to the
+        // model (prevents hallucinated calls, saves tokens). Orthogonal to the permission veto.
+        ToolAvailabilityReport availabilityReport = ToolAvailabilityGate.applyTo(toolkit, builtinTools);
 
         McpManager mcpManager = new McpManager();
         mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
@@ -383,8 +398,8 @@ public final class AgentBootstrap {
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
-                agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService, readerRef,
-                agentSession, taskScheduler);
+                agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
+                availabilityReport, readerRef, agentSession, taskScheduler);
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own

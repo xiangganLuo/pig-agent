@@ -2,7 +2,13 @@ package io.pigagent.cli.repl;
 
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PermissionMode;
+import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.PigAgent;
 import io.pigagent.mcp.McpManager;
+import io.pigagent.model.ModelManager;
+import io.pigagent.session.SessionManager;
+import io.pigagent.tool.availability.ToolAvailabilityReport;
+import io.pigagent.tool.availability.ToolAvailabilityReport.Hidden;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
@@ -17,6 +23,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -69,7 +76,8 @@ class ReplCommandsTest {
                 null, // sessionManager
                 terminal,
                 running,
-                new AtomicReference<LineReader>());
+                new AtomicReference<LineReader>(),
+                null); // availabilityReport
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
         return new Harness(cmd, out, running);
     }
@@ -145,6 +153,45 @@ class ReplCommandsTest {
         int code = h.cmd().execute("/clear");
         assertThat(code).isZero();
         assertThat(h.running().get()).isTrue();
+    }
+
+    @Test
+    void statusShowsHiddenToolsWithReasonAndNoCredential() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = TerminalBuilder.builder()
+                .dumb(true)
+                .streams(new ByteArrayInputStream(new byte[0]), out)
+                .build();
+        AtomicBoolean running = new AtomicBoolean(true);
+
+        AgentHolder agentHolder = mock(AgentHolder.class);
+        PigAgent agent = mock(PigAgent.class);
+        when(agentHolder.get()).thenReturn(agent);
+        when(agent.getAgentName()).thenReturn("test-agent");
+        ModelManager modelManager = mock(ModelManager.class);
+        when(modelManager.getCurrentModel()).thenReturn(Optional.empty());
+        SessionManager sessionManager = mock(SessionManager.class);
+        when(sessionManager.getCurrentSession()).thenReturn(Optional.empty());
+        when(sessionManager.isMemoryEnabled()).thenReturn(false);
+        McpManager mcpManager = mock(McpManager.class);
+        when(mcpManager.list()).thenReturn(List.of());
+        ConfigurationManager configManager = new ConfigurationManager(tmp.resolve("application.yaml"));
+
+        ToolAvailabilityReport report = new ToolAvailabilityReport(
+                List.of(new Hidden("webSearch", "BRAVE_API_KEY not set")));
+
+        ReplContext ctx = new ReplContext(
+                agentHolder, null, null, configManager, null, modelManager, null, mcpManager,
+                List.of(), sessionManager, terminal, running, new AtomicReference<LineReader>(), report);
+        CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
+
+        int code = cmd.execute("/status");
+
+        assertThat(code).isZero();
+        String output = out.toString(StandardCharsets.UTF_8);
+        assertThat(output).contains("webSearch").contains("BRAVE_API_KEY not set").contains("hidden");
+        // Only the prerequisite name is shown; no credential value is ever rendered.
+        assertThat(output).doesNotContain("=");
     }
 
     @Test

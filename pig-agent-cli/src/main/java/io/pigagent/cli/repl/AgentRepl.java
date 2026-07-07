@@ -14,6 +14,7 @@ import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.SessionManager;
+import io.pigagent.tool.availability.ToolAvailabilityReport;
 import org.jline.console.SystemRegistry;
 import org.jline.console.impl.SystemRegistryImpl;
 import org.jline.reader.EndOfFileException;
@@ -56,12 +57,13 @@ public final class AgentRepl {
     private final SessionManager sessionManager;
     private final Path workDir;
     private final AtomicReference<LineReader> readerRef;
+    private final ToolAvailabilityReport availabilityReport;
 
     public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
-                     AtomicReference<LineReader> readerRef) {
+                     AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport) {
         this.agentHolder = agentHolder;
         this.agentKernel = agentKernel;
         this.reportsDir = reportsDir;
@@ -74,6 +76,7 @@ public final class AgentRepl {
         this.sessionManager = sessionManager;
         this.workDir = workDir;
         this.readerRef = readerRef;
+        this.availabilityReport = availabilityReport;
     }
 
     public void run() throws IOException {
@@ -85,7 +88,8 @@ public final class AgentRepl {
             AtomicBoolean running = new AtomicBoolean(true);
             ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
                     configManager, registry, modelManager,
-                    compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef);
+                    compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
+                    availabilityReport);
 
             DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();

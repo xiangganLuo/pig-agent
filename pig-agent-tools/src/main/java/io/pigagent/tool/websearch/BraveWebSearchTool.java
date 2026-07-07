@@ -2,6 +2,8 @@ package io.pigagent.tool.websearch;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.tool.availability.Availability;
+import io.pigagent.tool.availability.ToolAvailability;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -10,25 +12,55 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Web search tool using Brave Search API.
- * Requires BRAVE_API_KEY environment variable.
+ * Requires the {@code BRAVE_API_KEY} environment variable; when it is missing the {@code webSearch}
+ * tool declares itself unavailable via {@link ToolAvailability} so it is hidden from the model schema
+ * rather than failing at call time.
  */
-public final class BraveWebSearchTool {
+public final class BraveWebSearchTool implements ToolAvailability {
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
     private static final String API_URL = "https://api.search.brave.com/res/v1/web/search";
+    private static final String API_KEY_ENV = "BRAVE_API_KEY";
+    private static final String TOOL_NAME = "webSearch";
+
+    private final Function<String, String> env;
+
+    public BraveWebSearchTool() {
+        this(System::getenv);
+    }
+
+    /** Test seam: inject the environment-variable lookup. */
+    BraveWebSearchTool(Function<String, String> env) {
+        this.env = env;
+    }
+
+    @Override
+    public Set<String> availabilityToolNames() {
+        return Set.of(TOOL_NAME);
+    }
+
+    @Override
+    public Availability checkAvailability() {
+        String apiKey = env.apply(API_KEY_ENV);
+        return (apiKey == null || apiKey.isBlank())
+                ? Availability.unavailable(API_KEY_ENV + " not set")
+                : Availability.AVAILABLE;
+    }
 
     @Tool(description = "Search the web using Brave Search. Returns top results with titles, URLs, and snippets.")
     public String webSearch(
             @ToolParam(name = "query", description = "Search query") String query,
             @ToolParam(name = "count", description = "Number of results (1-10, default 5)") String count
     ) {
-        String apiKey = System.getenv("BRAVE_API_KEY");
+        String apiKey = env.apply(API_KEY_ENV);
         if (apiKey == null || apiKey.isBlank()) {
-            return "Error: BRAVE_API_KEY environment variable not set";
+            return "Error: " + API_KEY_ENV + " environment variable not set";
         }
 
         int resultCount = 5;
