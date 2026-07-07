@@ -3,9 +3,7 @@
 ## Purpose
 
 模型调用遇到瞬时上游故障（HTTP 5xx / 超时 / 网络中断）时自动重试，让个人使用在上游打嗝时不中断；永久性错误（4xx/认证）快速失败。重试在 `Model` 装饰层（`RetryingModel`）内进行，对单飞的 `ReActAgent` 透明，不重入 agent。
-
 ## Requirements
-
 ### Requirement: 瞬时错误自动重试
 
 模型调用遇**瞬时错误**时，系统 SHALL 自动重试，最多 `max-retries`（默认 10）次，每两次之间按**指数退避 + 封顶**等待。瞬时错误包括：HTTP 5xx（如 502/503）、请求超时、网络/IO 中断。
@@ -32,15 +30,19 @@
 
 ### Requirement: 每次尝试超时（可选，默认关闭）
 
-重试 SHALL 由**真实瞬时错误信号**（5xx/网络/IO）驱动，而非客户端计时。客户端每次尝试超时 SHALL 为**可选、默认关闭**（`per-attempt-timeout-seconds: 0`）：因当前 `ReActAgent` 不可中断，客户端超时无法安全落地——它会误伤慢但健康的大模型响应，且超时取消后底层 agent 仍在运行，重试重订阅会撞进「Agent is still running」。真正的硬超时留待可中断运行的 spike。
+重试 SHALL 由**真实瞬时错误信号**（5xx/网络/IO）驱动。客户端每次尝试超时 SHALL 为**可选**（`per-attempt-timeout-seconds`，默认 0=关闭，向后兼容）。基于可中断的模型调用（能力 `interruptible-run`），当 `per-attempt-timeout-seconds > 0` 时，超时 SHALL 安全地**中断当前 attempt**（取消其后台调用、不污染历史）并按既有退避策略重试；MUST NOT 误伤慢但健康、超时未到即正常产出的响应。当 `= 0` 时保持关闭，行为不变。
 
 #### Scenario: 慢但健康的响应不被误重试
-- **WHEN** 一次流式响应因大上下文/工具而首个信号迟于若干秒到达，但最终正常产出
+- **WHEN** 一次流式响应因大上下文/工具而首个信号迟到，但在超时（或超时关闭时无限）之内最终正常产出
 - **THEN** 系统 MUST NOT 因超时而重试或中断它，正常返回该响应
 
 #### Scenario: 关闭超时不影响错误重试
 - **WHEN** `per-attempt-timeout-seconds` 为 0（默认）且模型返回 502（瞬时）
 - **THEN** 系统仍按瞬时错误重试
+
+#### Scenario: 启用超时时超时中断并重试
+- **WHEN** `per-attempt-timeout-seconds > 0` 且某次 attempt 在该时限内无任何信号
+- **THEN** 系统中断该 attempt（取消其后台调用、历史无半截内容）并按退避策略发起下一次重试
 
 ### Requirement: 重试在 Model 层进行，不重入 agent
 
@@ -93,3 +95,4 @@
 #### Scenario: 重试提示
 - **WHEN** 发生第 k 次重试（共 N 次上限）
 - **THEN** 终端显示形如 `[retry k/N] <原因>, backing off <时长>` 的提示
+

@@ -1,6 +1,6 @@
 ## MODIFIED Requirements
 
-### Requirement: 每次尝试超时（基于可中断运行，可安全启用）
+### Requirement: 每次尝试超时（可选，默认关闭）
 
 重试 SHALL 由**真实瞬时错误信号**（5xx/网络/IO）驱动。客户端每次尝试超时 SHALL 为**可选**（`per-attempt-timeout-seconds`，默认 0=关闭，向后兼容）。基于可中断的模型调用（能力 `interruptible-run`），当 `per-attempt-timeout-seconds > 0` 时，超时 SHALL 安全地**中断当前 attempt**（取消其后台调用、不污染历史）并按既有退避策略重试；MUST NOT 误伤慢但健康、超时未到即正常产出的响应。当 `= 0` 时保持关闭，行为不变。
 
