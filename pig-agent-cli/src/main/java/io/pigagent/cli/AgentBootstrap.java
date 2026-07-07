@@ -37,6 +37,7 @@ import io.pigagent.provider.ollama.OllamaProtocol;
 import io.pigagent.provider.openai.OpenAiProtocol;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.FileSystemSessionRepository;
+import io.pigagent.session.SessionLineageWriter;
 import io.pigagent.session.SessionManager;
 import io.pigagent.session.SessionRepository;
 import io.pigagent.task.FileSystemTaskRepository;
@@ -380,7 +381,8 @@ public final class AgentBootstrap {
 
         PigAgentConfig.CompressionConfig comp = config.getCompression();
         CompressionService compressionService = new CompressionService(
-                agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled());
+                agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled(),
+                new SessionLineageWriter(sessionRepository));
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService, readerRef,

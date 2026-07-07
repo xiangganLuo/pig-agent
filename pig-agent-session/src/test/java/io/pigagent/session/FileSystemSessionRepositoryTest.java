@@ -99,4 +99,38 @@ class FileSystemSessionRepositoryTest {
         assertThat(repo.findAll()).isEmpty();
         assertThat(repo.findById("orphan")).isEmpty();
     }
+
+    @Test
+    void compressionLineageRoundTrips() {
+        SessionRepository repo = new FileSystemSessionRepository(sessionsDir);
+        Session compressed = repo.save(Session.create("chat").withCompressionLineage());
+
+        Optional<Session> found = repo.findById(compressed.id());
+        assertThat(found).isPresent();
+        assertThat(found.get().lineageId()).isEqualTo(compressed.lineageId());
+        assertThat(found.get().parentSessionId()).isEqualTo(compressed.parentSessionId());
+        assertThat(found.get().hasCompressionLineage()).isTrue();
+    }
+
+    @Test
+    void legacyMetaWithoutLineageFieldsReadsAsNoParent() throws IOException {
+        SessionRepository repo = new FileSystemSessionRepository(sessionsDir);
+
+        // A meta.json written before this capability: no lineageId/parentSessionId keys.
+        Path dir = sessionsDir.resolve("legacy");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("meta.json"),
+                "{\"id\":\"legacy\",\"name\":\"old\",\"createdAt\":1000,\"lastActiveAt\":2000}");
+
+        Optional<Session> found = repo.findById("legacy");
+        assertThat(found).isPresent();
+        assertThat(found.get().corrupt()).isFalse();
+        assertThat(found.get().name()).isEqualTo("old");
+        assertThat(found.get().lineageId()).isNull();
+        assertThat(found.get().parentSessionId()).isNull();
+        assertThat(found.get().hasCompressionLineage()).isFalse();
+        // and it must not break listing alongside a modern session
+        repo.save(Session.create("modern"));
+        assertThat(repo.findAll()).hasSize(2);
+    }
 }

@@ -61,4 +61,51 @@ class SessionTest {
         assertThat(name).endsWith("…");
         assertThat(name.length()).isLessThanOrEqualTo(31);
     }
+
+    @Test
+    void freshSessionHasNoCompressionLineage() {
+        Session s = Session.create("s");
+        assertThat(s.lineageId()).isNull();
+        assertThat(s.parentSessionId()).isNull();
+        assertThat(s.hasCompressionLineage()).isFalse();
+    }
+
+    @Test
+    void withCompressionLineageAssignsLineageAndParentWithoutMutating() {
+        Session original = Session.create("s");
+        Session compressed = original.withCompressionLineage();
+
+        // original untouched (immutability)
+        assertThat(original.hasCompressionLineage()).isFalse();
+        // compressed records provenance
+        assertThat(compressed.hasCompressionLineage()).isTrue();
+        assertThat(compressed.lineageId()).isNotBlank();
+        assertThat(compressed.parentSessionId()).isNotBlank();
+        // identity/metadata preserved
+        assertThat(compressed.id()).isEqualTo(original.id());
+        assertThat(compressed.name()).isEqualTo(original.name());
+        assertThat(compressed.createdAt()).isEqualTo(original.createdAt());
+    }
+
+    @Test
+    void secondCompressionKeepsLineageIdButAdvancesParent() {
+        Session first = Session.create("s").withCompressionLineage();
+        Session second = first.withCompressionLineage();
+
+        assertThat(second.lineageId()).isEqualTo(first.lineageId()); // stable chain id
+        assertThat(second.parentSessionId()).isNotEqualTo(first.parentSessionId()); // superseded state advanced
+    }
+
+    @Test
+    void withNameAndModelIdPreserveLineage() {
+        Session compressed = Session.create("s").withCompressionLineage();
+
+        Session renamed = compressed.withName("renamed");
+        assertThat(renamed.lineageId()).isEqualTo(compressed.lineageId());
+        assertThat(renamed.parentSessionId()).isEqualTo(compressed.parentSessionId());
+
+        Session bound = compressed.withModelId("m-1");
+        assertThat(bound.lineageId()).isEqualTo(compressed.lineageId());
+        assertThat(bound.parentSessionId()).isEqualTo(compressed.parentSessionId());
+    }
 }

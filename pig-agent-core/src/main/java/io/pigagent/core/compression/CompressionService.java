@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * Automatic in-memory context compression.
@@ -23,6 +24,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * model-written summary while the most recent rounds are kept verbatim. Compression follows the
  * current model (it summarizes with whatever model the live agent uses) and is fully skipped on
  * any failure, leaving the original context intact.
+ *
+ * <p>After a successful compression, an optional {@link CompressionLineageRecorder} is fired to
+ * record the session's provenance. Lineage recording is <em>independent of the compression core</em>:
+ * it runs only once memory has already been rewritten, and any failure is logged and swallowed so
+ * it can never break compression.
  */
 public final class CompressionService {
 
@@ -34,15 +40,15 @@ public final class CompressionService {
     private static final int MIN_GROWTH = 4;
     private static final int CHARS_PER_TOKEN = 4;
 
-    private static final String SUMMARY_PROMPT = """
-            You compress conversation history. Produce a concise summary of the messages below.
-            STRICTLY PRESERVE: the user's explicit requirements, constraints, goals; final
-            decisions, conclusions and solutions; important tool results and errors. DROP:
-            repeated back-and-forth, retries, redundant confirmations, verbose logs. If older
-            content conflicts with later content, keep the later. Output only the summary.
-            """;
+    /** Summarizes a batch of older messages into a single string (null/blank aborts compression). */
+    @FunctionalInterface
+    public interface Summarizer {
+        String summarize(List<Msg> older);
+    }
 
-    private final AgentHolder agentHolder;
+    private final Supplier<Memory> memorySupplier;
+    private final Summarizer summarizer;
+    private final CompressionLineageRecorder lineageRecorder;
     private final int budgetTokens;
     private final double threshold;
     private final boolean defaultEnabled;
@@ -52,7 +58,25 @@ public final class CompressionService {
     private final Map<String, Integer> lastCompressedSize = new ConcurrentHashMap<>();
 
     public CompressionService(AgentHolder agentHolder, int budgetTokens, double threshold, boolean defaultEnabled) {
-        this.agentHolder = agentHolder;
+        this(agentHolder, budgetTokens, threshold, defaultEnabled, CompressionLineageRecorder.NOOP);
+    }
+
+    public CompressionService(AgentHolder agentHolder, int budgetTokens, double threshold,
+                              boolean defaultEnabled, CompressionLineageRecorder lineageRecorder) {
+        this(() -> {
+                    PigAgent agent = agentHolder.get();
+                    return agent == null ? null : agent.getMemory();
+                },
+                new ModelSummarizer(agentHolder),
+                budgetTokens, threshold, defaultEnabled, lineageRecorder);
+    }
+
+    /** Full constructor with injectable seams — package-private for unit tests. */
+    CompressionService(Supplier<Memory> memorySupplier, Summarizer summarizer, int budgetTokens,
+                       double threshold, boolean defaultEnabled, CompressionLineageRecorder lineageRecorder) {
+        this.memorySupplier = memorySupplier;
+        this.summarizer = summarizer;
+        this.lineageRecorder = lineageRecorder == null ? CompressionLineageRecorder.NOOP : lineageRecorder;
         this.budgetTokens = budgetTokens;
         this.threshold = threshold;
         this.defaultEnabled = defaultEnabled;
@@ -152,6 +176,7 @@ public final class CompressionService {
             if (sessionId != null) {
                 lastCompressedAt.put(sessionId, System.currentTimeMillis());
                 lastCompressedSize.put(sessionId, memory.getMessages().size());
+                recordLineage(sessionId);
             }
             return true;
         } catch (Exception e) {
@@ -161,29 +186,25 @@ public final class CompressionService {
         }
     }
 
-    private String summarize(List<Msg> older) {
-        Model model = agentHolder.get().getModel();
-        PigAgent summarizer = PigAgent.builder()
-                .name("compressor")
-                .sysPrompt(SUMMARY_PROMPT)
-                .model(model)
-                .build();
-        StringBuilder sb = new StringBuilder();
-        for (Msg m : older) {
-            String text = m.getTextContent();
-            if (text == null || text.isBlank()) {
-                continue;
-            }
-            sb.append(m.getRole()).append(": ").append(text).append("\n");
+    /**
+     * Record the session's compression lineage. Independent of the compression core: memory has
+     * already been rewritten and marked; any failure here is logged and swallowed so lineage
+     * tracking can never break a successful compression (design D4 / R3).
+     */
+    private void recordLineage(String sessionId) {
+        try {
+            lineageRecorder.recordCompression(sessionId);
+        } catch (Exception e) {
+            log.warn("Compression lineage record skipped for session {}: {}", sessionId, e.getMessage());
         }
-        Msg reply = summarizer.call(Msg.builder().name("user").role(MsgRole.USER)
-                .content(TextBlock.builder().text(sb.toString()).build()).build());
-        return reply == null ? null : reply.getTextContent();
+    }
+
+    private String summarize(List<Msg> older) {
+        return summarizer.summarize(older);
     }
 
     private Memory currentMemory() {
-        PigAgent agent = agentHolder.get();
-        return agent == null ? null : agent.getMemory();
+        return memorySupplier.get();
     }
 
     private int estimateTokens(List<Msg> messages) {
@@ -195,5 +216,44 @@ public final class CompressionService {
             }
         }
         return (int) (chars / CHARS_PER_TOKEN);
+    }
+
+    /** Default summarizer: spins up a throwaway agent on the live model to write the summary. */
+    private static final class ModelSummarizer implements Summarizer {
+
+        private static final String SUMMARY_PROMPT = """
+                You compress conversation history. Produce a concise summary of the messages below.
+                STRICTLY PRESERVE: the user's explicit requirements, constraints, goals; final
+                decisions, conclusions and solutions; important tool results and errors. DROP:
+                repeated back-and-forth, retries, redundant confirmations, verbose logs. If older
+                content conflicts with later content, keep the later. Output only the summary.
+                """;
+
+        private final AgentHolder agentHolder;
+
+        ModelSummarizer(AgentHolder agentHolder) {
+            this.agentHolder = agentHolder;
+        }
+
+        @Override
+        public String summarize(List<Msg> older) {
+            Model model = agentHolder.get().getModel();
+            PigAgent summarizer = PigAgent.builder()
+                    .name("compressor")
+                    .sysPrompt(SUMMARY_PROMPT)
+                    .model(model)
+                    .build();
+            StringBuilder sb = new StringBuilder();
+            for (Msg m : older) {
+                String text = m.getTextContent();
+                if (text == null || text.isBlank()) {
+                    continue;
+                }
+                sb.append(m.getRole()).append(": ").append(text).append("\n");
+            }
+            Msg reply = summarizer.call(Msg.builder().name("user").role(MsgRole.USER)
+                    .content(TextBlock.builder().text(sb.toString()).build()).build());
+            return reply == null ? null : reply.getTextContent();
+        }
     }
 }
