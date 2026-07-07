@@ -152,7 +152,20 @@ public final class PigAgentCli {
         toolkit.registration().tool(new McpTool(mcpManager,
                 () -> configManager.getConfig().getMcp().getAgentManagement(), confirmer)).apply();
 
-        String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd();
+        // Fixed tool guidance appended to the (user-editable) AGENT.md + INFO.md. Steers the agent
+        // to the native-path file tools instead of the shell: writeFile is classified WRITE (allowed
+        // without a prompt in `auto` mode), whereas shell is EXEC (still confirmed in `auto`), and
+        // the shell on Windows runs under PowerShell — using file tools keeps paths native (no /mnt/c).
+        String toolGuidance = """
+
+                ## File operations (important)
+                - To create, read, or list files, ALWAYS use the writeFile / readFile / listDirectory\
+                 tools with a native absolute path (Windows e.g. C:\\Users\\you\\file.txt, Unix e.g.\
+                 /home/you/file.txt).
+                - Do NOT use executeCommand (the shell) to create or edit files. Use executeCommand\
+                 only to run programs/commands, never for file CRUD.
+                """;
+        String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd() + toolGuidance;
         // Two-tier memory: shared global memory + a switchable per-session temporary memory.
         FileSystemLongTermMemory globalMemory = new FileSystemLongTermMemory(
                 workspace.getContextDir().resolve("memory.md"));
