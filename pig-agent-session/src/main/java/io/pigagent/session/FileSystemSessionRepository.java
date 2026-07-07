@@ -108,10 +108,17 @@ public final class FileSystemSessionRepository implements SessionRepository {
 
     private static Session corrupt(String id) {
         Instant now = Instant.now();
-        return new Session(id, "(corrupt)", now, now, null, true);
+        return new Session(id, "(corrupt)", now, now, null, null, null, true);
     }
 
-    /** On-disk shape of session metadata. Epoch-millis timestamps keep Jackson plain. */
+    /**
+     * On-disk shape of session metadata. Epoch-millis timestamps keep Jackson plain.
+     *
+     * <p>{@code lineageId}/{@code parentSessionId} are the compression-lineage fields; they are
+     * absent from files written before this capability, in which case Jackson leaves them
+     * {@code null} (read back as "no parent") — the fault-tolerant behaviour required of the
+     * repository.
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
     static final class Meta {
         public String id;
@@ -119,6 +126,8 @@ public final class FileSystemSessionRepository implements SessionRepository {
         public long createdAt;
         public long lastActiveAt;
         public String modelId;
+        public String lineageId;
+        public String parentSessionId;
 
         static Meta from(Session s) {
             Meta m = new Meta();
@@ -127,12 +136,14 @@ public final class FileSystemSessionRepository implements SessionRepository {
             m.createdAt = s.createdAt().toEpochMilli();
             m.lastActiveAt = s.lastActiveAt().toEpochMilli();
             m.modelId = s.modelId();
+            m.lineageId = s.lineageId();
+            m.parentSessionId = s.parentSessionId();
             return m;
         }
 
         Session toSession() {
             return new Session(id, name, Instant.ofEpochMilli(createdAt),
-                    Instant.ofEpochMilli(lastActiveAt), modelId, false);
+                    Instant.ofEpochMilli(lastActiveAt), modelId, lineageId, parentSessionId, false);
         }
     }
 }

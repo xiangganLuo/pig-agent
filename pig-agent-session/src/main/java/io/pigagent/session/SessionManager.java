@@ -232,6 +232,18 @@ public final class SessionManager {
         return currentSessionId == null ? Optional.empty() : repository.findById(currentSessionId);
     }
 
+    /**
+     * Query entry for a session's compression lineage (the {@code lineageId}/{@code parentSessionId}
+     * carried on its metadata), for future TUI/frontend consumption. Empty when the session is
+     * unknown or its metadata is unreadable (corrupt).
+     */
+    public Optional<Session> lineageOf(String sessionId) {
+        if (sessionId == null) {
+            return Optional.empty();
+        }
+        return repository.findById(sessionId).filter(s -> !s.corrupt());
+    }
+
     private void touch(String id) {
         repository.findById(id)
                 .filter(s -> !s.corrupt())
