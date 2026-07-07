@@ -6,10 +6,10 @@
 
 ## 2. 可中断的 Model 装饰层
 
-- [ ] 2.1 新增可中断包装（或增强 `RetryingModel`）：`model.stream` 订阅可被每回合的「中断信号」取消（`Disposable`/`takeUntil`）。
-- [ ] 2.2 中断即取消订阅、不写半截历史；未中断正常产出（行为等价现状）。
-- [ ] 2.3 与 `RetryingModel` 组合顺序：超时/中断在单次 attempt 粒度，重试在外层。
-- [ ] 2.4 单测：中断即取消 + 历史无半截；未中断正常完成。
+- [x] 2.1 新增可中断包装（或增强 `RetryingModel`）：`model.stream` 订阅可被每回合的「中断信号」取消（`Disposable`/`takeUntil`）。
+- [x] 2.2 中断即取消订阅、不写半截历史；未中断正常产出（行为等价现状）。
+- [x] 2.3 与 `RetryingModel` 组合顺序：超时/中断在单次 attempt 粒度，重试在外层。（`AgentFactory.decorate` = `RetryingModel(InterruptibleModel(model))`）
+- [x] 2.4 单测：中断即取消 + 历史无半截；未中断正常完成。
 
 ## 3. AgentKernel.interruptCurrent()
 

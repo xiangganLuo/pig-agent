@@ -4,6 +4,8 @@ import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
+import io.pigagent.core.interrupt.InterruptController;
+import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.retry.RetryPolicy;
 import io.pigagent.core.retry.RetryingModel;
 
@@ -25,29 +27,39 @@ public final class AgentFactory {
     private final List<Hook> hooks;
     private final LongTermMemory longTermMemory;
     private final RetryPolicy retryPolicy; // nullable
+    private final InterruptController interruptController; // nullable
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory) {
-        this(name, sysPrompt, toolkit, hooks, longTermMemory, null);
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, null, null);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy) {
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, null);
+    }
+
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
+                        InterruptController interruptController) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
         this.hooks = hooks;
         this.longTermMemory = longTermMemory;
         this.retryPolicy = retryPolicy;
+        this.interruptController = interruptController;
     }
 
     /**
-     * Build a fresh agent using the given model and the shared configuration. When a retry policy
-     * is set, the model is wrapped in a {@link RetryingModel} so transient failures are retried
-     * <em>inside</em> a single agent invocation (never by re-subscribing the single-flight agent).
+     * Build a fresh agent using the given model and the shared configuration. The model is wrapped
+     * in the decoration chain {@code RetryingModel(InterruptibleModel(model))} when the respective
+     * collaborators are set: interrupt/cancel is per single attempt (inner), retry is the outer
+     * layer. Retries happen <em>inside</em> a single agent invocation (never by re-subscribing the
+     * single-flight agent).
      */
     public PigAgent create(Model model) {
-        Model effectiveModel = retryPolicy == null ? model : new RetryingModel(model, retryPolicy);
+        Model effectiveModel = decorate(model);
         return PigAgent.builder()
                 .name(name)
                 .sysPrompt(sysPrompt)
@@ -56,5 +68,17 @@ public final class AgentFactory {
                 .hooks(hooks)
                 .longTermMemory(longTermMemory)
                 .build();
+    }
+
+    /** Wrap the raw model with the interrupt (inner) and retry (outer) decorators, if configured. */
+    private Model decorate(Model model) {
+        Model effective = model;
+        if (interruptController != null) {
+            effective = new InterruptibleModel(effective, interruptController);
+        }
+        if (retryPolicy != null) {
+            effective = new RetryingModel(effective, retryPolicy);
+        }
+        return effective;
     }
 }
