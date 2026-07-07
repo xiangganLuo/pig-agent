@@ -44,6 +44,7 @@ import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.checklist.CheckListTool;
+import io.pigagent.tool.contract.ToolContractGuard;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
@@ -190,7 +191,6 @@ public final class AgentBootstrap {
         toolkit.registration().tool(new PermissionDeniedTool()).apply();
 
         McpManager mcpManager = new McpManager();
-        mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
 
         AtomicReference<LineReader> readerRef = new AtomicReference<>();
         McpConfirmer confirmer = prompt -> {
@@ -203,6 +203,16 @@ public final class AgentBootstrap {
         };
         toolkit.registration().tool(new McpTool(mcpManager,
                 () -> configManager.getConfig().getMcp().getAgentManagement(), confirmer)).apply();
+
+        // Dispatch-layer contract guard (tool-json-contract): wrap every built-in tool so any
+        // exception a tool lets escape becomes a canonical {"error":...} result instead of aborting
+        // the turn. Installed after the built-in tools + McpTool but BEFORE MCP servers attach, so
+        // it never re-registers (and thus never breaks the identity/mcpClientName of) live MCP-server
+        // tools, which AgentScope manages separately. Per-agent toolkits built via Toolkit.copy()
+        // inherit the guarded built-in tools.
+        ToolContractGuard.install(toolkit);
+
+        mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
 
         // Fixed tool guidance appended to the (user-editable) AGENT.md + INFO.md — steers the agent to
         // the native-path file tools instead of the shell (writeFile is WRITE → allowed in `auto`;

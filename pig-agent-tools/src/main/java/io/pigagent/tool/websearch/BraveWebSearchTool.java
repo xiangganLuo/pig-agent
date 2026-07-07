@@ -2,6 +2,7 @@ package io.pigagent.tool.websearch;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.tool.contract.ToolErrors;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -28,7 +29,7 @@ public final class BraveWebSearchTool {
     ) {
         String apiKey = System.getenv("BRAVE_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
-            return "Error: BRAVE_API_KEY environment variable not set";
+            return ToolErrors.message("BRAVE_API_KEY environment variable not set");
         }
 
         int resultCount = 5;
@@ -57,12 +58,12 @@ public final class BraveWebSearchTool {
             HttpResponse<String> response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                return "Search error (HTTP " + response.statusCode() + "): " + response.body();
+                return ToolErrors.message("Search error (HTTP " + response.statusCode() + "): " + response.body());
             }
 
             return parseResults(response.body(), resultCount);
         } catch (Exception e) {
-            return "Search error: " + e.getMessage();
+            return ToolErrors.message("Search error: " + e.getMessage());
         }
     }
 
