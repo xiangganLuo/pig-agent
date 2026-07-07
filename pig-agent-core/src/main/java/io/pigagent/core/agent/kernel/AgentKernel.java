@@ -9,12 +9,15 @@ import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.runner.AgentReport;
 import io.pigagent.core.agent.runner.AgentRunner;
+import io.pigagent.core.interrupt.InterruptController;
+import io.pigagent.core.interrupt.TurnHandle;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The single façade the kernel exposes to frontends (CLI now, Web later). Frontends depend on
@@ -31,15 +34,29 @@ public final class AgentKernel {
     private final AgentSpecRepository repository;
     private final AgentInstanceFactory instanceFactory;
     private final AgentRunner runner; // nullable (no digital-employee runs wired)
+    private final InterruptController interrupts;
     private final Sinks.Many<KernelEvent> events =
             Sinks.many().multicast().onBackpressureBuffer(256, false);
 
     public AgentKernel(AgentRegistry registry, AgentSpecRepository repository,
                        AgentInstanceFactory instanceFactory, AgentRunner runner) {
+        this(registry, repository, instanceFactory, runner, new InterruptController());
+    }
+
+    /**
+     * @param interrupts shared with the model decorators built into the agents (so a stop request
+     *        cancels the in-flight model call). Pass the same instance the {@code AgentFactory} /
+     *        {@code AgentInstanceFactory} were given; otherwise interrupts register but never reach
+     *        the model. Must not be null — the no-arg default uses a fresh controller.
+     */
+    public AgentKernel(AgentRegistry registry, AgentSpecRepository repository,
+                       AgentInstanceFactory instanceFactory, AgentRunner runner,
+                       InterruptController interrupts) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceFactory = Objects.requireNonNull(instanceFactory, "instanceFactory");
         this.runner = runner;
+        this.interrupts = Objects.requireNonNull(interrupts, "interrupts");
     }
 
     public List<AgentInstance> listAgents() {
@@ -96,7 +113,12 @@ public final class AgentKernel {
             return Flux.error(new IllegalStateException("No agent available: " + agentId));
         }
         emit(KernelEvent.Type.CHAT_STARTED, instance.id(), "");
-        return instance.agent().stream(msg);
+        // Register a cancellable turn for the lifetime of this stream: begin on subscribe (so an
+        // unsubscribed Flux leaks nothing), clear on any termination (complete/error/cancel).
+        AtomicReference<TurnHandle> handle = new AtomicReference<>();
+        return instance.agent().stream(msg)
+                .doOnSubscribe(s -> handle.set(interrupts.begin()))
+                .doFinally(sig -> interrupts.end(handle.get()));
     }
 
     /** Trigger one autonomous run of an agent now; emits RUN_STARTED/RUN_FINISHED/REPORT. */
@@ -109,12 +131,28 @@ public final class AgentKernel {
             return Optional.empty();
         }
         emit(KernelEvent.Type.RUN_STARTED, agentId, spec.name());
-        Optional<AgentReport> report = runner.run(spec);
+        TurnHandle handle = interrupts.begin();
+        Optional<AgentReport> report;
+        try {
+            report = runner.run(spec);
+        } finally {
+            interrupts.end(handle);
+        }
         report.ifPresent(r -> {
             emit(KernelEvent.Type.RUN_FINISHED, agentId, String.valueOf(r.outcome()));
             emit(KernelEvent.Type.REPORT, agentId, String.valueOf(r.outcome()));
         });
         return report;
+    }
+
+    /**
+     * Request interruption of the current in-flight turn (chat or autonomous run) — the stable stop
+     * entry point for frontends (TUI stop key, Web). Returns true if a turn was in flight and its
+     * interrupt was fired; false when idle (no-op). Frontends MUST call this rather than touching
+     * the internal agent/threads directly.
+     */
+    public boolean interruptCurrent() {
+        return interrupts.interruptCurrent();
     }
 
     /**

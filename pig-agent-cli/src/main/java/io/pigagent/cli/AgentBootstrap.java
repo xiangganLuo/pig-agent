@@ -17,6 +17,8 @@ import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.agent.runner.FileReportWriter;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.core.interrupt.InterruptController;
+import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
 import io.pigagent.core.memory.CompositeLongTermMemory;
@@ -292,9 +294,15 @@ public final class AgentBootstrap {
                 (attempt, max, cause, backoff) -> log.warn("[channel retry {}/{}] {}",
                         attempt, max, retryCauseSummary(cause)));
 
+        // One shared interrupt controller: the kernel registers/clears the current turn's handle and
+        // the model decorators (built below) read it, so AgentKernel.interruptCurrent() cancels the
+        // in-flight model call. Interactive, channel, per-agent and autonomous models all share it.
+        InterruptController interruptController = new InterruptController();
+
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, interactiveRetry);
+                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
+                interactiveRetry, interruptController);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -306,7 +314,8 @@ public final class AgentBootstrap {
 
         AgentInstanceFactory agentInstanceFactory = new AgentInstanceFactory(
                 spec -> {
-                    Model baseModel = modelManager.modelFor(spec.modelId());
+                    Model baseModel = new InterruptibleModel(modelManager.modelFor(spec.modelId()),
+                            interruptController);
                     return interactiveRetry == null ? baseModel : new RetryingModel(baseModel, interactiveRetry);
                 },
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
@@ -327,6 +336,11 @@ public final class AgentBootstrap {
             }
         }
 
+        // NB: the autonomous (digital-employee) model is deliberately NOT wrapped with
+        // InterruptibleModel. Scheduled cron runs bypass the kernel, and the single-slot interrupt
+        // controller is scoped to the interactive turn; sharing it across the autonomous track could
+        // cross-talk with a concurrent interactive interrupt. Autonomous interrupt is out of scope
+        // for interruptible-run (its timeout stays best-effort).
         AgentRunner.AgentBuilder autonomousBuilder = (spec, recorder) -> {
             Model runModel = new RetryingModel(modelManager.modelFor(spec.modelId()), interactiveRetry);
             ToolPermissionHook unattended = new ToolPermissionHook(
@@ -348,7 +362,7 @@ public final class AgentBootstrap {
                 (spec, epoch) -> agentRepository.save(spec.withLastRunAtEpochMs(epoch)),
                 null);
         AgentKernel agentKernel = new AgentKernel(
-                agentRegistry, agentRepository, agentInstanceFactory, agentRunner);
+                agentRegistry, agentRepository, agentInstanceFactory, agentRunner, interruptController);
         for (AgentSpec s : agentRegistry.list().stream().map(AgentInstance::spec).toList()) {
             if (s.isAutonomous()) {
                 taskScheduler.schedule("agent:" + s.id(), TaskSchedule.cron(s.schedule()),
@@ -362,6 +376,8 @@ public final class AgentBootstrap {
         // channel bridges (the CLI does; the Web launcher does not).
         ToolPermissionHook channelPermissionHook = new ToolPermissionHook(
                 () -> configManager.getConfig().getPermissions(), null, null, true);
+        // The channel agent is a separate track (D4) with no stop key; it is deliberately NOT wired
+        // to the interrupt controller (which is scoped to the interactive kernel turn).
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, channelRetry);

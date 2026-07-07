@@ -13,9 +13,9 @@
 
 ## 3. AgentKernel.interruptCurrent()
 
-- [ ] 3.1 kernel 在 `chat`/`runNow` 启动回合时登记「当前回合中断句柄」（原子引用 + 回合 id），结束时清除。
-- [ ] 3.2 `interruptCurrent()`：命中活动回合则触发中断返回 true，否则 no-op 返回 false（替换 `tui-frontend` 的桩实现）。
-- [ ] 3.3 单测：有/无进行中回合两分支；并发登记/清除竞态安全。
+- [x] 3.1 kernel 在 `chat`/`runNow` 启动回合时登记「当前回合中断句柄」（原子引用 + 回合 id），结束时清除。（chat 用 doOnSubscribe/doFinally；runNow try/finally。注：autonomous/channel 模型不接可中断装饰，属独立轨，避免与交互回合串扰——digital-employee 中断本 spec 不强制）
+- [x] 3.2 `interruptCurrent()`：命中活动回合则触发中断返回 true，否则 no-op 返回 false（替换 `tui-frontend` 的桩实现）。
+- [x] 3.3 单测：有/无进行中回合两分支；并发登记/清除竞态安全。
 
 ## 4. 启用 model-retry per-attempt 硬超时
 
