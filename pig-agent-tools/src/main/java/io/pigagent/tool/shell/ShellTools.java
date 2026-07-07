@@ -2,6 +2,7 @@ package io.pigagent.tool.shell;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.tool.contract.ToolErrors;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +37,6 @@ public final class ShellTools {
             if (!finished) { process.destroyForcibly(); return "Command timed out.\n" + output; }
             int exitCode = process.exitValue();
             return exitCode == 0 ? output : "Exit code: " + exitCode + "\n" + output;
-        } catch (IOException | InterruptedException e) { return "Error: " + e.getMessage(); }
+        } catch (IOException | InterruptedException e) { return ToolErrors.message(e.getMessage()); }
     }
 }

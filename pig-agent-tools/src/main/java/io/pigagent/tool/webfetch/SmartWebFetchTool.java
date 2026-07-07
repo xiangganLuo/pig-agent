@@ -2,6 +2,7 @@ package io.pigagent.tool.webfetch;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.tool.contract.ToolErrors;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,6 +21,6 @@ public final class SmartWebFetchTool {
             String body = response.body();
             if (body.length() > 10000) body = body.substring(0, 10000) + "\n... [truncated]";
             return "Status: %d\n\n%s".formatted(response.statusCode(), body);
-        } catch (Exception e) { return "Error: " + e.getMessage(); }
+        } catch (Exception e) { return ToolErrors.message(e.getMessage()); }
     }
 }
