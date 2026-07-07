@@ -56,6 +56,8 @@ import io.pigagent.tool.permission.PermissionDeniedTool;
 import io.pigagent.tool.permission.ToolPermissionHook;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
+import io.pigagent.tool.spi.ToolContext;
+import io.pigagent.tool.spi.ToolRegistrar;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
@@ -83,6 +85,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class AgentBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(AgentBootstrap.class);
+
+    /** System property to disable SPI tool auto-registration and fall back to pure-manual wiring. */
+    static final String TOOLS_AUTO_REGISTER_PROP = "pigagent.tools.auto-register";
 
     private AgentBootstrap() {
     }
@@ -183,14 +188,24 @@ public final class AgentBootstrap {
         taskScheduler.scheduleAll();
 
         Toolkit toolkit = new Toolkit();
-        toolkit.registration().tool(new TaskTool(taskManager)).apply();
-        toolkit.registration().tool(new ShellTools()).apply();
-        toolkit.registration().tool(new FileSystemTools()).apply();
-        toolkit.registration().tool(new SmartWebFetchTool()).apply();
-        toolkit.registration().tool(new BraveWebSearchTool()).apply();
-        toolkit.registration().tool(new CheckListTool()).apply();
-        toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
-        toolkit.registration().tool(new PermissionDeniedTool()).apply();
+        // Builtin tools are auto-discovered via SPI (ServiceLoader, change tool-autoregister) — a new
+        // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
+        // to fall back to the pure-manual registration below (legacy behavior).
+        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir());
+        if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
+            ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
+            log.info("Tools auto-registered: {}", reg.registered);
+        } else {
+            log.info("Tool auto-register disabled — using manual registration (fallback)");
+            toolkit.registration().tool(new TaskTool(taskManager)).apply();
+            toolkit.registration().tool(new ShellTools()).apply();
+            toolkit.registration().tool(new FileSystemTools()).apply();
+            toolkit.registration().tool(new SmartWebFetchTool()).apply();
+            toolkit.registration().tool(new BraveWebSearchTool()).apply();
+            toolkit.registration().tool(new CheckListTool()).apply();
+            toolkit.registration().tool(new SkillsTool(workspace.getSkillsDir())).apply();
+            toolkit.registration().tool(new PermissionDeniedTool()).apply();
+        }
 
         McpManager mcpManager = new McpManager();
         mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
