@@ -59,6 +59,8 @@ import io.pigagent.tool.websearch.BraveWebSearchTool;
 import io.pigagent.web.WebContext;
 import io.pigagent.workspace.WorkspaceManager;
 import org.jline.reader.LineReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +78,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * — switch to {@code auto}/{@code bypass} (via {@code /permission} or the Web) to allow them.
  */
 public final class AgentBootstrap {
+
+    private static final Logger log = LoggerFactory.getLogger(AgentBootstrap.class);
 
     private AgentBootstrap() {
     }
@@ -146,7 +150,7 @@ public final class AgentBootstrap {
     public static Services build(boolean allowOnboarding) throws Exception {
         WorkspaceManager workspace = WorkspaceManager.defaultWorkspace();
         workspace.initialize();
-        System.out.println(Ansi.dim("Workspace: ") + Ansi.info(workspace.getRootPath().toAbsolutePath().toString()));
+        log.info("Workspace: {}", workspace.getRootPath().toAbsolutePath());
 
         ConfigurationManager configManager =
                 new ConfigurationManager(workspace.getRootPath().resolve("application.yaml"));
@@ -269,14 +273,14 @@ public final class AgentBootstrap {
                 java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
                 retryClassifier,
                 (attempt, max, cause, backoff) -> {
-                    String line = Ansi.warn(String.format("[retry %d/%d] %s, backing off %dms…",
-                            attempt, max, retryCauseSummary(cause), backoff.toMillis()));
+                    String msg = String.format("[retry %d/%d] %s, backing off %dms…",
+                            attempt, max, retryCauseSummary(cause), backoff.toMillis());
                     LineReader r = readerRef.get();
-                    if (r != null) {
-                        r.getTerminal().writer().println(line);
+                    if (r != null) { // REPL present: surface inline on the interactive terminal
+                        r.getTerminal().writer().println(Ansi.warn(msg));
                         r.getTerminal().writer().flush();
                     } else {
-                        System.err.println(line);
+                        log.warn(msg);
                     }
                 });
         RetryPolicy channelRetry = new RetryPolicy(
@@ -285,15 +289,15 @@ public final class AgentBootstrap {
                 java.time.Duration.ofMillis(rc.getFirstBackoffMs()),
                 java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
                 retryClassifier,
-                (attempt, max, cause, backoff) -> System.err.println(String.format(
-                        "[channel retry %d/%d] %s", attempt, max, retryCauseSummary(cause))));
+                (attempt, max, cause, backoff) -> log.warn("[channel retry {}/{}] {}",
+                        attempt, max, retryCauseSummary(cause)));
 
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, interactiveRetry);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
-        System.out.println(Ansi.success("Model: ") + Ansi.info(defaultModel.label()));
+        log.info("Model: {}", defaultModel.label());
 
         AgentRegistry agentRegistry = new AgentRegistry(agentHolder);
         AgentSpec defaultSpec = new AgentSpec("default", config.getAgent().getName(), sysPrompt,
@@ -318,7 +322,7 @@ public final class AgentBootstrap {
                 try {
                     agentRegistry.register(agentInstanceFactory.create(s));
                 } catch (Exception e) {
-                    System.err.println(Ansi.warn("[Agent] Failed to load '" + s.id() + "': " + e.getMessage()));
+                    log.warn("Failed to load agent '{}': {}", s.id(), e.getMessage());
                 }
             }
         }
@@ -349,8 +353,7 @@ public final class AgentBootstrap {
             if (s.isAutonomous()) {
                 taskScheduler.schedule("agent:" + s.id(), TaskSchedule.cron(s.schedule()),
                         () -> agentRunner.run(s));
-                System.out.println(Ansi.success("Digital employee scheduled: ")
-                        + Ansi.info(s.name() + " [" + s.schedule() + "]"));
+                log.info("Digital employee scheduled: {} [{}]", s.name(), s.schedule());
             }
         }
 
@@ -373,7 +376,7 @@ public final class AgentBootstrap {
                 configManager, workspace.getSessionsDir());
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
-                System.out.println(Ansi.success("Session: ") + Ansi.info(s.name() + " [" + s.id() + "]")));
+                log.info("Session: {} [{}]", s.name(), s.id()));
 
         PigAgentConfig.CompressionConfig comp = config.getCompression();
         CompressionService compressionService = new CompressionService(

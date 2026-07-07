@@ -2,6 +2,8 @@ package io.pigagent.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,6 +23,7 @@ import java.util.Optional;
  */
 public final class JsonModelStore implements ModelStore {
 
+    private static final Logger log = LoggerFactory.getLogger(JsonModelStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path file;
@@ -50,7 +53,7 @@ public final class JsonModelStore implements ModelStore {
                     StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ignored) {
         }
-        System.err.println("[Model] models.json was unreadable; backed up to models.json.bak, starting fresh.");
+        log.warn("models.json was unreadable; backed up to models.json.bak, starting fresh.");
     }
 
     private void persist() {
@@ -58,7 +61,7 @@ public final class JsonModelStore implements ModelStore {
             Files.createDirectories(file.getParent());
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), data);
         } catch (IOException e) {
-            System.err.println("[Model] Failed to write models.json: " + e.getMessage());
+            log.error("Failed to write models.json: {}", e.getMessage(), e);
         }
     }
 

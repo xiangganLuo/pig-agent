@@ -41,6 +41,14 @@
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>dashscope-sdk-java</artifactId>
+            <!-- The DashScope SDK bundles slf4j-simple, which collides with our Logback backend
+                 ("multiple SLF4J providers"). Exclude it so Logback is the sole binding. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 </project>

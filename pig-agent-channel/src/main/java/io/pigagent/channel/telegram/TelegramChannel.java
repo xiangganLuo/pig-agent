@@ -1,9 +1,13 @@
 package io.pigagent.channel.telegram;
 
 import io.pigagent.channel.Channel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.function.Consumer;
 
 public final class TelegramChannel implements Channel {
+    private static final Logger log = LoggerFactory.getLogger(TelegramChannel.class);
     private final String token;
     private volatile boolean running = false;
 
@@ -15,12 +19,12 @@ public final class TelegramChannel implements Channel {
     @Override
     public void start(Consumer<String> messageHandler) {
         this.running = true;
-        System.err.println("[Telegram] Channel started (stub)");
+        log.info("Telegram channel started (stub)");
     }
 
     @Override
     public void sendMessage(String message) {
-        System.err.println("[Telegram] Would send: " + message);
+        log.info("Telegram would send: {}", message);
     }
 
     @Override public void stop() { this.running = false; }

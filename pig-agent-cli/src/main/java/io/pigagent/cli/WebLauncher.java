@@ -2,6 +2,8 @@ package io.pigagent.cli;
 
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.web.WebConsole;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Standalone entry point for the local Web console — an INDEPENDENT process from the CLI. The CLI
@@ -14,29 +16,30 @@ import io.pigagent.web.WebConsole;
  */
 public final class WebLauncher {
 
+    private static final Logger log = LoggerFactory.getLogger(WebLauncher.class);
+
     private WebLauncher() {
     }
 
     public static void main(String[] args) throws Exception {
-        System.out.println(Ansi.heading("Pig Agent — Web Console"));
+        log.info("Starting Pig Agent Web Console");
 
         AgentBootstrap.Services s;
         try {
             s = AgentBootstrap.build(false); // no interactive onboarding in a headless web process
         } catch (IllegalStateException e) {
-            System.err.println(Ansi.error(e.getMessage()));
+            log.error(e.getMessage());
             return;
         }
 
         PigAgentConfig.WebConfig web = s.config.getWeb();
         WebConsole console = new WebConsole(s.webContext(), web.getHost(), web.getPort());
         console.start();
-        System.out.println(Ansi.success("Web console: ")
-                + Ansi.info("http://" + web.getHost() + ":" + console.boundPort()));
-        System.out.println(Ansi.dim("Loopback-only, single-user. Ctrl-C to stop."));
+        log.info("Web console: http://{}:{}  (loopback-only, single-user; Ctrl-C to stop)",
+                web.getHost(), console.boundPort());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.err.println(Ansi.warn("\n[Web] Shutting down..."));
+            log.info("Web console shutting down...");
             console.stop();
             s.shutdownCommon();
         }));

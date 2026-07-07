@@ -8,6 +8,8 @@ import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +22,8 @@ import java.util.Map;
  * via {@link WebLauncher} over the same workspace. Colored output is produced via {@link Ansi}.
  */
 public final class PigAgentCli {
+
+    private static final Logger log = LoggerFactory.getLogger(PigAgentCli.class);
 
     private static final String BANNER = """
                                                                   __     \s
@@ -43,7 +47,7 @@ public final class PigAgentCli {
         List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.err.println(Ansi.warn("\n[CLI] Shutting down..."));
+            log.info("CLI shutting down...");
             for (ChannelAgentBridge bridge : bridges) {
                 bridge.stop();
             }
@@ -67,7 +71,7 @@ public final class PigAgentCli {
                 case "telegram" -> new TelegramChannel(cfg.getToken());
                 case "discord" -> new DiscordChannel(cfg.getToken());
                 default -> {
-                    System.err.println(Ansi.warn("[Channel] Unknown channel type: " + id + ", skipping"));
+                    log.warn("Unknown channel type: {}, skipping", id);
                     yield null;
                 }
             };
@@ -76,7 +80,7 @@ public final class PigAgentCli {
             ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
             bridge.start();
             bridges.add(bridge);
-            System.out.println(Ansi.success("Channel started: ") + Ansi.info(channel.displayName()));
+            log.info("Channel started: {}", channel.displayName());
         }
         return bridges;
     }

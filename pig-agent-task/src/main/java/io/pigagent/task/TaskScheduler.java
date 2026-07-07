@@ -5,6 +5,8 @@ import com.cronutils.model.CronType;
 import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.ZonedDateTime;
 import java.util.Map;
@@ -26,6 +28,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class TaskScheduler {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskScheduler.class);
     private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(2);
     private final TaskManager taskManager;
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -64,7 +67,7 @@ public final class TaskScheduler {
             return;
         }
         schedule(task.id(), task.schedule(), () -> executeTask(task));
-        System.err.println("[Scheduler] Scheduled task: " + task.title() + " (" + task.schedule().type() + ")");
+        log.info("Scheduled task: {} ({})", task.title(), task.schedule().type());
     }
 
     private void scheduleCronNext(String id, String cronExpr, Runnable action) {
@@ -76,7 +79,7 @@ public final class TaskScheduler {
             try {
                 action.run();
             } catch (Exception e) {
-                System.err.println("[Scheduler] Run failed for '" + id + "': " + e.getMessage());
+                log.error("Run failed for '{}': {}", id, e.getMessage(), e);
             } finally {
                 if (scheduledTasks.containsKey(id)) {
                     scheduleCronNext(id, cronExpr, action); // reschedule to the following occurrence
@@ -119,13 +122,13 @@ public final class TaskScheduler {
     }
 
     private void executeTask(Task task) {
-        System.err.println("[Scheduler] Executing: " + task.title());
+        log.info("Executing task: {}", task.title());
         taskManager.updateStatus(task.id(), TaskStatus.IN_PROGRESS);
         try {
             taskManager.updateStatus(task.id(), TaskStatus.COMPLETED);
-            System.err.println("[Scheduler] Completed: " + task.title());
+            log.info("Completed task: {}", task.title());
         } catch (Exception e) {
-            System.err.println("[Scheduler] Failed: " + task.title() + " - " + e.getMessage());
+            log.error("Task failed: {} - {}", task.title(), e.getMessage(), e);
             taskManager.updateStatus(task.id(), TaskStatus.TODO);
         }
     }

@@ -2,6 +2,8 @@ package io.pigagent.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,6 +13,7 @@ import java.util.function.Consumer;
 
 public final class ConfigurationManager {
 
+    private static final Logger log = LoggerFactory.getLogger(ConfigurationManager.class);
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
     private final Path configPath;
     private volatile PigAgentConfig config;
@@ -39,7 +42,7 @@ public final class ConfigurationManager {
             try {
                 return YAML_MAPPER.readValue(configPath.toFile(), PigAgentConfig.class);
             } catch (IOException e) {
-                System.err.println("Warning: Failed to load config, using defaults: " + e.getMessage());
+                log.warn("Failed to load config, using defaults: {}", e.getMessage());
             }
         }
         PigAgentConfig defaultConfig = new PigAgentConfig();
@@ -54,7 +57,7 @@ public final class ConfigurationManager {
             Files.createDirectories(configPath.getParent());
             YAML_MAPPER.writerWithDefaultPrettyPrinter().writeValue(configPath.toFile(), cfg);
         } catch (IOException e) {
-            System.err.println("Warning: Failed to save config: " + e.getMessage());
+            log.warn("Failed to save config: {}", e.getMessage());
         }
     }
 
@@ -70,7 +73,7 @@ public final class ConfigurationManager {
     private void notifyListeners(ConfigurationChangedEvent event) {
         for (var listener : listeners) {
             try { listener.accept(event); }
-            catch (Exception e) { System.err.println("Warning: Config listener error: " + e.getMessage()); }
+            catch (Exception e) { log.warn("Config listener error: {}", e.getMessage()); }
         }
     }
 }

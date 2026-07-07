@@ -6,30 +6,32 @@ import io.agentscope.core.hook.PreActingEvent;
 import io.agentscope.core.hook.PostActingEvent;
 import io.agentscope.core.hook.PreReasoningEvent;
 import io.agentscope.core.hook.PostReasoningEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
-
 /**
- * Logging hook that prints agent lifecycle events to stderr.
+ * Logging hook that traces agent lifecycle events at DEBUG (timestamps come from the log pattern).
  */
 public final class LoggingHook implements Hook {
 
+    private static final Logger log = LoggerFactory.getLogger(LoggingHook.class);
+
     @Override
     public <T extends HookEvent> Mono<T> onEvent(T event) {
-        String timestamp = Instant.now().toString().substring(11, 19);
-        String agentName = event.getAgent() != null ? event.getAgent().getName() : "unknown";
-
-        if (event instanceof PreReasoningEvent) {
-            System.err.printf("[%s] [%s] Pre-reasoning%n", timestamp, agentName);
-        } else if (event instanceof PostReasoningEvent) {
-            System.err.printf("[%s] [%s] Post-reasoning%n", timestamp, agentName);
-        } else if (event instanceof PreActingEvent) {
-            System.err.printf("[%s] [%s] Pre-acting%n", timestamp, agentName);
-        } else if (event instanceof PostActingEvent) {
-            System.err.printf("[%s] [%s] Post-acting%n", timestamp, agentName);
-        } else {
-            System.err.printf("[%s] [%s] Event: %s%n", timestamp, agentName, event.getClass().getSimpleName());
+        if (log.isDebugEnabled()) {
+            String agentName = event.getAgent() != null ? event.getAgent().getName() : "unknown";
+            if (event instanceof PreReasoningEvent) {
+                log.debug("[{}] Pre-reasoning", agentName);
+            } else if (event instanceof PostReasoningEvent) {
+                log.debug("[{}] Post-reasoning", agentName);
+            } else if (event instanceof PreActingEvent) {
+                log.debug("[{}] Pre-acting", agentName);
+            } else if (event instanceof PostActingEvent) {
+                log.debug("[{}] Post-acting", agentName);
+            } else {
+                log.debug("[{}] Event: {}", agentName, event.getClass().getSimpleName());
+            }
         }
         return Mono.just(event);
     }

@@ -7,6 +7,8 @@ import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.Model;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -23,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * any failure, leaving the original context intact.
  */
 public final class CompressionService {
+
+    private static final Logger log = LoggerFactory.getLogger(CompressionService.class);
 
     /** Number of trailing messages kept verbatim (~3 user/assistant rounds). */
     private static final int KEEP_RECENT = 6;
@@ -152,7 +156,7 @@ public final class CompressionService {
             return true;
         } catch (Exception e) {
             // Abort compression entirely; original context is unchanged (§八).
-            System.err.println("[Compress] Skipped: " + e.getMessage());
+            log.warn("Compression skipped: {}", e.getMessage());
             return false;
         }
     }

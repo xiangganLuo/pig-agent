@@ -11,6 +11,8 @@ import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.AgentModelSwitcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +26,8 @@ import java.util.Optional;
  * the right model when activating a session.
  */
 public final class ModelManager implements AgentModelSwitcher {
+
+    private static final Logger log = LoggerFactory.getLogger(ModelManager.class);
 
     /** Result of a connectivity test. */
     public record TestResult(boolean ok, String error) {
@@ -175,7 +179,7 @@ public final class ModelManager implements AgentModelSwitcher {
             currentModelId = target.id();
         } catch (Exception e) {
             // Keep the previous model and conversation intact (§八).
-            System.err.println("[Model] Failed to switch to '" + target.label() + "': " + e.getMessage());
+            log.error("Failed to switch to model '{}': {}", target.label(), e.getMessage(), e);
         }
     }
 }

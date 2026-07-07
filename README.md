@@ -343,6 +343,10 @@ mvn exec:java -s  -pl pig-agent-cli
 2. 生成 `AGENT.md`、`INFO.md`、`application.yaml`
 3. 如果 API Key 未配置，启动引导向导
 
+### 日志
+
+日志经 **SLF4J + Logback**：控制台 + 滚动文件，文件落在 `~/.pig-agent/workspace/logs/pig-agent.log`（按天/大小滚动，保留 7 天）。默认级别 INFO；要调级别或输出目标，编辑 `pig-agent-cli/src/main/resources/logback.xml`（`io.pigagent` 可单独设级，嘈杂第三方压到 WARN）。首次运行引导向导与 REPL 的彩色/流式输出属交互界面，不走日志。
+
 ### 配置示例
 
 编辑 `~/.pig-agent/workspace/application.yaml`：

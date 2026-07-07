@@ -6,6 +6,8 @@ import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.modelcontextprotocol.spec.McpSchema;
 import io.pigagent.config.PigAgentConfig.McpConfig;
 import io.pigagent.config.PigAgentConfig.McpServerConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,6 +30,7 @@ import java.util.Set;
  */
 public final class McpManager {
 
+    private static final Logger log = LoggerFactory.getLogger(McpManager.class);
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
     private Toolkit toolkit;
@@ -65,12 +68,11 @@ public final class McpManager {
                     store.save(fromLegacy(e.getKey(), e.getValue()));
                     imported++;
                 } catch (RuntimeException ex) {
-                    System.err.println("[MCP] 跳过导入 '" + e.getKey() + "': " + ex.getMessage());
+                    log.warn("跳过导入 '{}': {}", e.getKey(), ex.getMessage());
                 }
             }
             if (imported > 0) {
-                System.err.println("[MCP] 已从 application.yaml 导入 " + imported
-                        + " 个服务器到 mcp.json（此后 mcp.json 为唯一真源）。");
+                log.info("已从 application.yaml 导入 {} 个服务器到 mcp.json（此后 mcp.json 为唯一真源）。", imported);
             }
         }
 
@@ -80,9 +82,9 @@ public final class McpManager {
             }
             try {
                 attach(spec);
-                System.err.println("[MCP] 已连接: " + spec.name());
+                log.info("已连接 MCP: {}", spec.name());
             } catch (RuntimeException ex) {
-                System.err.println("[MCP] 连接失败 " + spec.name() + ": " + ex.getMessage());
+                log.warn("连接 MCP 失败 {}: {}", spec.name(), ex.getMessage());
             }
         }
     }
@@ -323,7 +325,7 @@ public final class McpManager {
         try {
             client.close();
         } catch (Exception e) {
-            System.err.println("[MCP] 关闭出错 " + client.getName() + ": " + e.getMessage());
+            log.warn("关闭 MCP 出错 {}: {}", client.getName(), e.getMessage());
         }
     }
 

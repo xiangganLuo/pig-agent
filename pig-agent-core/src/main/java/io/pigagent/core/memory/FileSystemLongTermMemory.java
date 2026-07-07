@@ -3,6 +3,8 @@ package io.pigagent.core.memory;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
@@ -20,6 +22,7 @@ import java.util.List;
  */
 public final class FileSystemLongTermMemory implements LongTermMemory {
 
+    private static final Logger log = LoggerFactory.getLogger(FileSystemLongTermMemory.class);
     private static final int MIN_TEXT_LENGTH = 20;
     private static final int MAX_RETRIEVE_CHARS = 3000;
     private static final DateTimeFormatter TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -47,7 +50,7 @@ public final class FileSystemLongTermMemory implements LongTermMemory {
                 Files.writeString(memoryFile, sb.toString(),
                         StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             } catch (IOException e) {
-                System.err.println("[Memory] Failed to write: " + e.getMessage());
+                log.warn("Failed to write memory: {}", e.getMessage());
             }
         });
     }
@@ -66,7 +69,7 @@ public final class FileSystemLongTermMemory implements LongTermMemory {
                 }
                 return content.substring(content.length() - MAX_RETRIEVE_CHARS);
             } catch (IOException e) {
-                System.err.println("[Memory] Failed to read: " + e.getMessage());
+                log.warn("Failed to read memory: {}", e.getMessage());
                 return "";
             }
         });
