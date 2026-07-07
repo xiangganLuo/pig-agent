@@ -12,15 +12,31 @@
     <span id="conn" class="conn off">离线</span>
 </header>
 
-<main>
-    <section class="panel" id="agents-panel">
-        <div class="panel-head">
-            <h2>Agents</h2>
-            <button id="refresh">刷新</button>
-        </div>
-        <ul id="agents" class="agents"></ul>
+<nav id="tabs">
+    <button data-tab="chat" class="active">Chat</button>
+    <button data-tab="agents">Agents</button>
+    <button data-tab="models">Models</button>
+    <button data-tab="sessions">Sessions</button>
+    <button data-tab="tasks">Tasks</button>
+    <button data-tab="mcp">MCP</button>
+    <button data-tab="settings">Settings</button>
+</nav>
 
-        <form id="create-form" class="create">
+<main>
+    <!-- Chat -->
+    <section class="tab active" id="tab-chat">
+        <div id="chat-log" class="chat-log"></div>
+        <form id="chat-form" class="chat-input">
+            <textarea id="chat-msg" rows="2" placeholder="给 agent 发消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+            <button type="submit">发送</button>
+        </form>
+    </section>
+
+    <!-- Agents -->
+    <section class="tab" id="tab-agents">
+        <div class="panel-head"><h2>Agents</h2><button data-refresh="agents">刷新</button></div>
+        <ul id="agents" class="rows"></ul>
+        <form id="create-agent" class="form-row">
             <input name="id" placeholder="id" required/>
             <input name="name" placeholder="名称" required/>
             <input name="modelId" placeholder="modelId（可选）"/>
@@ -28,12 +44,80 @@
         </form>
     </section>
 
-    <section class="panel" id="events-panel">
-        <div class="panel-head">
-            <h2>实时事件</h2>
-            <button id="clear-events">清空</button>
+    <!-- Models -->
+    <section class="tab" id="tab-models">
+        <div class="panel-head"><h2>Models</h2><button data-refresh="models">刷新</button></div>
+        <ul id="models" class="rows"></ul>
+        <form id="create-model" class="form-row">
+            <select name="protocolId" id="model-protocol"></select>
+            <input name="apiKey" placeholder="API key"/>
+            <input name="baseUrl" placeholder="Base URL（可选）"/>
+            <input name="modelName" placeholder="model name" required/>
+            <button type="submit">添加（含连通性测试）</button>
+        </form>
+    </section>
+
+    <!-- Sessions -->
+    <section class="tab" id="tab-sessions">
+        <div class="panel-head"><h2>Sessions</h2><button data-refresh="sessions">刷新</button></div>
+        <ul id="sessions" class="rows"></ul>
+        <form id="create-session" class="form-row">
+            <input name="name" placeholder="会话名（可选）"/>
+            <button type="submit" data-fork="false">新建</button>
+            <button type="submit" data-fork="true">Fork 当前</button>
+        </form>
+    </section>
+
+    <!-- Tasks -->
+    <section class="tab" id="tab-tasks">
+        <div class="panel-head"><h2>Tasks</h2><button data-refresh="tasks">刷新</button></div>
+        <ul id="tasks" class="rows"></ul>
+        <form id="create-task" class="form-row">
+            <input name="title" placeholder="标题" required/>
+            <input name="description" placeholder="描述"/>
+            <button type="submit">新建任务</button>
+        </form>
+    </section>
+
+    <!-- MCP -->
+    <section class="tab" id="tab-mcp">
+        <div class="panel-head"><h2>MCP servers</h2><button data-refresh="mcp">刷新</button></div>
+        <ul id="mcp" class="rows"></ul>
+        <form id="create-mcp" class="form-row">
+            <input name="name" placeholder="name" required/>
+            <input name="url" placeholder="URL（SSE/HTTP 服务器）"/>
+            <button type="submit">添加（URL 服务器）</button>
+        </form>
+    </section>
+
+    <!-- Settings -->
+    <section class="tab" id="tab-settings">
+        <div class="panel-head"><h2>Status</h2><button data-refresh="settings">刷新</button></div>
+        <ul id="status" class="rows"></ul>
+
+        <h3>Permission</h3>
+        <div class="form-row">
+            <label>mode:
+                <select id="perm-mode">
+                    <option>plan</option><option>ask</option><option>auto</option><option>bypass</option>
+                </select>
+            </label>
+            <span id="perm-lists" class="dim"></span>
         </div>
-        <ul id="events" class="events"></ul>
+
+        <h3>Memory</h3>
+        <div class="form-row">
+            <label><input type="checkbox" id="mem-enabled"/> enabled</label>
+        </div>
+        <details><summary>全局记忆</summary><pre id="mem-global" class="memview"></pre></details>
+        <details><summary>会话记忆</summary><pre id="mem-session" class="memview"></pre></details>
+
+        <h3>Compression</h3>
+        <div class="form-row">
+            <label><input type="checkbox" id="cmp-enabled"/> auto</label>
+            <button id="cmp-now">立即压缩</button>
+            <span id="cmp-info" class="dim"></span>
+        </div>
     </section>
 </main>
 

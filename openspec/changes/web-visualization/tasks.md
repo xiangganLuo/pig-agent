@@ -24,3 +24,13 @@
 - [x] 4.1 `PigAgentCli` 在 `web.enabled` 时装配 Web 控制台（默认关）；与 CLI 共享同一 `AgentKernel`；shutdown hook 停止。
 - [x] 4.2 全模块 `mvn test` BUILD SUCCESS，无回归；内核与 CLI 不受影响（web 模块 11 用例绿）。
 - [x] 4.3 文档：`CLAUDE.md`（模块表 + Web 控制台架构 + `web` 配置）+ `README`（启用/访问/安全说明：仅本机、无 DB）。
+
+## 5. CLI 全能力对等（parity，第二轮扩展）
+
+> 用户要求"把 CLI 全部能力沉淀到 Web"。据 D1 扩展：`WebContext` 打包共享 manager；每域一个 handler 委托，零业务逻辑重复。
+
+- [x] 5.1 `WebContext`（打包 kernel + model/session/compression/mcp/task/protocol/config manager + 记忆路径）+ `Http` 共享工具；`WebConsole(WebContext,...)`；`pig-agent-web` 依赖扩 model/session/mcp/task/providers。
+- [x] 5.2 领域 REST handler：Model/Protocol/Session/Task/Mcp/Permission/Memory/Compress/Status，各委托对应 manager；凭据脱敏（apiKey、env/headers 不回传）。
+- [x] 5.3 流式对话 `ChatHandler`（`POST /api/chat` SSE），镜像 REPL 回合（noteUserMessage→maybeCompress→kernel.chat 流→saveCurrent）。
+- [x] 5.4 前端 tab 化（Chat/Agents/Models/Sessions/Tasks/MCP/Settings），消费全部 REST + chat 流。
+- [x] 5.5 `PigAgentCli` 用已有 manager 构造 `WebContext`；测试：`RestHandlersTest`(permission/task/model 真实 HTTP)、`ChatHandlerTest`(mock kernel 流)、既有 web 测试保持绿。全模块 `mvn test` 绿。

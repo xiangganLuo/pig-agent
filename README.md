@@ -195,18 +195,20 @@ ReActAgent 推理循环:
 
 ### pig-agent-web — 本地 Web 控制台
 
-嵌入式本地 Web 控制台，作为 `AgentKernel` 门面的又一个 adapter（与 CLI 并列，零内核逻辑）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE，随 CLI 进程启停。
+嵌入式本地 Web 控制台，**与 CLI 功能对等**：作为内核之上的 adapter（agent/对话/事件经 `AgentKernel` 门面，其余能力复用 CLI 同一批 manager，零业务逻辑重复）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE，随 CLI 进程启停。前端为纯 HTML/JS 的 tab 页（Chat/Agents/Models/Sessions/Tasks/MCP/Settings，无构建步骤）。
 
-| 类                     | 职责                                                        |
-| ---------------------- | ----------------------------------------------------------- |
-| `WebConsole`           | 嵌入式 HTTP server：绑本机、注册路由、`start`/`stop`        |
-| `AgentApiHandler`      | REST `/api/agents…` 直委托门面（list/get/create/use/run…）  |
-| `EventStreamHandler`   | SSE `/api/events` 订阅 `subscribeEvents()`，推 `KernelEvent` |
-| `StaticHandler`        | 静态前端 `/`（`resources/web/`，纯 HTML/JS，随 jar 打包）    |
+| 类                     | 职责                                                                 |
+| ---------------------- | -------------------------------------------------------------------- |
+| `WebConsole`           | 嵌入式 HTTP server：绑本机、注册路由、`start`/`stop`                 |
+| `WebContext`           | 打包共享 manager（kernel + model/session/mcp/task/… ），镜像 `ReplContext` |
+| `ChatHandler`          | `POST /api/chat` 流式对话（SSE），镜像 REPL 回合                     |
+| `AgentApiHandler` 等   | 各域 REST：agents/models/sessions/tasks/mcp/permission/memory/compress/status |
+| `EventStreamHandler`   | SSE `/api/events` 订阅 `subscribeEvents()`，推 `KernelEvent`         |
+| `StaticHandler`        | 静态前端 `/`（`resources/web/`，随 jar 打包）                        |
 
 **启用与访问**：默认关闭。在 `application.yaml` 加 `web.enabled: true`（可选 `web.host`/`web.port`，默认 `127.0.0.1:7317`），启动后访问 `http://127.0.0.1:7317`。
 
-**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。切勿把 `web.host` 改成对外地址。
+**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。凭据（apiKey、MCP env/headers）不经 REST 回传。切勿把 `web.host` 改成对外地址。
 
 ### pig-agent-onboarding — 引导向导
 

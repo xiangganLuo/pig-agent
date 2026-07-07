@@ -16,7 +16,8 @@
         HttpServer. Loopback-only, single-user, no DB — a personal-computer visual front-end.</description>
 
     <dependencies>
-        <!-- The kernel façade + events this console adapts. No internal-kernel deps. -->
+        <!-- The kernel façade + events this console adapts, plus the same shared managers the CLI
+             drives (single source of truth; the web is an adapter, not a second implementation). -->
         <dependency>
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-core</artifactId>
@@ -24,6 +25,26 @@
         <dependency>
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-config</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-session</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-mcp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-task</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-providers</artifactId>
         </dependency>
 
         <!-- JSON for REST/SSE payloads. The HTTP server itself is the JDK built-in

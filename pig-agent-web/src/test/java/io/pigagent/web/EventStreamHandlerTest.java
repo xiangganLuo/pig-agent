@@ -48,7 +48,7 @@ class EventStreamHandlerTest {
         AgentRegistry registry = new AgentRegistry(new AgentHolder(def.agent()));
         registry.register(def);
         kernel = new AgentKernel(registry, new AgentSpecRepository(dir), factory, null);
-        console = new WebConsole(kernel, "127.0.0.1", 0);
+        console = new WebConsole(WebContext.ofKernel(kernel), "127.0.0.1", 0);
         console.start();
         base = "http://127.0.0.1:" + console.boundPort();
     }
