@@ -195,7 +195,7 @@ ReActAgent 推理循环:
 
 ### pig-agent-web — 本地 Web 控制台
 
-嵌入式本地 Web 控制台，**与 CLI 功能对等**：作为内核之上的 adapter（agent/对话/事件经 `AgentKernel` 门面，其余能力复用 CLI 同一批 manager，零业务逻辑重复）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE，随 CLI 进程启停。前端为纯 HTML/JS 的 tab 页（Chat/Agents/Models/Sessions/Tasks/MCP/Settings，无构建步骤）。
+本地 Web 控制台，**与 CLI 功能对等**：作为内核之上的 adapter（agent/对话/事件经 `AgentKernel` 门面，其余能力复用同一批 manager，零业务逻辑重复）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE。**CLI 与 Web 是独立进程**——CLI 不启动 Web；两者共享同一磁盘 workspace，各自 `AgentBootstrap.build(...)` 起自己的运行时。前端为纯 HTML/JS 的 tab 页（Chat/Agents/Models/Sessions/Tasks/MCP/Settings，无构建步骤）。
 
 | 类                     | 职责                                                                 |
 | ---------------------- | -------------------------------------------------------------------- |
@@ -206,9 +206,15 @@ ReActAgent 推理循环:
 | `EventStreamHandler`   | SSE `/api/events` 订阅 `subscribeEvents()`，推 `KernelEvent`         |
 | `StaticHandler`        | 静态前端 `/`（`resources/web/`，随 jar 打包）                        |
 
-**启用与访问**：默认关闭。在 `application.yaml` 加 `web.enabled: true`（可选 `web.host`/`web.port`，默认 `127.0.0.1:7317`），启动后访问 `http://127.0.0.1:7317`。
+**启动与访问**：独立进程启动（不随 CLI）：
 
-**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。凭据（apiKey、MCP env/headers）不经 REST 回传。切勿把 `web.host` 改成对外地址。
+```bash
+mvn exec:java -pl pig-agent-cli -Dexec.mainClass=io.pigagent.cli.WebLauncher
+```
+
+host/port 取 `application.yaml` 的 `web.host`/`web.port`（默认 `127.0.0.1:7317`），启动后访问 `http://127.0.0.1:7317`。需先用 CLI 配好模型（Web 进程不做交互式引导）。
+
+**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。凭据（apiKey、MCP env/headers）不经 REST 回传。切勿把 `web.host` 改成对外地址。Web 进程无终端 confirmer，`ask` 模式下工具调用 fail-closed，请用 `auto`/`bypass`。
 
 ### pig-agent-onboarding — 引导向导
 
