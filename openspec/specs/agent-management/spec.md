@@ -3,12 +3,10 @@
 ## Purpose
 
 让内核从「单 agent」变为「进程内管理多个 agent」：每个 agent 由声明式、不可变的 `AgentSpec`（各自模型、工具子集、权限档、人格）定义并持久化；用户可列出/新建/切换 agent，交互「当前 agent」为注册表中的 active 实例。单 agent 为其退化特例，行为不变。设计见 `docs/design/agent-management-design.md`。
-
 ## Requirements
-
 ### Requirement: 声明式 Agent 定义
 
-系统 SHALL 用不可变的 `AgentSpec` 描述一个 agent，至少包含 `id`、`name`、`sysPrompt`、`toolNames`（工具名白名单）、`permissionMode`、`modelId`（可为空）与 `maxIters`。`AgentSpec` MUST 通过 `withXxx` 拷贝方式修改，不得原地可变。
+系统 SHALL 用不可变的 `AgentSpec` 描述一个 agent，至少包含 `id`、`name`、`sysPrompt`、`toolNames`（工具名白名单）、`permissionMode`、`modelId`（可为空）与 `maxIters`；并支持**自主运行字段**：`mandate`（自主运行时作为 user message 的岗位说明，可空）、`schedule`（`TaskSchedule`：ONCE/CRON/DELAYED，可空）、`commandAllowlist`（EXEC 首-token 白名单，可空）、`timeoutSeconds`（尽力而为墙钟超时，0=不设）、`lastRunAt`（上次自主运行时间，可空）。`schedule` 为空表示交互型、非空表示自主型。`AgentSpec` MUST 通过 `withXxx` 拷贝方式修改，不得原地可变。
 
 #### Scenario: 用 withXxx 生成新实例而不改原对象
 - **WHEN** 对一个 `AgentSpec` 调用 `withModelId(newId)`
@@ -16,7 +14,15 @@
 
 #### Scenario: 缺省字段有合理默认
 - **WHEN** 创建一个仅指定 `id` 与 `name` 的 `AgentSpec`
-- **THEN** `toolNames` 默认为空表示全量工具、`permissionMode` 取全局默认、`modelId` 为空表示用默认模型
+- **THEN** `toolNames` 默认为空表示全量工具、`permissionMode` 取全局默认、`modelId` 为空表示用默认模型、`schedule`/`mandate` 为空表示交互型
+
+#### Scenario: schedule 区分交互型与自主型
+- **WHEN** 一个 `AgentSpec` 的 `schedule` 非空
+- **THEN** 它被视为自主型 agent，纳入自主运行调度；`schedule` 为空则为交互型，不被调度
+
+#### Scenario: 自主字段完整持久化往返
+- **WHEN** 保存一个含 `mandate`、`schedule`、`commandAllowlist`、`timeoutSeconds` 的 `AgentSpec` 后重新加载
+- **THEN** 这些自主字段与保存前等值（不丢字段）
 
 ### Requirement: Agent 定义持久化
 
@@ -32,15 +38,19 @@
 
 ### Requirement: 多 Agent 注册与当前 Agent
 
-系统 SHALL 用 `AgentRegistry` 持有多个 `AgentInstance`（每个 = agentId + 源 AgentSpec + 内部 PigAgent），并维护唯一的「当前（active）agent」。既有只通过 `AgentHolder.get()` 读当前 agent 的组件 MUST 继续读到 active 实例，行为不变。
+系统 SHALL 用 `AgentRegistry` 持有多个 `AgentInstance`（每个 = agentId + 源 AgentSpec + 内部 PigAgent），并维护唯一的「当前（active）agent」。对外访问 SHALL 经 `AgentKernel` 门面（列/建/改/删/切、chat、事件流）；内核内部仍以 `AgentRegistry` 为准，`AgentHolder` 继续作为 active 实例的视图，既有只通过 `AgentHolder.get()` 读当前 agent 的组件 MUST 继续读到 active 实例，行为不变。
 
 #### Scenario: 切换当前 agent
-- **WHEN** 注册表中存在 agent A（active）与 agent B，执行「切换到 B」
+- **WHEN** 注册表中存在 agent A（active）与 agent B，经门面 `useAgent("B")`
 - **THEN** active 实例变为 B，随后 `AgentHolder.get()` 返回 B 的 PigAgent
 
 #### Scenario: AgentHolder 作为 active 视图零变化
-- **WHEN** 通过注册表切换 active 实例
+- **WHEN** 通过门面/注册表切换 active 实例
 - **THEN** REPL、SessionManager、CompressionService 等读 `agentHolder.get()` 的组件立即看到新的 active agent，无需改动其代码
+
+#### Scenario: 对外访问经门面
+- **WHEN** 一个入口需要操作 agent 或消费事件
+- **THEN** 它经 `AgentKernel` 门面完成，而非直连 `AgentRegistry` 内部类
 
 ### Requirement: 每 Agent 独立选择模型
 
@@ -77,3 +87,4 @@
 #### Scenario: 现有交互链路不回归
 - **WHEN** 在默认 agent 上执行发送消息、切换模型、切换会话、上下文压缩
 - **THEN** 各功能表现与本变更前一致
+
