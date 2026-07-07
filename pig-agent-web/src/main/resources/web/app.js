@@ -136,7 +136,7 @@ $('#create-session').addEventListener('submit', async (e) => {
 });
 
 // ---- tasks ------------------------------------------------------------
-const NEXT_STATUS = { TODO: 'IN_PROGRESS', IN_PROGRESS: 'DONE', DONE: 'TODO' };
+const NEXT_STATUS = { TODO: 'IN_PROGRESS', IN_PROGRESS: 'COMPLETED', COMPLETED: 'TODO', AWAITING_HUMAN_INPUT: 'TODO' };
 async function loadTasks() {
     const { body } = await api('/api/tasks');
     render('#tasks', body, (t) => rowHtml(
