@@ -205,7 +205,11 @@ public final class ReplCommands {
         public void run() {
             Terminal t = ctx.terminal();
             ModelManager mm = ctx.modelManager();
-            String act = action == null ? "list" : action.toLowerCase();
+            if (action == null) {
+                ModelSelection.interactive(ctx);
+                return;
+            }
+            String act = action.toLowerCase();
             switch (act) {
                 case "list" -> listModels(t, mm);
                 case "add" -> addModel(t, mm);
@@ -300,24 +304,7 @@ public final class ReplCommands {
                 Ansi.println(t, Ansi.error("No such model: " + args[0]));
                 return;
             }
-            Ansi.println(t, Ansi.dim("Testing " + m.label() + " ..."));
-            ModelManager.TestResult test = mm.test(m);
-            if (!test.ok()) {
-                Ansi.println(t, Ansi.error("Model unavailable: " + test.error() + " — keeping current model."));
-                return;
-            }
-            SessionManager sm = ctx.sessionManager();
-            if (global) {
-                mm.setDefault(id);
-                sm.bindCurrentSessionModel(null);
-                sm.reactivateCurrent();
-                Ansi.println(t, Ansi.success("Global default set to " + m.label() + " (applies to all sessions)."));
-            } else {
-                sm.bindCurrentSessionModel(id);
-                sm.reactivateCurrent();
-                Ansi.println(t, Ansi.success("This session now uses " + m.label()
-                        + " (new sessions keep the default)."));
-            }
+            ModelSelection.apply(t, mm, ctx.sessionManager(), m, global);
         }
 
         private void editModel(Terminal t, ModelManager mm) {

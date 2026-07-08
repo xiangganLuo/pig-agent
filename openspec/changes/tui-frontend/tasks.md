@@ -29,10 +29,10 @@
 
 ## 6. 轻量行内交互（选择器 + 确认）
 
-- [ ] 6.1 `/model` 无参 → 行内选择器：`BindingReader`/`KeyMap` 读方向键，上下移高亮、Enter 选定、Esc 取消，当前行区重绘；选定后经 `ModelManager` + 会话层生效。**降级**：非交互/异常回退既有数字输入。
-- [ ] 6.2 `/session` 无参 → 行内选择器（次要；成本高时留最小实现或数字选择）。
-- [ ] 6.3 破坏性操作沿用 y/N 行内确认（既有），纳入统一交互口径。
-- [ ] 6.4 单测：选择器「选定 → manager 委托」关键路径（参照现有 `ReplCommands` 测法，真 manager + temp dir 或 mock）。
+- [x] 6.1 `/model` 无参 → `InlineSelector`（`BindingReader`/`KeyMap` 读方向键，上下移高亮、Enter 选定、Esc/q 取消，原地重绘）；导航态纯 `SelectorModel`（单测）；选定经 `ModelSelection.apply` → `ModelManager.test` + 会话层生效。**降级**：`isInteractive` 为假（dumb/无真 TTY）回退数字输入。
+- [x] 6.2 `/session` 无参 → 保持既有子命令（`SelectorModel`/`InlineSelector` 已复用就绪；`/session` 选择器为次要项，暂留既有交互，避免重复造轮子）。
+- [x] 6.3 破坏性操作沿用 y/N 行内确认（`/model delete` 等既有），口径不变。
+- [x] 6.4 单测：`ModelSelectionTest`「选定 → manager 委托」——会话切换 bind 当前会话、全局切换 setDefault、连通性失败不改任何状态。
 
 ## 7. 移除 pig-agent-web（保留 CLI REPL）
 
