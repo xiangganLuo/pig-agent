@@ -129,6 +129,7 @@ public final class AgentRepl {
             while (running.get()) {
                 try {
                     systemRegistry.cleanUp();
+                    Ansi.println(terminal, StatusLine.from(modelManager, sessionManager, configManager));
                     String line = reader.readLine(prompt);
                     if (line == null || line.isBlank()) {
                         continue;

@@ -13,13 +13,13 @@
 
 ## 3. 斜杠命令补全菜单
 
-- [ ] 3.1 输入 `/` 弹补全菜单，覆盖全部命令（`/model /session /mcp /permission /memory /compress /status /agent /tasks /skills /config /protocols /channels /help /clear /quit`）；沿用 `SystemRegistry.completer()`（picocli 元数据），必要时补 `Completer` 使空 `/` 弹全量。
-- [ ] 3.2 单测：补全候选集合 = 全部斜杠命令名（防止命令新增/漏挂时静默漂移）。
+- [x] 3.1 输入 `/` 弹补全菜单，覆盖全部命令（`build()` 里 16 个子命令全部 `addSubcommand`，`SystemRegistry.completer()` 直接取 picocli 元数据 → 候选即全量）。
+- [x] 3.2 单测：`SlashCompletionTest` 断言 `PicocliCommands.commandNames()`（= 补全候选源）含全部 16 个斜杠命令且都以 `/` 开头（防新增/漏挂静默漂移）。
 
 ## 4. 状态行
 
-- [ ] 4.1 `StatusLine`（纯函数）：组装 `model · session · 权限mode`，读 `ModelManager/SessionManager/ConfigurationManager`；每个提示符上方打印一行（简单可靠，不做终端底部固定）。
-- [ ] 4.2 单测：状态行内容组装正确，且不含任何凭据字段。
+- [x] 4.1 `StatusLine`：`format(model,session,perm)` 纯组装 + `from(ModelManager,SessionManager,ConfigurationManager)` 读值（model 用 `StoredModel.label()` 非 apiKey）；`run()` 每个提示符上方打印一行（不做终端底部固定）。
+- [x] 4.2 单测：`StatusLineTest` 组装正确 + `from` 用安全 label、输出不含 apiKey。
 
 ## 5. Ctrl-C 打断当前回合
 
