@@ -43,6 +43,6 @@
 
 ## 8. 文档与验收
 
-- [ ] 8.1 `README` / `CLAUDE.md`：删 Web 章节与 `WebLauncher` 命令；REPL 描述更新为「CC 风格增强」（富渲染 / 补全 / 状态行 / Ctrl-C 打断 / 行内选择器）；模块表去掉 `pig-agent-web`。
-- [ ] 8.2 `mvn -s "D:\env\apache-maven-3.9.10\conf\settings.xml" compile` / `test` 全绿。
-- [ ] 8.3 `docs/planning/tui-and-core-roadmap.md` §8 进度表：能力名由 `tui-console` 更新为 `cc-repl`，勾选对应 spec/code 列。
+- [x] 8.1 `README` / `CLAUDE.md`：删 Web 章节与 `WebLauncher` 命令；REPL 描述更新为「CC 风格增强」（富渲染 / 补全 / 状态行 / Ctrl-C 打断 / 行内选择器）；模块表去掉 `pig-agent-web`；补 gitbash/mintty 兼容提示（需真 TTY，用 winpty / Windows Terminal）。
+- [x] 8.2 `mvn -s "..." test` 全绿：全项目 13 模块 BUILD SUCCESS（tools 73 / session 23 / model 12 / cli 64 等，0 失败）。
+- [x] 8.3 `docs/planning/tui-and-core-roadmap.md`：从旧提交恢复并按新方向改写——tui-frontend 改为「CC 风格行式 REPL 增强（非 Lanterna）」能力名 `cc-repl`；§8 进度表标注 6 内核 spec 已并入 main/归档 + 组1–7 已完成。

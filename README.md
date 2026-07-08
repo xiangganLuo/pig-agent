@@ -193,28 +193,7 @@ ReActAgent 推理循环:
 | `DiscordChannel`     | Discord 通道（存根）                                 |
 | `ChannelRegistry`    | 通道注册中心                                         |
 
-### pig-agent-web — 本地 Web 控制台
-
-本地 Web 控制台，**与 CLI 功能对等**：作为内核之上的 adapter（agent/对话/事件经 `AgentKernel` 门面，其余能力复用同一批 manager，零业务逻辑重复）。基于 JDK 内置 `com.sun.net.httpserver`（无外部 Web 框架），暴露 REST + SSE。**CLI 与 Web 是独立进程**——CLI 不启动 Web；两者共享同一磁盘 workspace，各自 `AgentBootstrap.build(...)` 起自己的运行时。前端为纯 HTML/JS 的 tab 页（Chat/Agents/Models/Sessions/Tasks/MCP/Settings，无构建步骤）。
-
-| 类                     | 职责                                                                 |
-| ---------------------- | -------------------------------------------------------------------- |
-| `WebConsole`           | 嵌入式 HTTP server：绑本机、注册路由、`start`/`stop`                 |
-| `WebContext`           | 打包共享 manager（kernel + model/session/mcp/task/… ），镜像 `ReplContext` |
-| `ChatHandler`          | `POST /api/chat` 流式对话（SSE），镜像 REPL 回合                     |
-| `AgentApiHandler` 等   | 各域 REST：agents/models/sessions/tasks/mcp/permission/memory/compress/status |
-| `EventStreamHandler`   | SSE `/api/events` 订阅 `subscribeEvents()`，推 `KernelEvent`         |
-| `StaticHandler`        | 静态前端 `/`（`resources/web/`，随 jar 打包）                        |
-
-**启动与访问**：独立进程启动（不随 CLI）：
-
-```bash
-mvn exec:java -pl pig-agent-cli -Dexec.mainClass=io.pigagent.cli.WebLauncher
-```
-
-host/port 取 `application.yaml` 的 `web.host`/`web.port`（默认 `127.0.0.1:7317`），启动后访问 `http://127.0.0.1:7317`。需先用 CLI 配好模型（Web 进程不做交互式引导）。
-
-**安全约束**：仅绑本机（loopback）、单用户、无账号体系、无 DB —— 个人电脑红线。凭据（apiKey、MCP env/headers）不经 REST 回传。切勿把 `web.host` 改成对外地址。Web 进程无终端 confirmer，`ask` 模式下工具调用 fail-closed，请用 `auto`/`bypass`。
+> **终端前端说明**：曾有一个可选的嵌入式本地 Web 控制台模块（`pig-agent-web`）。当前端收敛到 CC 风格 REPL 后，该模块已移除；Web 可在生态扩展阶段作为又一个 `AgentKernel` adapter 回归（投影蓝本仍在 git 历史）。终端前端唯一入口即下文的 `pig-agent-cli` REPL。
 
 ### pig-agent-onboarding — 引导向导
 
@@ -223,23 +202,27 @@ host/port 取 `application.yaml` 的 `web.host`/`web.port`（默认 `127.0.0.1:7
 | ------------------ | -------------------------------------------- |
 | `OnboardingWizard` | 首次运行引导，选择提供商、配置凭证、更新配置 |
 
-### pig-agent-cli — CLI 入口
+### pig-agent-cli — CLI 入口（CC 风格 REPL）
 
+终端唯一前端：Claude-Code 风格的**行式对话** REPL（非全屏 TUI），基于 JLine3 + picocli。
 
-| 类            | 职责                                    |
-| ------------- | --------------------------------------- |
-| `PigAgentCli` | 主入口，JLine3 REPL，流式输出，优雅关闭 |
+| 类 / 包                              | 职责                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `PigAgentCli`                        | 主入口，构建共享运行时 + 启动 channel + 交给 `AgentRepl`                  |
+| `repl/AgentRepl`                     | REPL 主循环；回合走 `kernel.chat` 并流式富渲染；Ctrl-C 真中断             |
+| `repl/render/MarkdownAnsiRenderer`   | markdown→ANSI（粗体/行内代码/代码块/列表/标题），纯函数                   |
+| `repl/render/StreamingMarkdownPrinter` | 答案按完成行增量出字，fence 状态跨 chunk                                 |
+| `repl/render/ToolCallFormatter`      | 工具调用块 `⏺工具名 / └结果摘要`，凭据 redact                            |
+| `repl/StatusLine`                    | 提示符上方状态行 `model · session · perms`（不含凭据）                    |
+| `repl/select/InlineSelector` + `SelectorModel` | 方向键行内选择器（`/model` 无参用；数字降级）                   |
 
-REPL 命令：
+**富渲染 / 交互**：流式出字 + markdown 高亮；`REASONING` 显示 `⋯ thinking`；工具调用缩进成块；输入 `/` 弹**全部命令**补全菜单；`/model` 无参弹方向键选择器（Enter 选定、Esc 取消）；破坏性操作 y/N 确认。
 
+**Ctrl-C 真中断**：回合进行中按 Ctrl-C → `AgentKernel.interruptCurrent()` 取消当前模型调用、回到提示符，**进程不退出**；空闲态 Ctrl-C 丢弃当前行、Ctrl-D 退出。
 
-| 命令      | 功能         |
-| --------- | ------------ |
-| `/help`   | 显示帮助     |
-| `/tasks`  | 列出任务     |
-| `/skills` | 列出技能     |
-| `/config` | 显示当前配置 |
-| `/quit`   | 退出         |
+REPL 命令（输入 `/` 触发补全）：`/help /model /agent /session /mcp /permission /memory /compress /status /tasks /skills /config /protocols /channels /clear /quit`。
+
+**终端要求**：JLine 需要真控制台。请用 **Windows Terminal / PowerShell / cmd**（或 Linux/macOS 原生终端）。**git-bash / mintty 下 stdin 不是真 TTY，交互会异常**——请用 `winpty mvn ... exec:java`，或改用 Windows Terminal。
 
 ## 代码结构
 
