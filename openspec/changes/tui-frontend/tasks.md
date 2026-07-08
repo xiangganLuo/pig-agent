@@ -5,11 +5,11 @@
 
 ## 2. 流式富渲染（CC 风格）
 
-- [ ] 2.1 `MarkdownAnsiRenderer`（纯函数）：`**粗体**` / `` `行内代码` `` / ```` ``` 代码块 ```` / `- 列表` / `# 标题` → `Ansi` 转义；单测覆盖典型 + 未闭合标记边界。
-- [ ] 2.2 增量出字：`AGENT_RESULT` 事件到达即写出（不再缓冲到 `doOnComplete`），代码块按 fence 边界刷新、行内标记按完成行渲染。
-- [ ] 2.3 工具调用块：`TOOL_RESULT` 渲染为 `⏺ 工具名(参数摘要)` + `└ 结果摘要`，缩进显示；apiKey / mcp env/headers 等敏感字段不渲染。
-- [ ] 2.4 推理 spinner：`REASONING` 阶段行尾显示 `⋯ thinking`（`\r` 重绘），出答案/工具时清除。
-- [ ] 2.5 `streamToAgent` 改走 `agentKernel.chat(agentKernel.activeId(), msg)`（注册可中断回合），保留 `noteUserMessage → maybeCompress → chat → saveCurrent` 顺序；单测 mock kernel 返回假 `Flux<Event>` 验证映射 + 钩子顺序不回归。
+- [x] 2.1 `MarkdownAnsiRenderer`（纯函数）：`**粗体**` / `` `行内代码` `` / ```` ``` 代码块 ```` / `- 列表` / `# 标题` → `Ansi` 转义；单测覆盖典型 + 未闭合标记边界。（`render/MarkdownAnsiRendererTest` 12 测）
+- [x] 2.2 增量出字：`AGENT_RESULT` 事件到达即写出（`StreamingMarkdownPrinter` 按完成行刷新，fence 状态跨行），不再缓冲到 `doOnComplete`。（`render/StreamingMarkdownPrinterTest` 5 测）
+- [x] 2.3 工具调用块：`TOOL_RESULT` 渲染为 `⏺ 工具名` + `└ 结果摘要`，缩进显示；apiKey / bearer / `key=值` 等敏感字段 `redact` 掉。（`render/ToolCallFormatterTest` 7 测）
+- [x] 2.4 推理 spinner：`REASONING` 阶段行尾显示 `⋯ thinking`（`\r` 重绘），出答案/工具时清除。
+- [x] 2.5 `runTurn` 改走 `agentKernel.chat(agentKernel.activeId(), msg)`（注册可中断回合），保留 `noteUserMessage → maybeCompress → chat → saveCurrent` 顺序；`AgentReplTurnTest` mock kernel 返回假 `Flux<Event>` 验证映射 + 钩子顺序。
 
 ## 3. 斜杠命令补全菜单
 
@@ -23,9 +23,9 @@
 
 ## 5. Ctrl-C 打断当前回合
 
-- [ ] 5.1 回合进行中：`subscribe()` + `Disposable` + `CountDownLatch`；`terminal.handle(Signal.INT, …)` → `agentKernel.interruptCurrent()` + `disposable.dispose()` + `latch.countDown()`；回合结束 `finally` 恢复默认 INT handler。中断后回提示符、进程不退出。
-- [ ] 5.2 空闲态：Ctrl-C 仍 `UserInterruptException`（丢弃当前行），Ctrl-D 仍 `EndOfFileException` 退出——三态互不串味。
-- [ ] 5.3 单测：中断接线（回合内触发 → 调 `interruptCurrent()` + dispose；返回可输入态）；handler 复位。
+- [x] 5.1 回合进行中：`renderStream` 用 `subscribe()` + `Disposable` + `CountDownLatch`；`terminal.handle(Signal.INT, …)` → `agentKernel.interruptCurrent()` + `disposable.dispose()` + `latch.countDown()`；回合结束 `finally` 恢复上一个 INT handler。中断后回提示符、进程不退出。
+- [x] 5.2 空闲态：Ctrl-C 仍 `UserInterruptException`（丢弃当前行），Ctrl-D 仍 `EndOfFileException` 退出——`run()` 循环三态互不串味（未改）。
+- [x] 5.3 单测：`AgentReplInterruptTest` 回合内触发 → 调 `interruptCurrent()` + dispose + 返回可输入态；handler 复位。
 
 ## 6. 轻量行内交互（选择器 + 确认）
 
