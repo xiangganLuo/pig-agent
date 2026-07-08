@@ -64,7 +64,6 @@ import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.task.TaskTool;
 import io.pigagent.tool.webfetch.SmartWebFetchTool;
 import io.pigagent.tool.websearch.BraveWebSearchTool;
-import io.pigagent.web.WebContext;
 import io.pigagent.workspace.WorkspaceManager;
 import org.jline.reader.LineReader;
 import org.slf4j.Logger;
@@ -77,13 +76,12 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Builds the shared agent runtime (workspace, config, providers, model, tools, MCP, the agent +
  * kernel, sessions, compression, tasks, the channel agent, and digital-employee scheduling) — the
- * wiring both frontends depend on. It builds NO frontend: the CLI ({@link PigAgentCli}) adds the
- * REPL + channels on top, and the Web console ({@link WebLauncher}) adds the HTTP server on top.
- * Neither starts the other — they are independent processes over the same on-disk workspace.
+ * wiring the frontend depends on. It builds NO frontend: the CLI ({@link PigAgentCli}) adds the
+ * REPL + channels on top.
  *
  * <p>Interactive confirmers read from {@code readerRef}, which the CLI wires to its JLine reader.
- * In a non-interactive process (the Web launcher) it stays null, so ASK-mode tool calls fail closed
- * — switch to {@code auto}/{@code bypass} (via {@code /permission} or the Web) to allow them.
+ * In a non-interactive process it stays null, so ASK-mode tool calls fail closed — switch to
+ * {@code auto}/{@code bypass} (via {@code /permission}) to allow them.
  */
 public final class AgentBootstrap {
 
@@ -139,14 +137,7 @@ public final class AgentBootstrap {
             this.taskScheduler = taskScheduler;
         }
 
-        /** A ready {@link WebContext} over these shared managers (for the Web launcher). */
-        public WebContext webContext() {
-            return new WebContext(agentKernel, modelManager, sessionManager, compressionService, mcpManager,
-                    taskManager, registry, configManager,
-                    workspace.getContextDir().resolve("memory.md"), workspace.getSessionsDir());
-        }
-
-        /** Release the shared resources — call from each frontend's shutdown hook. */
+        /** Release the shared resources — call from the frontend's shutdown hook. */
         public void shutdownCommon() {
             sessionManager.saveCurrent();
             agentSession.close();
@@ -414,8 +405,7 @@ public final class AgentBootstrap {
         }
 
         // A separate channel agent (channel-mode permissions, no confirmer). attachChannel rebuilds
-        // it on model switch so channels follow the active model. Frontends decide whether to start
-        // channel bridges (the CLI does; the Web launcher does not).
+        // it on model switch so channels follow the active model. The CLI starts the channel bridges.
         ToolPermissionHook channelPermissionHook = new ToolPermissionHook(
                 () -> configManager.getConfig().getPermissions(), null, null, true);
         // The channel agent is a separate track (D4) with no stop key; it is deliberately NOT wired

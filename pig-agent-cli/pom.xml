@@ -59,10 +59,6 @@
             <artifactId>pig-agent-mcp</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.pigagent</groupId>
-            <artifactId>pig-agent-web</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
         </dependency>
@@ -82,7 +78,7 @@
             <groupId>org.fusesource.jansi</groupId>
             <artifactId>jansi</artifactId>
         </dependency>
-        <!-- Logging backend: the CLI is the entry module, so it (and WebLauncher) provide Logback.
+        <!-- Logging backend: the CLI is the entry module, so it provides Logback.
              Library modules depend only on the SLF4J API (transitively available). -->
         <dependency>
             <groupId>ch.qos.logback</groupId>

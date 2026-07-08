@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Logback config for the Pig Agent entry module (shared by PigAgentCli and WebLauncher).
+  Logback config for the Pig Agent entry module (PigAgentCli).
   Console + rolling file. Logs land under the workspace: ~/.pig-agent/workspace/logs/.
   Adjust io.pigagent level for more/less detail; noisy third parties are pinned to WARN.
 -->
