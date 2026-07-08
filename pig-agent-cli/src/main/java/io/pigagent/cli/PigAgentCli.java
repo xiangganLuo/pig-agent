@@ -18,8 +18,7 @@ import java.util.Map;
 /**
  * Terminal (REPL) entry point. Builds the shared runtime via {@link AgentBootstrap}, starts the
  * channel bridges, then hands control to {@link AgentRepl} for the interactive (picocli + JLine)
- * loop. It deliberately does NOT start the Web console — that is an independent process launched
- * via {@link WebLauncher} over the same workspace. Colored output is produced via {@link Ansi}.
+ * loop. Colored output is produced via {@link Ansi}.
  */
 public final class PigAgentCli {
 
@@ -40,8 +39,7 @@ public final class PigAgentCli {
     public static void main(String[] args) throws Exception {
         System.out.println(Ansi.heading(BANNER));
 
-        // Shared runtime (agent, kernel, managers). The CLI is a REPL frontend on top of it — it does
-        // NOT start the Web console; run WebLauncher for that (independent process, same workspace).
+        // Shared runtime (agent, kernel, managers). The CLI is the REPL frontend on top of it.
         AgentBootstrap.Services s = AgentBootstrap.build(true);
 
         List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());

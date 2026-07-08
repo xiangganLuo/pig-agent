@@ -36,10 +36,10 @@
 
 ## 7. 移除 pig-agent-web（保留 CLI REPL）
 
-- [ ] 7.1 删除 `pig-agent-web/` 整目录 + parent POM `<modules>` 条目 + `pig-agent-cli/pom.xml` 对 `pig-agent-web` 的依赖。
-- [ ] 7.2 删除 `cli.WebLauncher` + `AgentBootstrap.webContext()`（及其 `WebContext` import/装配）。
-- [ ] 7.3 删除 `config.WebConfig` 与 `web.*` 读取；`application.yaml` 去除 `web.*`；`logback.xml` 去除 web 相关条目。
-- [ ] 7.4 全量搜残留（`WebConsole` / `WebContext` / `WebLauncher` / `WebConfig` / `web.`）确保 `mvn -am compile` 无残留；`PigAgentCli` 注释里的 web 描述一并更新。
+- [x] 7.1 删除 `pig-agent-web/` 整目录 + parent POM `<modules>` 条目 + `dependencyManagement` 里 `pig-agent-web` 条目 + `pig-agent-cli/pom.xml` 依赖。模块数 14→13。
+- [x] 7.2 删除 `cli.WebLauncher` + `AgentBootstrap.webContext()`（及 `WebContext` import/装配）；`PigAgentCli` 移除 web 注释。
+- [x] 7.3 删除 `config.WebConfig` 与 `web` 字段/getter；无 `application.yaml` 模板（配置运行时写工作区），`logback.xml` 无 web 条目（仅注释提及 WebLauncher，已改）。
+- [x] 7.4 全量搜残留（主树无 `WebConsole/WebContext/WebLauncher/WebConfig/getWeb`；仅其他 agent 的 worktree 副本与 openspec 归档文档保留）；`mvn clean install -DskipTests` 13 模块 BUILD SUCCESS；config 10 + cli 64 单测全绿。
 
 ## 8. 文档与验收
 
