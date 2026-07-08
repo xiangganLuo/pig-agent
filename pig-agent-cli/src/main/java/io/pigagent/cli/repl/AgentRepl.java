@@ -122,6 +122,12 @@ public final class AgentRepl {
                     .build();
             readerRef.set(reader);
 
+            // Type-ahead slash completion (auto-list + arrow navigation) needs a real TTY; on a dumb
+            // terminal (bare gitbash/mintty) we degrade to plain Tab completion.
+            if (io.pigagent.cli.repl.select.InlineSelector.isInteractive(terminal)) {
+                SlashCompletionWidgets.install(reader, picocliCommands.commandNames());
+            }
+
             Ansi.println(terminal, Ansi.success("Agent ready.")
                     + Ansi.dim(" Type your message or /help for commands.\n"));
 

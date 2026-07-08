@@ -215,8 +215,9 @@ ReActAgent 推理循环:
 | `repl/render/ToolCallFormatter`      | 工具调用块 `⏺工具名 / └结果摘要`，凭据 redact                            |
 | `repl/StatusLine`                    | 提示符上方状态行 `model · session · perms`（不含凭据）                    |
 | `repl/select/InlineSelector` + `SelectorModel` | 方向键行内选择器（`/model` 无参用；数字降级）                   |
+| `repl/SlashCommands` + `SlashCompletionWidgets` | 斜杠命令边打边弹补全（`/` 起自动列出、随输入过滤、`↑/↓` 选择、Enter 补全、Esc 退出）；仅 `/` 缓冲触发，普通对话不打扰；纯 TTY 才装，dumb 终端降级为 Tab 补全 |
 
-**富渲染 / 交互**：流式出字 + markdown 高亮；`REASONING` 显示 `⋯ thinking`；工具调用缩进成块；输入 `/` 弹**全部命令**补全菜单；`/model` 无参弹方向键选择器（Enter 选定、Esc 取消）；破坏性操作 y/N 确认。
+**富渲染 / 交互**：流式出字 + markdown 高亮；`REASONING` 显示 `⋯ thinking`；工具调用缩进成块；输入 `/` **自动弹出全部命令补全菜单**（无需按 Tab），随输入实时过滤（如 `/mo` → 只剩 `/model`），`↑/↓` 移动高亮、Enter 补全、Esc/退格退出——**仅当缓冲以 `/` 开头**，普通对话不弹菜单；`/model` 无参弹方向键选择器（Enter 选定、Esc 取消）；破坏性操作 y/N 确认。
 
 **Ctrl-C 真中断**：回合进行中按 Ctrl-C → `AgentKernel.interruptCurrent()` 取消当前模型调用、回到提示符，**进程不退出**；空闲态 Ctrl-C 丢弃当前行、Ctrl-D 退出。
 
