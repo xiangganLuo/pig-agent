@@ -13,6 +13,11 @@
     <name>Pig Agent - Core</name>
     <description>Core agent abstraction, provider interfaces, and memory</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.69</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.agentscope</groupId>

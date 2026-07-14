@@ -85,6 +85,17 @@
         <junit.version>5.11.4</junit.version>
         <mockito.version>5.15.2</mockito.version>
         <assertj.version>3.27.3</assertj.version>
+
+        <!-- Build quality gate (ci-quality-gate) -->
+        <jacoco.version>0.8.12</jacoco.version>
+        <failsafe.version>3.5.2</failsafe.version>
+        <!-- *IT integration tests need real API creds + models.json; skipped by default so a
+             credential-less `mvn verify` passes. Enable with `-Pit` (or `-DskipITs=false`). -->
+        <skipITs>true</skipITs>
+        <!-- Ratchet floor: minimum line-coverage ratio enforced by jacoco:check per module.
+             Default 0.00 (never blocks); each module overrides this to floor(current) - 0.02 so
+             coverage can only ratchet up. See openspec/changes/coverage-and-ci-gate/design.md. -->
+        <jacoco.line.min>0.00</jacoco.line.min>
     </properties>
 
     <dependencyManagement>
@@ -305,6 +316,81 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
             </plugin>
+
+            <!-- Integration tests (*IT). Skipped by default (skipITs=true) so a credential-less
+                 `mvn verify` passes without real API keys; enabled via the `it` profile. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${failsafe.version}</version>
+                <configuration>
+                    <skipITs>${skipITs}</skipITs>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>integration-test</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Coverage measurement + ratchet gate (ci-quality-gate). prepare-agent instruments
+                 surefire; report emits per-module html/csv/xml; check enforces the per-module line
+                 floor (${jacoco.line.min}) on `verify` so coverage can only ratchet up. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.min}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- `mvn verify -Pit`: run *IT integration tests (need real API creds + models.json). -->
+        <profile>
+            <id>it</id>
+            <properties>
+                <skipITs>false</skipITs>
+            </properties>
+        </profile>
+    </profiles>
 </project>
