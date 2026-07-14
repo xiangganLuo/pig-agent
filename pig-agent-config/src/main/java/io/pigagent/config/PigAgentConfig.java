@@ -77,13 +77,28 @@ public final class PigAgentConfig {
         public void setMaxIters(int i) { this.maxIters = i; }
     }
 
+    /**
+     * 单个渠道的配置（键 {@code channels.<id>}）。缺省 {@code enabled=false}——不配置即不启动任何渠道。
+     * {@code token} 用作通用鉴权/机器人令牌；{@code port}/{@code path} 供 HTTP 类渠道（webhook/slack）
+     * 监听用（{@code port<=0} 或 {@code path} 为空时渠道取内置默认）；{@code signing-secret} 供 Slack
+     * 签名校验用。全部新字段可选且有安全缺省——旧配置（仅 {@code enabled}/{@code token}）照常解析。
+     */
     public static final class ChannelConfig {
         @JsonProperty("enabled") private boolean enabled = false;
         @JsonProperty("token") private String token;
+        @JsonProperty("port") private int port = 0;
+        @JsonProperty("path") private String path;
+        @JsonProperty("signing-secret") private String signingSecret;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
         public String getToken() { return token; }
         public void setToken(String t) { this.token = t; }
+        public int getPort() { return port; }
+        public void setPort(int p) { this.port = p; }
+        public String getPath() { return path; }
+        public void setPath(String p) { this.path = p; }
+        public String getSigningSecret() { return signingSecret; }
+        public void setSigningSecret(String s) { this.signingSecret = s; }
     }
 
     public static final class CompressionConfig {
