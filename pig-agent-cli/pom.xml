@@ -68,6 +68,10 @@
             <artifactId>pig-agent-plugin</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-web</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
         </dependency>

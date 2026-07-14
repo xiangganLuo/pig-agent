@@ -6,17 +6,21 @@ import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.web.WebConsole;
+import io.pigagent.web.WebLauncher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Terminal (REPL) entry point. Builds the shared runtime via {@link AgentBootstrap}, starts the
- * channel bridges, then hands control to {@link AgentRepl} for the interactive (picocli + JLine)
- * loop. Colored output is produced via {@link Ansi}.
+ * channel bridges, optionally starts the embedded Web console ({@code web.enabled}), then hands
+ * control to {@link AgentRepl} for the interactive (picocli + JLine) loop. The Web console is
+ * another {@link AgentKernel} adapter sharing the same kernel. Colored output is via {@link Ansi}.
  */
 public final class PigAgentCli {
 
@@ -42,8 +46,15 @@ public final class PigAgentCli {
 
         List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());
 
+        // Optional embedded Web console — another AgentKernel adapter in the same process, sharing
+        // the one kernel with the REPL. Default disabled (web.enabled=false); loopback-only.
+        PigAgentConfig.WebConfig webCfg = s.config.getWeb();
+        Optional<WebConsole> webConsole = WebLauncher.startIfEnabled(
+                s.agentKernel, webCfg.isEnabled(), webCfg.getHost(), webCfg.getPort());
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("CLI shutting down...");
+            webConsole.ifPresent(WebConsole::stop);
             for (ChannelAgentBridge bridge : bridges) {
                 bridge.stop();
             }

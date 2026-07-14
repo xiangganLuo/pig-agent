@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Pig Agent · Web Console</title>
+    <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+<header>
+    <h1>🐷 Pig Agent <span class="tag">web console</span></h1>
+    <span id="conn" class="conn off">events: connecting…</span>
+</header>
+
+<main>
+    <aside id="sidebar">
+        <h2>Agents <button id="refresh" title="refresh">⟳</button></h2>
+        <ul id="agents"></ul>
+        <h2>Events</h2>
+        <ul id="events"></ul>
+    </aside>
+
+    <section id="chat">
+        <div id="messages"></div>
+        <form id="composer">
+            <textarea id="input" rows="2" placeholder="Message the active agent… (Enter to send, Shift+Enter for newline)"></textarea>
+            <button id="send" type="submit">Send</button>
+        </form>
+    </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
