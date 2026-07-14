@@ -12,3 +12,5 @@ application.yaml
 docs/review/
 # 本地导出的 classpath 等构建产物
 cp.txt
+# isolated subagent worktrees (never commit)
+.claude/worktrees/
