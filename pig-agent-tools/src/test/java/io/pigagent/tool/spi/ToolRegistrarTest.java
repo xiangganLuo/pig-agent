@@ -131,6 +131,37 @@ class ToolRegistrarTest {
         assertThat(toolkit.getToolNames()).isEmpty();
     }
 
+    // --- registerTools (compose already-instantiated tools, e.g. from a plugin) ---
+
+    @Test
+    void registerTools_registersInstances_withNonOverrideDedup() {
+        // Arrange — a tool already in the toolkit; then two instances via registerTools, one colliding
+        Toolkit toolkit = new Toolkit();
+        toolkit.registration().tool(new AutoGreetTool()).apply(); // occupies "greet"
+
+        // Act
+        ToolRegistrar.Result result = ToolRegistrar.registerTools(
+                toolkit, List.of(new HealthyTool(), new ManualGreetTool()));
+
+        // Assert — new name registered, colliding "greet" kept-first and skipped (not stacked)
+        assertThat(result.registered).contains("healthyOp");
+        assertThat(result.duplicatesSkipped).contains("greet");
+        assertThat(toolkit.getToolNames()).contains("greet", "healthyOp");
+    }
+
+    @Test
+    void registerTools_nullList_isNoOp() {
+        // Arrange
+        Toolkit toolkit = new Toolkit();
+
+        // Act
+        ToolRegistrar.Result result = ToolRegistrar.registerTools(toolkit, null);
+
+        // Assert
+        assertThat(result.registered).isEmpty();
+        assertThat(toolkit.getToolNames()).isEmpty();
+    }
+
     // --- test tool fixtures (public so AgentScope's reflection can register them) ---
 
     public static final class AutoGreetTool {
