@@ -31,9 +31,9 @@
 
 ## 5. 集成与回归
 
-- [ ] 5.1 `mvn -q test` 全量绿（单线程；不回归既有单测。注：`AgentKernelInterruptTest` 在 `-T 1C` 并行下偶发时序 flaky，与本变更无关）
-- [ ] 5.2 `mvn -pl pig-agent-cli -am compile` 编译通过
-- [ ] 5.3 复查无回归：maxIters 仅在 >0 施加；任务旧文件容错；config 仅忽略未知字段
+- [x] 5.1 `mvn -q test` 全量绿（单线程；不回归既有单测。注：`AgentKernelInterruptTest` 在 `-T 1C` 并行下偶发时序 flaky，与本变更无关）
+- [x] 5.2 `mvn -pl pig-agent-cli -am compile` 编译通过
+- [x] 5.3 复查无回归：maxIters 仅在 >0 施加；任务旧文件容错；config 仅忽略未知字段
 
 ## 6. 文档
 
