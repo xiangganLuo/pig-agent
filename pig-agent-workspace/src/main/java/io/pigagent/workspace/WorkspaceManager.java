@@ -32,6 +32,7 @@ public final class WorkspaceManager {
         Files.createDirectories(rootPath.resolve("sessions"));
         Files.createDirectories(rootPath.resolve("agents"));
         Files.createDirectories(rootPath.resolve("reports"));
+        Files.createDirectories(rootPath.resolve("plugins"));
         createIfAbsent(rootPath.resolve("AGENT.md"), defaultAgentMd());
         createIfAbsent(rootPath.resolve("INFO.md"), defaultInfoMd());
         createIfAbsent(rootPath.resolve("application.yaml"), defaultConfigYaml());
@@ -48,6 +49,8 @@ public final class WorkspaceManager {
     public Path getSessionsDir() { return rootPath.resolve("sessions"); }
     public Path getAgentsDir() { return rootPath.resolve("agents"); }
     public Path getReportsDir() { return rootPath.resolve("reports"); }
+    /** External plugin jars directory ({@code workspace/plugins/}); scanned by {@code DirectoryPluginSource}. */
+    public Path getPluginsDir() { return rootPath.resolve("plugins"); }
     public Path getModelsFile() { return rootPath.resolve("models.json"); }
     public Path getMcpFile() { return rootPath.resolve("mcp.json"); }
 

@@ -17,6 +17,7 @@ class WorkspaceManagerTest {
         assertThat(Files.isDirectory(ws.getContextDir())).isTrue();
         assertThat(Files.isDirectory(ws.getSkillsDir())).isTrue();
         assertThat(Files.isDirectory(ws.getTasksDir())).isTrue();
+        assertThat(Files.isDirectory(ws.getPluginsDir())).isTrue();
         assertThat(Files.exists(ws.getAgentMd())).isTrue();
         assertThat(Files.exists(ws.getInfoMd())).isTrue();
     }
