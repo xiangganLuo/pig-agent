@@ -1,9 +1,7 @@
 package io.pigagent.cli;
 
-import io.pigagent.channel.Channel;
 import io.pigagent.channel.ChannelAgentBridge;
-import io.pigagent.channel.discord.DiscordChannel;
-import io.pigagent.channel.telegram.TelegramChannel;
+import io.pigagent.channel.ChannelFactory;
 import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
@@ -61,25 +59,16 @@ public final class PigAgentCli {
     private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder, AgentKernel agentKernel,
                                                           Map<String, PigAgentConfig.ChannelConfig> channelConfigs) {
         List<ChannelAgentBridge> bridges = new ArrayList<>();
+        ChannelFactory factory = new ChannelFactory();
+        // Construction + enable gating live in ChannelFactory (unit-tested); adding a new adapter
+        // needs no edit here. Each enabled, known channel is bridged to the live agent and started.
         for (var entry : channelConfigs.entrySet()) {
-            String id = entry.getKey();
-            PigAgentConfig.ChannelConfig cfg = entry.getValue();
-            if (!cfg.isEnabled()) continue;
-
-            Channel channel = switch (id) {
-                case "telegram" -> new TelegramChannel(cfg.getToken());
-                case "discord" -> new DiscordChannel(cfg.getToken());
-                default -> {
-                    log.warn("Unknown channel type: {}, skipping", id);
-                    yield null;
-                }
-            };
-            if (channel == null) continue;
-
-            ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
-            bridge.start();
-            bridges.add(bridge);
-            log.info("Channel started: {}", channel.displayName());
+            factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
+                ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
+                bridge.start();
+                bridges.add(bridge);
+                log.info("Channel started: {}", channel.displayName());
+            });
         }
         return bridges;
     }
