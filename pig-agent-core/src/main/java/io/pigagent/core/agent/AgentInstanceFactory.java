@@ -63,6 +63,7 @@ public final class AgentInstanceFactory {
                 .toolkit(toolkits.toolkitFor(spec))
                 .hooks(hooks.hooksFor(spec))
                 .longTermMemory(longTermMemory)
+                .maxIters(spec.maxIters())
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

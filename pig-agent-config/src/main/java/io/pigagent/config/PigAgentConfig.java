@@ -1,8 +1,15 @@
 package io.pigagent.config;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
+/**
+ * Root application config. Unknown/unrecognized fields are ignored rather than failing the whole
+ * load and reverting to all-defaults — so config schema drift (a new-version field read by an old
+ * build, or a stale field left in the file) never silently discards the user's recognized settings.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public final class PigAgentConfig {
 
     @JsonProperty("workspace") private String workspacePath;
@@ -70,7 +77,9 @@ public final class PigAgentConfig {
 
     public static final class AgentConfig {
         @JsonProperty("name") private String name = "PigAgent";
-        @JsonProperty("max-iters") private int maxIters = 10;
+        // Interactive/channel default: 40 iterations is generous enough for complex coding turns
+        // without truncating them; autonomous agents stay conservative at AgentSpec.DEFAULT_MAX_ITERS (10).
+        @JsonProperty("max-iters") private int maxIters = 40;
         public String getName() { return name; }
         public void setName(String n) { this.name = n; }
         public int getMaxIters() { return maxIters; }

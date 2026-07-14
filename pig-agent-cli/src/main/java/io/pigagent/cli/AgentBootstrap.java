@@ -336,7 +336,7 @@ public final class AgentBootstrap {
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
-                interactiveRetry, interruptController);
+                interactiveRetry, interruptController, config.getAgent().getMaxIters());
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -388,6 +388,7 @@ public final class AgentBootstrap {
                     .model(runModel)
                     .toolkit(AgentWiring.toolkitFor(toolkit, spec.toolNames()))
                     .hooks(List.of(unattended, new LoggingHook(), new ToolCallLoggingHook()))
+                    .maxIters(spec.maxIters())
                     .build();
         };
         AgentRunner agentRunner = new AgentRunner(
@@ -413,7 +414,8 @@ public final class AgentBootstrap {
         // to the interrupt controller (which is scoped to the interactive kernel turn).
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, channelRetry);
+                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
+                channelRetry, null, config.getAgent().getMaxIters());
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);

@@ -99,6 +99,8 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 13 modules
 
 **Tasks** persist as Markdown at `workspace/tasks/{date}/{id}.md` (recurring under `tasks/recurring/`); `TaskScheduler` runs ONCE/CRON/DELAYED schedules on a `ScheduledExecutorService`.
 
+**Autonomous guardrails** (`autonomous-guardrails`): three production safety nets. (1) `maxIters` now bounds **every** agent via `PigAgent.Builder.maxIters` (only applied when `> 0`, preserved across model switches) — interactive/channel take `agent.max-iters` (default **40**), per-agent/autonomous take `AgentSpec.maxIters` (default **10**, conservative for unattended runs). (2) Task `.md` persistence is **lossless** — the Schedule line encodes `ONCE` / `CRON:<expr>` / `DELAYED:<seconds>` plus `Created`/`Updated` timestamps + description, so CRON/DELAYED tasks survive a restart and are re-scheduled by `scheduleAll` — and **fault-tolerant**: a corrupt/incomplete task file is skipped with a warn (never crashes `findAll`/startup `scheduleAll`), and old type-only Schedule lines degrade to `ONCE`. (3) `PigAgentConfig` ignores unknown fields (`@JsonIgnoreProperties(ignoreUnknown = true)`) so config schema drift no longer fails the whole load and reverts every setting to defaults.
+
 ## Conventions
 
 - **Immutability is enforced.** Domain types (`Task`, `Session`, `StoredModel`, `ProviderCredentials`, config events) are records; mutate via `withXxx()` copy methods. See `.claude/rules/common/coding-style.md`.

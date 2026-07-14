@@ -350,7 +350,9 @@ model:
 
 agent:
   name: PigAgent
-  max-iters: 10
+  # 迭代上限：现约束**全部** agent（交互/渠道/自主），仅在 > 0 时生效、换模型后仍保留。
+  # 交互/渠道默认 40（够用、不截断复杂任务）；自主/数字员工用 AgentSpec.maxIters（默认 10，保守防失控）。
+  max-iters: 40
 
 mcp:
   servers:
@@ -644,6 +646,9 @@ WantedBy=multi-user.target
 | 通道常驻   | Telegram/Discord 通道持续监听消息，收到即响应     |
 | 定时任务   | TaskScheduler 后台执行 CRON/DELAYED 任务          |
 | MCP 长连接 | MCP Server 连接保持，工具随时可用                 |
+| 运行上限   | `maxIters` 约束**全部** agent（交互/渠道默认 40，自主默认 10），防推理-工具循环失控 |
+| 任务无损/容错 | 任务 `.md` 无损往返（CRON/DELAYED 重启后正确重排），坏文件跳过不崩启动 |
+| 配置容错   | 配置忽略未知字段，schema 漂移不再让整份配置回退默认               |
 | 优雅关闭   | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
 | 自动重启   | 配合 systemd`Restart=always` 实现故障自愈         |
 

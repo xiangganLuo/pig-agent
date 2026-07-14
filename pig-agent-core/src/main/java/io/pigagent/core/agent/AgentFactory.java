@@ -28,20 +28,27 @@ public final class AgentFactory {
     private final LongTermMemory longTermMemory;
     private final RetryPolicy retryPolicy; // nullable
     private final InterruptController interruptController; // nullable
+    private final int maxIters; // 0 = keep AgentScope's default (see PigAgent.Builder.maxIters)
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory) {
-        this(name, sysPrompt, toolkit, hooks, longTermMemory, null, null);
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, null, null, 0);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy) {
-        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, null);
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, null, 0);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
                         InterruptController interruptController) {
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, interruptController, 0);
+    }
+
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
+                        InterruptController interruptController, int maxIters) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -49,6 +56,7 @@ public final class AgentFactory {
         this.longTermMemory = longTermMemory;
         this.retryPolicy = retryPolicy;
         this.interruptController = interruptController;
+        this.maxIters = maxIters;
     }
 
     /**
@@ -67,6 +75,7 @@ public final class AgentFactory {
                 .toolkit(toolkit)
                 .hooks(hooks)
                 .longTermMemory(longTermMemory)
+                .maxIters(maxIters)
                 .build();
     }
 
