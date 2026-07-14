@@ -140,6 +140,22 @@ class AgentKernelInterruptTest {
         List<Event> events = kernel.chat("default", userMsg()).collectList().block();
 
         assertThat(events).isNotNull();
+        // The turn is cleared in the stream's doFinally, which runs after the terminal signal has
+        // propagated to block() — so under parallel builds the clear can lag the block() return by a
+        // hair. Deterministically await the clear (side-effect-free read of the shared controller)
+        // instead of racing on a bare read; this still verifies "no lingering turn after completion".
+        awaitTurnCleared(controller);
         assertThat(kernel.interruptCurrent()).isFalse(); // no lingering turn after normal completion
+    }
+
+    /** Poll (side-effect-free) until the shared controller reports no in-flight turn, or time out. */
+    private static void awaitTurnCleared(InterruptController controller) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (controller.currentTurn().isPresent() && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertThat(controller.currentTurn())
+                .as("turn must clear via doFinally after normal completion")
+                .isEmpty();
     }
 }

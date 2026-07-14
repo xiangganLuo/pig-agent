@@ -13,6 +13,11 @@
     <name>Pig Agent - Session Management</name>
     <description>Independent conversation sessions with per-session memory and persistence</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.89</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.pigagent</groupId>
