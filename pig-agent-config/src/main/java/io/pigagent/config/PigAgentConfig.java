@@ -12,6 +12,7 @@ public final class PigAgentConfig {
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
+    @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -23,6 +24,7 @@ public final class PigAgentConfig {
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
     public PermissionConfig getPermissions() { return permissions; }
+    public ToolsConfig getTools() { return tools; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -125,6 +127,25 @@ public final class PigAgentConfig {
             public void setTools(java.util.List<String> t) { this.tools = t; }
             public java.util.List<String> getCommands() { return commands; }
             public void setCommands(java.util.List<String> c) { this.commands = c; }
+        }
+    }
+
+    /** 内置工具配置。缺省全空，向后兼容。 */
+    public static final class ToolsConfig {
+        @JsonProperty("web") private WebToolConfig web = new WebToolConfig();
+        public WebToolConfig getWeb() { return web; }
+        public void setWeb(WebToolConfig w) { this.web = w; }
+    }
+
+    /**
+     * web-fetch 工具配置。{@code allowed-hosts} 为可选主机白名单：非空时 {@code fetchUrl} 仅放行
+     * 白名单内主机（叠加在 SSRF IP 守卫之上）；为空则仅施加 SSRF 守卫。缺省空。
+     */
+    public static final class WebToolConfig {
+        @JsonProperty("allowed-hosts") private java.util.List<String> allowedHosts = java.util.List.of();
+        public java.util.List<String> getAllowedHosts() { return allowedHosts; }
+        public void setAllowedHosts(java.util.List<String> h) {
+            this.allowedHosts = h == null ? java.util.List.of() : h;
         }
     }
 

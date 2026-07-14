@@ -17,6 +17,10 @@ import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.provider.anthropic.AnthropicProtocol;
+import io.pigagent.provider.dashscope.DashScopeProtocol;
+import io.pigagent.provider.gemini.GeminiProtocol;
+import io.pigagent.provider.ollama.OllamaProtocol;
+import io.pigagent.provider.openai.OpenAiProtocol;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -92,10 +96,14 @@ class PermissionVetoSpikeIT {
     @Test
     void preActingHookCanVetoToolByRewritingToDenySentinel() {
         Path realModels = Path.of(System.getProperty("user.home"), ".pig-agent", "workspace", "models.json");
-        assertThat(realModels).as("需要已配置的 anthropic models.json").exists();
+        assertThat(realModels).as("需要已配置的默认模型 models.json").exists();
 
         ProtocolRegistry registry = new ProtocolRegistry();
+        registry.register(new OpenAiProtocol());
         registry.register(new AnthropicProtocol());
+        registry.register(new GeminiProtocol());
+        registry.register(new OllamaProtocol());
+        registry.register(new DashScopeProtocol());
         ModelManager modelManager = new ModelManager(registry, new JsonModelStore(realModels));
         StoredModel def = modelManager.getDefault().orElseThrow();
         Model model = modelManager.buildModel(def);

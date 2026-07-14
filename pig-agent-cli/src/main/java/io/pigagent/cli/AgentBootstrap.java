@@ -189,7 +189,8 @@ public final class AgentBootstrap {
         // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
         // to fall back to the pure-manual registration below (legacy behavior). Either way we keep the
         // registered instances so the availability gate (tool-availability) can inspect them below.
-        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir());
+        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
+                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts());
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());

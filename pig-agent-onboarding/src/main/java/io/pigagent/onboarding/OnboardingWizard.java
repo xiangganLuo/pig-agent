@@ -21,6 +21,7 @@ public final class OnboardingWizard {
     private final ProtocolRegistry protocolRegistry;
     private final ModelManager modelManager;
     private final BufferedReader reader;
+    private boolean warnedNoMask;
 
     public OnboardingWizard(ProtocolRegistry protocolRegistry, ModelManager modelManager) {
         this.protocolRegistry = protocolRegistry;
@@ -87,12 +88,33 @@ public final class OnboardingWizard {
             return null;
         }
         while (true) {
-            String key = readLine("API key for " + protocol.displayName() + ": ").trim();
+            String key = readSecret("API key for " + protocol.displayName() + ": ").trim();
             if (!key.isBlank()) {
                 return key;
             }
             System.out.println("API key is required.");
         }
+    }
+
+    /**
+     * Reads a secret without echoing it. Uses {@link java.io.Console#readPassword} when a console is
+     * available; when it is not (piped stdin / IDE / {@code mvn exec}), falls back to visible reading
+     * with a one-time warning — masking is impossible without a console, but onboarding must proceed.
+     */
+    private String readSecret(String prompt) throws IOException {
+        java.io.Console console = System.console();
+        if (console != null) {
+            char[] chars = console.readPassword(prompt);
+            if (chars == null) {
+                throw new EndOfInputException();
+            }
+            return new String(chars);
+        }
+        if (!warnedNoMask) {
+            System.out.println("[warn] No interactive console — the API key will be visible as you type.");
+            warnedNoMask = true;
+        }
+        return readLine(prompt);
     }
 
     private String promptBaseUrl(ModelProtocol protocol) throws IOException {
