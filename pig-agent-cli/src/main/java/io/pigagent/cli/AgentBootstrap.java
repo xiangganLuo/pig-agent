@@ -26,6 +26,15 @@ import io.pigagent.core.loop.LoopDetectionHook;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
+import io.pigagent.core.memory.extraction.AsyncMemoryExtractionScheduler;
+import io.pigagent.core.memory.extraction.ConfidenceGate;
+import io.pigagent.core.memory.extraction.ExtractingLongTermMemory;
+import io.pigagent.core.memory.extraction.FactMerger;
+import io.pigagent.core.memory.extraction.LlmMemoryExtractor;
+import io.pigagent.core.memory.extraction.MarkdownFactStore;
+import io.pigagent.core.memory.extraction.MemoryExtractionPipeline;
+import io.pigagent.core.memory.extraction.MemoryExtractor;
+import io.pigagent.core.memory.extraction.MemoryNoiseFilter;
 import io.pigagent.core.retry.RetryPolicy;
 import io.pigagent.core.retry.RetryingModel;
 import io.pigagent.core.retry.TransientErrorClassifier;
@@ -48,6 +57,7 @@ import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.FileSystemSessionRepository;
 import io.pigagent.session.SessionLineageWriter;
 import io.pigagent.session.SessionManager;
+import io.pigagent.session.SessionMemoryFactory;
 import io.pigagent.session.SessionRepository;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
@@ -149,6 +159,8 @@ public final class AgentBootstrap {
         public final AtomicReference<LineReader> readerRef;
         private final JsonSession agentSession;
         private final TaskScheduler taskScheduler;
+        /** Debounce scheduler for memory extraction; null when extraction is disabled. */
+        private final AutoCloseable memoryExtractionScheduler;
 
         private Services(WorkspaceManager workspace, ConfigurationManager configManager, PigAgentConfig config,
                          ProtocolRegistry registry, ModelManager modelManager, TaskManager taskManager,
@@ -156,7 +168,8 @@ public final class AgentBootstrap {
                          AgentKernel agentKernel, SessionManager sessionManager,
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
-                         JsonSession agentSession, TaskScheduler taskScheduler) {
+                         JsonSession agentSession, TaskScheduler taskScheduler,
+                         AutoCloseable memoryExtractionScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
             this.config = config;
@@ -173,14 +186,29 @@ public final class AgentBootstrap {
             this.readerRef = readerRef;
             this.agentSession = agentSession;
             this.taskScheduler = taskScheduler;
+            this.memoryExtractionScheduler = memoryExtractionScheduler;
         }
 
         /** Release the shared resources — call from the frontend's shutdown hook. */
         public void shutdownCommon() {
             sessionManager.saveCurrent();
+            // Flush + stop the memory-extraction scheduler BEFORE closing the session store, so a
+            // last pending extraction lands (no leak, no lost work). No-op when extraction is off.
+            closeMemoryExtractionScheduler();
             agentSession.close();
             taskScheduler.shutdown();
             mcpManager.closeAll();
+        }
+
+        private void closeMemoryExtractionScheduler() {
+            if (memoryExtractionScheduler == null) {
+                return;
+            }
+            try {
+                memoryExtractionScheduler.close();
+            } catch (Exception e) {
+                log.warn("Failed to close memory-extraction scheduler: {}", e.getMessage());
+            }
         }
     }
 
@@ -512,9 +540,40 @@ public final class AgentBootstrap {
 
         JsonSession agentSession = new JsonSession(workspace.getSessionsDir());
         SessionRepository sessionRepository = new FileSystemSessionRepository(workspace.getSessionsDir());
+
+        // Memory extraction (memory-extraction): when enabled, the per-session temp memory is wrapped
+        // with an ExtractingLongTermMemory decorator that LLM-extracts classified facts off the turn's
+        // critical path (async, debounced). Default off → DEFAULT factory = raw FileSystemLongTermMemory,
+        // no scheduler, byte-for-byte the pre-extraction behavior. Session-tier only; global tier and
+        // the PreReasoning injection half are untouched.
+        PigAgentConfig.MemoryExtractionConfig extractionCfg = config.getMemory().getExtraction();
+        AsyncMemoryExtractionScheduler extractionScheduler = null;
+        SessionMemoryFactory sessionMemoryFactory = SessionMemoryFactory.DEFAULT;
+        if (extractionCfg.isEnabled()) {
+            extractionScheduler = new AsyncMemoryExtractionScheduler(extractionCfg.getDebounceMs());
+            // Shared, stateless collaborators; only the FactStore/pipeline are per-session (path-bound).
+            MemoryExtractor extractor = new LlmMemoryExtractor(() -> agentHolder.get().getModel());
+            MemoryNoiseFilter noiseFilter = new MemoryNoiseFilter();
+            ConfidenceGate gate = new ConfidenceGate();
+            FactMerger merger = new FactMerger();
+            AsyncMemoryExtractionScheduler scheduler = extractionScheduler;
+            java.util.function.BooleanSupplier enabled =
+                    () -> configManager.getConfig().getMemory().getExtraction().isEnabled();
+            java.util.function.DoubleSupplier threshold =
+                    () -> configManager.getConfig().getMemory().getExtraction().getConfidenceThreshold();
+            sessionMemoryFactory = tempFile -> {
+                FileSystemLongTermMemory raw = new FileSystemLongTermMemory(tempFile);
+                MemoryExtractionPipeline pipeline = new MemoryExtractionPipeline(
+                        noiseFilter, extractor, gate, merger, new MarkdownFactStore(tempFile), threshold);
+                return new ExtractingLongTermMemory(raw, pipeline, scheduler, enabled);
+            };
+            log.info("Memory extraction enabled (threshold {}, debounce {}ms)",
+                    extractionCfg.getConfidenceThreshold(), extractionCfg.getDebounceMs());
+        }
+
         SessionManager sessionManager = new SessionManager(
                 agentHolder, modelManager, agentSession, memory, sessionRepository,
-                configManager, workspace.getSessionsDir());
+                configManager, workspace.getSessionsDir(), sessionMemoryFactory);
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
                 log.info("Session: {} [{}]", s.name(), s.id()));
@@ -526,7 +585,7 @@ public final class AgentBootstrap {
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
-                availabilityReport, readerRef, agentSession, taskScheduler);
+                availabilityReport, readerRef, agentSession, taskScheduler, extractionScheduler);
     }
 
     /**

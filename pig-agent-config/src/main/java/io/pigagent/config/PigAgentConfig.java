@@ -23,6 +23,7 @@ public final class PigAgentConfig {
     @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
+    @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -38,6 +39,8 @@ public final class PigAgentConfig {
     public SandboxConfig getSandbox() { return sandbox; }
     public ToolsConfig getTools() { return tools; }
     public WebConfig getWeb() { return web; }
+    public MemoryConfig getMemory() { return memory; }
+    public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -138,6 +141,36 @@ public final class PigAgentConfig {
         public void setMaxContextTokens(int t) { this.maxContextTokens = t; }
         public double getThreshold() { return threshold; }
         public void setThreshold(double t) { this.threshold = t; }
+    }
+
+    /**
+     * 记忆配置。当前仅含 {@code extraction}（记忆 LLM 抽取）子块，全部可选、默认安全。
+     * 注意：全局记忆读写总开关是顶层的 {@code memory-enabled}（历史字段，保持不动）。
+     */
+    public static final class MemoryConfig {
+        @JsonProperty("extraction") private MemoryExtractionConfig extraction = new MemoryExtractionConfig();
+        public MemoryExtractionConfig getExtraction() { return extraction; }
+        public void setExtraction(MemoryExtractionConfig e) {
+            this.extraction = e == null ? new MemoryExtractionConfig() : e;
+        }
+    }
+
+    /**
+     * 记忆 LLM 抽取（memory-extraction）。默认 {@code enabled=false} → 逐字节保留原始「死记原始回合」的
+     * record 行为（不起抽取模型调用、不起后台线程），需显式开启。启用后：会话层 record 改为用当前模型
+     * 从完成的回合中抽取带类别 + 置信度的结构化事实，经置信度门（{@code confidence-threshold}，默认 0.7）
+     * + 纠正覆盖 + 噪声过滤后，异步去抖（{@code debounce-ms}，默认 2000）写入。全部可选、向后兼容。
+     */
+    public static final class MemoryExtractionConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("confidence-threshold") private double confidenceThreshold = 0.7;
+        @JsonProperty("debounce-ms") private long debounceMs = 2000;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public double getConfidenceThreshold() { return confidenceThreshold; }
+        public void setConfidenceThreshold(double t) { this.confidenceThreshold = t; }
+        public long getDebounceMs() { return debounceMs; }
+        public void setDebounceMs(long ms) { this.debounceMs = ms; }
     }
 
     /**
