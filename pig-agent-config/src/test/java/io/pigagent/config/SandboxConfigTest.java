@@ -54,4 +54,28 @@ class SandboxConfigTest {
         exec.setDenylist(null);
         assertThat(exec.getDenylist()).isEmpty();
     }
+
+    @Test
+    void defaultWarnlistIsEmpty() {
+        assertThat(new PigAgentConfig().getSandbox().getExec().getWarnlist()).isEmpty();
+    }
+
+    @Test
+    void parsesWarnlist() throws Exception {
+        String src = """
+                sandbox:
+                  exec:
+                    warnlist:
+                      - "risky-cmd"
+                """;
+        PigAgentConfig cfg = yaml.readValue(src, PigAgentConfig.class);
+        assertThat(cfg.getSandbox().getExec().getWarnlist()).containsExactly("risky-cmd");
+    }
+
+    @Test
+    void nullWarnlistSetterIsTolerated() {
+        PigAgentConfig.ExecSandboxConfig exec = new PigAgentConfig.ExecSandboxConfig();
+        exec.setWarnlist(null);
+        assertThat(exec.getWarnlist()).isEmpty();
+    }
 }

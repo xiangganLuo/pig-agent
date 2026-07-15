@@ -266,4 +266,115 @@ class CommandGuardTest {
         guard.applyTo(pb);
         assertThat(pb.directory()).isNull();
     }
+
+    // --- three-tier warn: medium-risk commands warn but still run --------------------------------
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "pip install requests",
+            "pip3 install requests",
+            "python -m pip install requests",
+            "python3 -m pip install -r requirements.txt",
+            "sudo pip install requests",
+            "apt install foo",
+            "apt-get install foo",
+            "sudo apt-get install foo",
+            "sudo systemctl restart nginx",
+            "su - root",
+            "chmod 777 ./localfile",
+            "chmod -R 777 ./dir",
+            "npm install -g typescript",
+            "npm i -g typescript",
+            "npm install --global typescript",
+            "PATH=/custom:$PATH mycmd",
+            "export PATH=/opt/bin:$PATH"})
+    void warnsMediumRiskCommandsButDoesNotBlock(String command) {
+        CommandClassification verdict = guard.classify(command);
+        assertThat(verdict.isWarn()).as("should warn: %s", command).isTrue();
+        // block/pass contract unchanged: a warn command is NOT "denied".
+        assertThat(guard.checkDenied(command)).as("warn is not a block: %s", command).isEmpty();
+    }
+
+    @Test
+    void warnReasonNamesCategoryNotCommand() {
+        CommandClassification verdict = guard.classify("pip install requests");
+        assertThat(verdict.reason()).isEqualTo("package install (pip)");
+        assertThat(verdict.reason()).doesNotContain("requests");
+    }
+
+    // --- most-severe-wins: a command matching BOTH warn and block is BLOCKED ---------------------
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "chmod -R 777 /",   // warn(chmod 777) + block(root/home 777) → block
+            "sudo rm -rf /"})   // warn(sudo) + block(recursive delete of root) → block
+    void blockOutranksWarnMostSevereWins(String command) {
+        CommandClassification verdict = guard.classify(command);
+        assertThat(verdict.isBlocked()).as("block should win over warn: %s", command).isTrue();
+        assertThat(guard.checkDenied(command)).isPresent();
+    }
+
+    @Test
+    void classifyBlocksCatastrophicCommand() {
+        assertThat(guard.classify("rm -rf /").isBlocked()).isTrue();
+    }
+
+    // --- compound: a warn sub-command warns the whole command ------------------------------------
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "git pull && pip install -r req.txt",
+            "cd /tmp && sudo apt install foo",
+            "mkdir build; npm install -g typescript"})
+    void compoundCommandWithWarnSubCommandWarns(String command) {
+        CommandClassification verdict = guard.classify(command);
+        assertThat(verdict.isWarn()).as("should warn on sub-command: %s", command).isTrue();
+        assertThat(guard.checkDenied(command)).isEmpty();
+    }
+
+    // --- silence: normal dev commands are a clean PASS (no warn, no block) ------------------------
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "mvn -q test",
+            "git commit -m \"pip install later\"", // quoted arg must NOT warn (anchored rule)
+            "npm install",
+            "npm run build",
+            "npm run format",
+            "ls -la",
+            "cat pom.xml",
+            "chmod -R 755 ./dir",
+            "chmod 755 run.sh",
+            "rm -rf target",
+            "Remove-Item -Recurse -Force .\\target"})
+    void normalDevCommandsAreSilentPass(String command) {
+        CommandClassification verdict = guard.classify(command);
+        assertThat(verdict.isPass()).as("should be a silent pass: %s", command).isTrue();
+    }
+
+    // --- configured warnlist: extends the built-in warn set, never weakens it --------------------
+
+    @Test
+    void configuredExtraWarnPatternWarns() {
+        CommandGuard g = new CommandGuard(
+                SandboxPolicy.defaults().withExtraWarnPatterns(List.of("flaky-cmd")));
+        CommandClassification verdict = g.classify("run flaky-cmd now");
+        assertThat(verdict.isWarn()).isTrue();
+        assertThat(verdict.reason()).isEqualTo("matched configured warnlist pattern");
+        assertThat(g.checkDenied("run flaky-cmd now")).isEmpty();
+    }
+
+    @Test
+    void invalidExtraWarnPatternIsSkippedAndBuiltinWarnSetStillApplies() {
+        CommandGuard g = new CommandGuard(
+                SandboxPolicy.defaults().withExtraWarnPatterns(List.of("[invalid(")));
+        // Bad warn pattern skipped (no throw); built-in warn set still flags pip install.
+        assertThat(g.classify("pip install requests").isWarn()).isTrue();
+    }
+
+    @Test
+    void emptyConfiguredWarnlistDoesNotWeakenBuiltinWarnSet() {
+        CommandGuard g = new CommandGuard(SandboxPolicy.defaults().withExtraWarnPatterns(List.of()));
+        assertThat(g.classify("sudo apt install foo").isWarn()).isTrue();
+    }
 }

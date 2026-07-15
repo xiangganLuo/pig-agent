@@ -206,13 +206,15 @@ public final class PigAgentConfig {
     /**
      * {@code executeCommand} 的受约束执行配置。{@code max-output-bytes}/{@code timeout-seconds} 非法
      * （{@code <=0}）时由 {@code SandboxPolicy} 容错钳制回默认；{@code denylist} 只在内置灾难性模式
-     * 底线之上**追加**用户正则（不能削弱底线）；{@code scrub-env} 默认剔除凭据类环境变量；
-     * {@code working-dir} 为空则继承当前工作目录。
+     * 底线之上**追加**用户正则（不能削弱底线）；{@code warnlist} 只在内置中危 warn 集之上**追加**用户
+     * 正则（命中→照常执行但结果追加 ⚠️ 提示，不改 block/pass 契约；不能削弱内置集）；{@code scrub-env}
+     * 默认剔除凭据类环境变量；{@code working-dir} 为空则继承当前工作目录。
      */
     public static final class ExecSandboxConfig {
         @JsonProperty("max-output-bytes") private long maxOutputBytes = 200_000;
         @JsonProperty("timeout-seconds") private int timeoutSeconds = 30;
         @JsonProperty("denylist") private java.util.List<String> denylist = new java.util.ArrayList<>();
+        @JsonProperty("warnlist") private java.util.List<String> warnlist = new java.util.ArrayList<>();
         @JsonProperty("scrub-env") private boolean scrubEnv = true;
         @JsonProperty("working-dir") private String workingDir;
         public long getMaxOutputBytes() { return maxOutputBytes; }
@@ -222,6 +224,10 @@ public final class PigAgentConfig {
         public java.util.List<String> getDenylist() { return denylist; }
         public void setDenylist(java.util.List<String> d) {
             this.denylist = d == null ? new java.util.ArrayList<>() : d;
+        }
+        public java.util.List<String> getWarnlist() { return warnlist; }
+        public void setWarnlist(java.util.List<String> w) {
+            this.warnlist = w == null ? new java.util.ArrayList<>() : w;
         }
         public boolean isScrubEnv() { return scrubEnv; }
         public void setScrubEnv(boolean e) { this.scrubEnv = e; }

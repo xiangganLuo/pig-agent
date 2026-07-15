@@ -4,10 +4,11 @@ import java.util.List;
 
 /**
  * Immutable, config-backed policy for the command-execution sandbox (capability {@code exec-sandbox}).
- * It carries the four runtime constraints applied to {@code executeCommand}: a captured-output byte
- * cap (OOM guard), a timeout, an <em>additional</em> user denylist (regex, layered on top of
- * {@link CommandGuard}'s built-in catastrophic-command floor — never replacing it), an env-scrub
- * toggle, and an optional working directory.
+ * It carries the runtime constraints applied to {@code executeCommand}: a captured-output byte cap
+ * (OOM guard), a timeout, an <em>additional</em> user denylist (regex, layered on top of
+ * {@link CommandGuard}'s built-in catastrophic-command floor — never replacing it), an <em>additional</em>
+ * user warnlist (regex, layered on top of {@link CommandGuard}'s built-in medium-risk warn set — never
+ * replacing it), an env-scrub toggle, and an optional working directory.
  *
  * <p>Value object: fields are final and every mutator is a {@code withXxx()} copy method (per the
  * repo's immutability convention). The constructor is <strong>fault-tolerant</strong>: an out-of-range
@@ -32,29 +33,43 @@ public final class SandboxPolicy {
     private final long maxOutputBytes;
     private final int timeoutSeconds;
     private final List<String> extraDenyPatterns;
+    private final List<String> extraWarnPatterns;
     private final boolean scrubEnv;
     private final String workingDir;
 
     /**
+     * Canonical constructor.
+     *
      * @param maxOutputBytes   captured-output cap; {@code <= 0} clamps to {@link #DEFAULT_MAX_OUTPUT_BYTES}
      * @param timeoutSeconds   command timeout; {@code <= 0} clamps to {@link #DEFAULT_TIMEOUT_SECONDS}
-     * @param extraDenyPatterns user-supplied denylist regexes appended to the built-in floor; {@code null} → empty
+     * @param extraDenyPatterns user-supplied denylist regexes appended to the built-in block floor; {@code null} → empty
+     * @param extraWarnPatterns user-supplied warnlist regexes appended to the built-in warn set; {@code null} → empty
      * @param scrubEnv         when true, strip credential-bearing env vars from the child process
      * @param workingDir       optional child working directory; {@code null}/blank → inherit current
      */
     public SandboxPolicy(long maxOutputBytes, int timeoutSeconds, List<String> extraDenyPatterns,
-                         boolean scrubEnv, String workingDir) {
+                         List<String> extraWarnPatterns, boolean scrubEnv, String workingDir) {
         this.maxOutputBytes = maxOutputBytes > 0 ? maxOutputBytes : DEFAULT_MAX_OUTPUT_BYTES;
         this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : DEFAULT_TIMEOUT_SECONDS;
         this.extraDenyPatterns = extraDenyPatterns == null ? List.of() : List.copyOf(extraDenyPatterns);
+        this.extraWarnPatterns = extraWarnPatterns == null ? List.of() : List.copyOf(extraWarnPatterns);
         this.scrubEnv = scrubEnv;
         this.workingDir = (workingDir == null || workingDir.isBlank()) ? null : workingDir;
+    }
+
+    /**
+     * Backward-compatible constructor (no warnlist) — delegates with an empty {@code extraWarnPatterns}
+     * so pre-warn callers keep compiling and the built-in warn set alone applies.
+     */
+    public SandboxPolicy(long maxOutputBytes, int timeoutSeconds, List<String> extraDenyPatterns,
+                         boolean scrubEnv, String workingDir) {
+        this(maxOutputBytes, timeoutSeconds, extraDenyPatterns, List.of(), scrubEnv, workingDir);
     }
 
     /** The conservative built-in default policy (used when no config / no policy is injected). */
     public static SandboxPolicy defaults() {
         return new SandboxPolicy(DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_SECONDS, List.of(),
-                DEFAULT_SCRUB_ENV, null);
+                List.of(), DEFAULT_SCRUB_ENV, null);
     }
 
     public long maxOutputBytes() {
@@ -70,6 +85,11 @@ public final class SandboxPolicy {
         return extraDenyPatterns;
     }
 
+    /** Extra user warnlist regexes (immutable); the built-in medium-risk warn set is applied regardless. */
+    public List<String> extraWarnPatterns() {
+        return extraWarnPatterns;
+    }
+
     public boolean scrubEnv() {
         return scrubEnv;
     }
@@ -80,22 +100,26 @@ public final class SandboxPolicy {
     }
 
     public SandboxPolicy withMaxOutputBytes(long bytes) {
-        return new SandboxPolicy(bytes, timeoutSeconds, extraDenyPatterns, scrubEnv, workingDir);
+        return new SandboxPolicy(bytes, timeoutSeconds, extraDenyPatterns, extraWarnPatterns, scrubEnv, workingDir);
     }
 
     public SandboxPolicy withTimeoutSeconds(int seconds) {
-        return new SandboxPolicy(maxOutputBytes, seconds, extraDenyPatterns, scrubEnv, workingDir);
+        return new SandboxPolicy(maxOutputBytes, seconds, extraDenyPatterns, extraWarnPatterns, scrubEnv, workingDir);
     }
 
     public SandboxPolicy withExtraDenyPatterns(List<String> patterns) {
-        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, patterns, scrubEnv, workingDir);
+        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, patterns, extraWarnPatterns, scrubEnv, workingDir);
+    }
+
+    public SandboxPolicy withExtraWarnPatterns(List<String> patterns) {
+        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, extraDenyPatterns, patterns, scrubEnv, workingDir);
     }
 
     public SandboxPolicy withScrubEnv(boolean scrub) {
-        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, extraDenyPatterns, scrub, workingDir);
+        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, extraDenyPatterns, extraWarnPatterns, scrub, workingDir);
     }
 
     public SandboxPolicy withWorkingDir(String dir) {
-        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, extraDenyPatterns, scrubEnv, dir);
+        return new SandboxPolicy(maxOutputBytes, timeoutSeconds, extraDenyPatterns, extraWarnPatterns, scrubEnv, dir);
     }
 }

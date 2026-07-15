@@ -1,19 +1,4 @@
-# exec-sandbox Specification
-
-## Purpose
-TBD - created by archiving change exec-sandbox. Update Purpose after archive.
-## Requirements
-### Requirement: 命令执行受约束
-
-`executeCommand` MUST 在一道受约束执行层下运行获准的命令，约束由一个配置驱动的不可变策略对象（`SandboxPolicy`）+ 一个承载 denylist/输出上限/env 脱敏逻辑的策略组件（`CommandGuard`）承载，逻辑 MUST 集中于该组件而非散落在 `executeCommand` 内。该层与 `tool-permissions`（may-run）、`tool-availability`（visibility）**正交叠加**：权限决定「能否运行」，沙箱决定「运行时被约束到什么程度」。OS 原生 shell 选择（`buildInvocation`）MUST 保持不变。缺省（未注入策略/无配置块）时 MUST 使用保守内置默认，且行为对既有单测零回归。
-
-#### Scenario: 无配置时用保守默认
-- **WHEN** 未提供 `sandbox` 配置块（或未注入策略）
-- **THEN** 生效策略为「保守内置 denylist + 输出上限 200_000 字节 + 超时 30s + env 脱敏开 + 不限 cwd」，且 `buildInvocation` 的 PowerShell/bash 选择与今天一致
-
-#### Scenario: 非法配置值被容错钳制
-- **WHEN** 配置给出非法值（`max-output-bytes<=0` 或 `timeout-seconds<=0`）
-- **THEN** 策略把该值钳制回安全默认（而非崩溃或关闭约束），始终保留超时与输出上限
+## MODIFIED Requirements
 
 ### Requirement: 灾难性命令 denylist（保守拦截，两遍分类）
 
@@ -53,53 +38,7 @@ TBD - created by archiving change exec-sandbox. Update Purpose after archive.
 - **WHEN** 一条命令仅命中 warn 模式（如 `pip install foo`、`chmod 777 ./localfile`）而不命中任何 block 模式
 - **THEN** `checkDenied` 返回「未拦」（block/pass 契约不变），命令照常执行（warn 提示由 warn 层追加，见下）
 
-### Requirement: 命令输入校验
-
-在任何正则匹配之前，系统 MUST 对命令做廉价输入校验：空/空白命令、长度超过约 10_000 字符、含 NUL（`\x00`）字节的命令 MUST 被拒绝执行并返回规范错误结果（不 spawn）。审计日志行记录被拦命令时 MUST 先经凭据脱敏（复用 `CredentialSanitizer`）且长度受限，绝不明文回显密钥。
-
-#### Scenario: 非法输入被拒
-- **WHEN** 命令为空/空白、超长（>10_000 字符）、或含 NUL 字节
-- **THEN** 命令不被 spawn，返回规范错误（分别为 empty/too long/null byte 类别）
-
-#### Scenario: 审计日志脱敏
-- **WHEN** 一条被拦命令写入审计日志
-- **THEN** 日志中的命令经凭据脱敏且截断，不出现明文 API key/token
-
-### Requirement: 输出上限（防 OOM）
-
-`executeCommand` 捕获子进程输出时 MUST 有界读取，最多保留 `exec.max-output-bytes`（默认 200_000）字节；超限时 MUST 继续 drain 丢弃剩余输出（避免管道写满阻塞子进程）、MUST 在保留内容后追加清晰的截断标记。MUST NOT 使用无上限的 `readAllBytes()` 语义。
-
-#### Scenario: 超长输出被截断并标记
-- **WHEN** 子进程产出超过上限的输出
-- **THEN** 工具只保留上限内的字节并追加截断标记，进程不因内存耗尽而崩溃
-
-#### Scenario: 正常输出不受影响
-- **WHEN** 子进程输出小于上限
-- **THEN** 输出原样返回，无截断标记
-
-### Requirement: 子进程环境凭据脱敏
-
-`executeCommand` 在 `exec.scrub-env` 为真（默认）时 MUST NOT 把父进程的凭据类环境变量传给子进程——MUST 按名剔除凭据类变量（名字含 `TOKEN`/`SECRET`/`PASSWORD`/`CREDENTIAL`/`APIKEY`/`_KEY` 或以 `KEY` 结尾，含 `ANTHROPIC_API_KEY` 等），MUST 保留正常变量（`PATH`/`HOME`/`LANG` 等）以不破坏正常命令。脱敏 MUST 产出新的环境映射，MUST NOT 修改父进程环境。`scrub-env=false` 时按旧行为原样透传。
-
-#### Scenario: 凭据变量不进入子进程
-- **WHEN** 父进程环境含 `ANTHROPIC_API_KEY` 且 `scrub-env` 为真，agent 尝试 `echo $ANTHROPIC_API_KEY`
-- **THEN** 子进程环境不含该变量，密钥不被回显给模型；`PATH` 等正常变量仍在，正常命令不受影响
-
-#### Scenario: 关闭脱敏则原样透传
-- **WHEN** `scrub-env=false`
-- **THEN** 子进程继承完整父进程环境（旧行为）
-
-### Requirement: 可配置超时与工作目录
-
-`executeCommand` 的超时 MUST 由 `exec.timeout-seconds`（默认 30）驱动（取代硬编码 30s），超时未完成 MUST 强制销毁进程并返回已捕获（且已受上限约束）的输出。当 `exec.working-dir` 非空时子进程 MUST 在该目录运行；为空时继承当前工作目录。超时/工作目录 MUST 经 `ProcessBuilder` 施加，且 MUST 可在不 spawn 真实进程的前提下断言其配置。
-
-#### Scenario: 超时可配置并生效
-- **WHEN** `timeout-seconds` 配为 N 且命令在 N 秒内未完成
-- **THEN** 进程被强制销毁，返回超时提示 + 已捕获（受上限约束）的输出
-
-#### Scenario: 工作目录被施加
-- **WHEN** `working-dir` 指向某目录且 agent 执行命令
-- **THEN** `ProcessBuilder` 的工作目录被设为该目录（可不 spawn 断言）；`working-dir` 为空时不设置、继承当前目录
+## ADDED Requirements
 
 ### Requirement: 中间 warn 层（medium-risk 提示，不改 block/pass 契约）
 
@@ -124,4 +63,3 @@ warn 判定 MUST 复用 block 的两遍结构（整串结构型扫描 + 引号�
 #### Scenario: warn 配置只追加、非法正则跳过
 - **WHEN** 配置把 `exec.warnlist` 追加一条自定义正则，或追加一条非法正则，或设为空数组
 - **THEN** 内置 warn 集仍全部生效（空配置不削弱内置集）；追加的合法正则叠加为新的 warn 模式；非法正则被跳过且不影响其余规则
-

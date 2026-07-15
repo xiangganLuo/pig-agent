@@ -225,7 +225,7 @@ public final class AgentBootstrap {
         PigAgentConfig.ExecSandboxConfig execCfg = config.getSandbox().getExec();
         SandboxPolicy sandboxPolicy = new SandboxPolicy(
                 execCfg.getMaxOutputBytes(), execCfg.getTimeoutSeconds(),
-                execCfg.getDenylist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
+                execCfg.getDenylist(), execCfg.getWarnlist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
                 workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy);
         List<Object> builtinTools;
