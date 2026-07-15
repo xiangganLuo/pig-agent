@@ -210,8 +210,36 @@ public final class PigAgentConfig {
     /** 内置工具配置。缺省全空，向后兼容。 */
     public static final class ToolsConfig {
         @JsonProperty("web") private WebToolConfig web = new WebToolConfig();
+        @JsonProperty("deferred") private DeferredToolsConfig deferred = new DeferredToolsConfig();
         public WebToolConfig getWeb() { return web; }
         public void setWeb(WebToolConfig w) { this.web = w; }
+        public DeferredToolsConfig getDeferred() { return deferred; }
+        public void setDeferred(DeferredToolsConfig d) {
+            this.deferred = d == null ? new DeferredToolsConfig() : d;
+        }
+    }
+
+    /**
+     * 延迟工具（{@code deferred-tools}）配置。默认 {@code enabled=false} → 一切照旧（不隐藏任何工具、
+     * 不注册 {@code tool_search}、不对 MCP 工具分组）。启用后：{@code tools} 显式清单 + 阈值规则
+     * （{@code auto-defer-mcp} 且总工具数超 {@code threshold} 时自动延迟全部 MCP 工具）决定隐藏哪些工具，
+     * 模型经 {@code tool_search} 按需发现并揭示，省提示词 token。
+     */
+    public static final class DeferredToolsConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("tools") private java.util.List<String> tools = java.util.List.of();
+        @JsonProperty("auto-defer-mcp") private boolean autoDeferMcp = true;
+        @JsonProperty("threshold") private int threshold = 25;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public java.util.List<String> getTools() { return tools; }
+        public void setTools(java.util.List<String> t) {
+            this.tools = t == null ? java.util.List.of() : t;
+        }
+        public boolean isAutoDeferMcp() { return autoDeferMcp; }
+        public void setAutoDeferMcp(boolean a) { this.autoDeferMcp = a; }
+        public int getThreshold() { return threshold; }
+        public void setThreshold(int t) { this.threshold = t; }
     }
 
     /**

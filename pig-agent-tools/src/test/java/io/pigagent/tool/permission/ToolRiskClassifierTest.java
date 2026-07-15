@@ -32,6 +32,12 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void toolSearchIsReadOnly() {
+        // deferred-tools: tool_search 只搜索/揭示元数据，必须只读（不触发权限确认）
+        assertThat(ToolRiskClassifier.classify("tool_search", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+    }
+
+    @Test
     void unknownToolDefaultsToExecFailSafe() {
         assertThat(ToolRiskClassifier.classify("someRandomTool", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify(null, Map.of())).isEqualTo(ToolRisk.EXEC);

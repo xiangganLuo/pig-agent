@@ -39,6 +39,27 @@ public final class McpManager {
     private final Map<String, McpClientWrapper> clients = new LinkedHashMap<>();
     /** 正在添加/连接中的 name（占位防并发重名，L-1），受 {@code this} 锁保护。 */
     private final Set<String> pending = new HashSet<>();
+    /**
+     * 可选（deferred-tools）：服务器名 → tool-group 名。为 null（默认）时零行为变化——MCP 工具照旧
+     * 未分组注册。非 null 时 attach 把该服务器的工具注册进 {@code active} 分组，供 {@code DeferredToolGate}
+     * 按需停用以隐藏（延迟）；这样延迟对 MCP 安全（保留 {@code mcpClientName}，{@code removeMcpClient} 照常）。
+     */
+    private java.util.function.Function<String, String> toolGroupNamer;
+    /** attach 时创建过的 tool-group 名（供上层枚举 MCP 工具→分组），受 {@code this} 锁保护。 */
+    private final Set<String> managedGroups = new java.util.LinkedHashSet<>();
+
+    /**
+     * 启用 MCP 工具分组（deferred-tools）：注入「服务器名 → 分组名」函数。MUST 在 {@link #initialize} 前调用。
+     * 传 null 恢复默认（不分组）。
+     */
+    public void setToolGroupNamer(java.util.function.Function<String, String> namer) {
+        this.toolGroupNamer = namer;
+    }
+
+    /** attach 期创建的 MCP tool-group 名快照（未启用分组时为空）。 */
+    public synchronized Set<String> managedToolGroups() {
+        return new java.util.LinkedHashSet<>(managedGroups);
+    }
 
     /** 连通测试结果。 */
     public record TestResult(boolean ok, String error, int toolCount) {
@@ -281,13 +302,31 @@ public final class McpManager {
                                 "工具名冲突: '" + tn + "' 已被其他 MCP 服务器注册（扁平命名空间，拒绝添加）");
                     }
                 }
-                toolkit.registerMcpClient(client).block(DEFAULT_TIMEOUT);
+                registerClient(client, spec.name());
                 clients.put(spec.name(), client);
             }
         } catch (RuntimeException e) {
             safeClose(client);
             throw e;
         }
+    }
+
+    /**
+     * 注册 client：默认（无分组函数）走 {@code registerMcpClient}（带超时，逐字节旧行为）；启用分组时
+     * 先确保 {@code active} 分组存在，再经 {@code registration().mcpClient(...).group(g)} 注册——保留
+     * {@code mcpClientName}（{@code removeMcpClient} 热移除照常）。须在 {@code synchronized(this)} 内调用。
+     */
+    private void registerClient(McpClientWrapper client, String serverName) {
+        String group = toolGroupNamer == null ? null : toolGroupNamer.apply(serverName);
+        if (group == null || group.isBlank()) {
+            toolkit.registerMcpClient(client).block(DEFAULT_TIMEOUT);
+            return;
+        }
+        if (toolkit.getToolGroup(group) == null) {
+            toolkit.createToolGroup(group, "MCP server: " + serverName, true);
+        }
+        toolkit.registration().mcpClient(client).group(group).apply();
+        managedGroups.add(group);
     }
 
     private McpClientWrapper connect(McpServerSpec spec) {

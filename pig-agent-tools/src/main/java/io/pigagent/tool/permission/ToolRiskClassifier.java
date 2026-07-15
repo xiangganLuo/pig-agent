@@ -20,6 +20,8 @@ public final class ToolRiskClassifier {
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
             Map.entry("loadSkill", ToolRisk.READ_ONLY),
+            // 延迟工具发现（deferred-tools）——只读：仅搜索/揭示元数据，不改任何状态
+            Map.entry("tool_search", ToolRisk.READ_ONLY),
             // 内置计算插件（pig-agent-plugin-builtin）——纯计算工具，无 shell/网络/写盘
             Map.entry("currentDateTime", ToolRisk.READ_ONLY),
             Map.entry("convertTimezone", ToolRisk.READ_ONLY),

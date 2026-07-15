@@ -86,4 +86,13 @@ class McpManagerTest {
         assertThat(mgr.findByName("x")).isPresent();
         verify(store).findByName("x");
     }
+
+    @Test
+    void managedToolGroupsEmptyByDefault() {
+        // deferred-tools: 未注入分组函数（默认）时不创建任何 tool-group（零行为变化）。
+        // 实际按服务器分组需真实连接，在手动冒烟验证；此处确认默认与占位设置不产生分组。
+        assertThat(mgr.managedToolGroups()).isEmpty();
+        mgr.setToolGroupNamer(name -> "mcp:" + name);
+        assertThat(mgr.managedToolGroups()).isEmpty(); // 尚无服务器连接
+    }
 }
