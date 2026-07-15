@@ -34,13 +34,13 @@ tags: [workflow, ls-pipeline, clarify, multi-spec]
    若判断可拆，产出拆分方案：每个子 spec 给 `name` + 一句范围 + 是否可独立上线 + 与其它子 spec 的依赖（可并行 / 有先后）。用 **AskUserQuestion** 让用户**审阅并调整拆分**（选项如：确认此拆分 / 需要调整 / 不拆做单 spec）。拆分是关键决策，**必须人工审过**。
 
 3. **派生 name 与分支（每个 spec 一条，可并行）**
-   - 每个 spec：kebab-case `name` + 分支 `feat/<name>`（type 依该 spec 性质，通常 `feat`）。
+   - 每个 spec：kebab-case `name` + 分支 `<type>/YYYYMMDD-<name>`（`YYYYMMDD`=当天日期，`type` 依该 spec 性质，通常 `feat`），例如 `feat/20260715-plugin-collection`。
    - 多 spec 时各自独立分支，可**并行开发**（不同会话/agent 分别推进）。
    - 注意：`bug/` 分支的提交信息仍用 conventional-commit 的 `fix:`。
 
-4. **建分支**（PowerShell；每个 spec 各建一条）
+4. **建分支**（PowerShell；每个 spec 各建一条；`YYYYMMDD` 用当天日期）
    ```powershell
-   git fetch origin --quiet; git checkout -b <type>/<name> origin/main
+   git fetch origin --quiet; git checkout -b <type>/YYYYMMDD-<name> origin/main
    ```
    多 spec 时逐个从 `origin/main` fresh 拉出。工作树有未提交改动或分支已存在 → 停下告知，不强行覆盖。
    （并行开发建议每个 spec 用独立 worktree/会话，避免互相踩工作树。）
@@ -51,7 +51,7 @@ tags: [workflow, ls-pipeline, clarify, multi-spec]
 **Output（单 spec）**
 ```
 ## 需求已澄清（单 spec）
-**变更**: <name>（类型 <type>）  **分支**: <type>/<name>
+**变更**: <name>（类型 <type>）  **分支**: <type>/YYYYMMDD-<name>
 **意图** / **验收标准** / **影响模块** / **可复用**: ...
 确认后运行 `/ls:spec <name>`。
 ```
@@ -62,8 +62,8 @@ tags: [workflow, ls-pipeline, clarify, multi-spec]
 
 | spec | 分支 | 范围 | 独立上线 | 依赖 |
 |------|------|------|:-------:|------|
-| <name1> | feat/<name1> | ... | 是 | 无（可并行） |
-| <name2> | feat/<name2> | ... | 是 | 依赖 name1 |
+| <name1> | feat/YYYYMMDD-<name1> | ... | 是 | 无（可并行） |
+| <name2> | feat/YYYYMMDD-<name2> | ... | 是 | 依赖 name1 |
 
 并行建议: <哪些可同时开工 / 哪些需等依赖>
 逐个推进：在各自分支/会话运行 `/ls:spec <name>` → `/ls:code` → `/ls:itest` → `/ls:archive`。
