@@ -1,4 +1,4 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
 import io.pigagent.plugin.CollectingPluginContext;
 import io.pigagent.tool.spi.ToolContext;

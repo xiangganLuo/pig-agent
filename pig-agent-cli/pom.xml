@@ -67,11 +67,11 @@
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-plugin</artifactId>
         </dependency>
-        <!-- Built-in plugin collection: on the runtime classpath so ServiceLoaderPluginSource
-             discovers its plugins (no compile-time use here). -->
+        <!-- Built-in plugins: on the runtime classpath so ServiceLoaderPluginSource discovers its
+             plugins (incl. the extracted web/checklist tools). Referenced from a *IT test only. -->
         <dependency>
             <groupId>io.pigagent</groupId>
-            <artifactId>pig-agent-plugin-collection</artifactId>
+            <artifactId>pig-agent-plugin-builtin</artifactId>
         </dependency>
         <dependency>
             <groupId>io.pigagent</groupId>

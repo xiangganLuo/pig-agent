@@ -1,6 +1,6 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
-import io.pigagent.plugin.collection.tool.Base64Tool;
+import io.pigagent.plugin.builtin.tool.Base64Tool;
 import io.pigagent.tool.spi.ToolContext;
 
 import java.util.List;
@@ -9,7 +9,7 @@ import java.util.List;
 public final class Base64Plugin extends AbstractToolPlugin {
 
     public Base64Plugin() {
-        super("collection:base64");
+        super("builtin:base64");
     }
 
     @Override

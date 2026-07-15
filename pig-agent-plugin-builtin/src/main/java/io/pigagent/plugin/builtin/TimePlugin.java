@@ -1,6 +1,6 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
-import io.pigagent.plugin.collection.tool.TimeTool;
+import io.pigagent.plugin.builtin.tool.TimeTool;
 import io.pigagent.tool.spi.ToolContext;
 
 import java.util.List;
@@ -9,7 +9,7 @@ import java.util.List;
 public final class TimePlugin extends AbstractToolPlugin {
 
     public TimePlugin() {
-        super("collection:time");
+        super("builtin:time");
     }
 
     @Override

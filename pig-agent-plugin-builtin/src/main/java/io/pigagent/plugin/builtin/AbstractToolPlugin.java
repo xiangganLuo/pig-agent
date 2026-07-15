@@ -1,4 +1,4 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
 import io.pigagent.plugin.Plugin;
 import io.pigagent.plugin.PluginContext;
@@ -29,7 +29,7 @@ public abstract class AbstractToolPlugin implements Plugin {
     private final String id;
 
     /**
-     * @param id stable plugin id (e.g. {@code "collection:time"}); must not be {@code null}/blank —
+     * @param id stable plugin id (e.g. {@code "builtin:time"}); must not be {@code null}/blank —
      *           a blank id would break {@code PluginRegistry}'s id-based de-duplication.
      */
     protected AbstractToolPlugin(String id) {

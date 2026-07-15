@@ -1,4 +1,4 @@
-package io.pigagent.plugin.collection.tool;
+package io.pigagent.plugin.builtin.tool;
 
 import org.junit.jupiter.api.Test;
 

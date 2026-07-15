@@ -1,4 +1,4 @@
-package io.pigagent.plugin.collection.tool;
+package io.pigagent.plugin.builtin.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;

@@ -1,4 +1,4 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
 import io.pigagent.plugin.Plugin;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class PluginCatalogTest {
 
         assertThat(plugins).isNotEmpty();
         assertThat(ids).hasSameSizeAs(plugins);
-        assertThat(ids).allMatch(id -> id.startsWith("collection:"));
+        assertThat(ids).allMatch(id -> id.startsWith("builtin:"));
     }
 
     @Test

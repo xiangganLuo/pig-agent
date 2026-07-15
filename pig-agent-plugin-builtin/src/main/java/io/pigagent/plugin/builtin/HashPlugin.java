@@ -1,6 +1,6 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
-import io.pigagent.plugin.collection.tool.HashTool;
+import io.pigagent.plugin.builtin.tool.HashTool;
 import io.pigagent.tool.spi.ToolContext;
 
 import java.util.List;
@@ -9,7 +9,7 @@ import java.util.List;
 public final class HashPlugin extends AbstractToolPlugin {
 
     public HashPlugin() {
-        super("collection:hash");
+        super("builtin:hash");
     }
 
     @Override

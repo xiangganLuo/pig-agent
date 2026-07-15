@@ -1,6 +1,6 @@
-package io.pigagent.plugin.collection;
+package io.pigagent.plugin.builtin;
 
-import io.pigagent.plugin.collection.tool.RandomTool;
+import io.pigagent.plugin.builtin.tool.RandomTool;
 import io.pigagent.tool.spi.ToolContext;
 
 import java.util.List;
@@ -9,7 +9,7 @@ import java.util.List;
 public final class RandomPlugin extends AbstractToolPlugin {
 
     public RandomPlugin() {
-        super("collection:random");
+        super("builtin:random");
     }
 
     @Override

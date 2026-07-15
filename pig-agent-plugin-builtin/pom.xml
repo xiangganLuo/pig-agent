@@ -9,9 +9,9 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>pig-agent-plugin-collection</artifactId>
-    <name>Pig Agent - Plugin Collection</name>
-    <description>A set of common, safe, offline built-in plugins contributed through the Plugin SPI</description>
+    <artifactId>pig-agent-plugin-builtin</artifactId>
+    <name>Pig Agent - Built-in Plugins</name>
+    <description>Built-in plugins contributed through the Plugin SPI: common offline compute tools plus the extracted web search / web fetch / checklist tools</description>
 
     <dependencies>
         <!-- Plugin SPI (transitively brings pig-agent-tools + core + agentscope) -->
