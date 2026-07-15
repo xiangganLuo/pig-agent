@@ -27,7 +27,6 @@ Pig Agent 的设计灵感来源于 OpenCLAW、Hermes Agent 等终端智能体产
 | Agent 框架 | AgentScope Java 1.0.10     |
 | 终端 REPL  | JLine3 3.28.0              |
 | 配置管理   | Jackson YAML 2.18.3        |
-| 工具发现   | Apache Lucene 10.1.0       |
 | MCP 协议   | AgentScope 内置 MCP Client |
 | 构建工具   | Maven (Java 17)            |
 
@@ -120,7 +119,6 @@ ReActAgent 推理循环:
 | `TaskTool`           | `createTask`, `listTasks`, `updateTaskStatus`      | 任务管理                          |
 | `CheckListTool`      | `createChecklist`, `completeItem`, `showChecklist` | 清单管理                          |
 | `SkillsTool`         | `listSkills`, `loadSkill`                          | 从 workspace/skills/ 加载技能     |
-| `ToolDiscovery`      | —                                                 | 基于 Lucene 的工具全文搜索        |
 
 ### pig-agent-task — 任务管理
 

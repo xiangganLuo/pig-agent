@@ -51,7 +51,6 @@ import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
-import io.pigagent.tool.checklist.CheckListTool;
 import io.pigagent.tool.contract.ToolContractGuard;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.mcp.McpConfirmer;
@@ -67,8 +66,6 @@ import io.pigagent.tool.spi.ToolRegistrar;
 import io.pigagent.tool.availability.ToolAvailabilityGate;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.task.TaskTool;
-import io.pigagent.tool.webfetch.SmartWebFetchTool;
-import io.pigagent.tool.websearch.BraveWebSearchTool;
 import io.pigagent.workspace.WorkspaceManager;
 import org.jline.reader.LineReader;
 import org.slf4j.Logger;
@@ -203,13 +200,12 @@ public final class AgentBootstrap {
             builtinTools = reg.instances;
         } else {
             log.info("Tool auto-register disabled — using manual registration (fallback)");
+            // Core tools only (tools-core-slim). The extracted web/checklist tools are contributed by
+            // pig-agent-plugin-builtin via PluginRegistry below, which runs regardless of this flag.
             builtinTools = List.of(
                     new TaskTool(taskManager),
                     new ShellTools(),
                     new FileSystemTools(),
-                    new SmartWebFetchTool(),
-                    new BraveWebSearchTool(),
-                    new CheckListTool(),
                     new SkillsTool(workspace.getSkillsDir()),
                     new PermissionDeniedTool());
             for (Object tool : builtinTools) {
