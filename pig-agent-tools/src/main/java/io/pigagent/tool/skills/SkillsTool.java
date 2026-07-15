@@ -2,34 +2,51 @@ package io.pigagent.tool.skills;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
- * The agent's entry point for on-demand capability packs. A skill is a named {@code SKILL.md}; the
- * tool merges skills from several {@link SkillSource}s via a {@link SkillRegistry}:
+ * The agent's entry point for on-demand capability packs. A skill is a composite {@code SKILL.md}
+ * bundle; the tool merges skills from several {@link SkillSource}s via a {@link SkillRegistry}:
  * <ul>
  *   <li>the <b>built-in</b> classpath set ({@link ClasspathSkillSource}, shipped by
  *       {@code pig-agent-skills-builtin}); and</li>
  *   <li>the <b>workspace</b> directory ({@link WorkspaceSkillSource}, {@code workspace/skills/}).</li>
  * </ul>
  * The workspace source has priority, so a user can override / shadow a built-in skill by dropping a
- * same-named {@code SKILL.md} into the workspace. With no built-in module on the classpath the
- * classpath source finds nothing and behaviour is exactly workspace-only (backward compatible).
+ * same-named skill into the workspace. With no built-in module on the classpath the classpath source
+ * finds nothing and behaviour is exactly workspace-only (backward compatible).
  *
- * <p>The {@code @Tool} surface ({@link #listSkills()} / {@link #loadSkill(String)}) — names,
- * signatures and return semantics — is unchanged from the original single-directory tool.
+ * <p><b>Progressive loading.</b> {@link #listSkills()} reads only each skill's cheap
+ * {@link Skill#metadata() metadata} (name + optional description), never a body; {@link #loadSkill}
+ * reads the full body on demand and surfaces the skill's supporting files (bounded). The {@code @Tool}
+ * surface ({@link #listSkills()} / {@link #loadSkill(String)}) — names, signatures and return
+ * semantics — is unchanged: an empty listing is {@code "No skills found."}, a description-less skill is
+ * {@code "- <name>"}, an unknown load is {@code "Skill not found: <name>"}, a read error is
+ * {@code "Error: <msg>"}, and a skill with no supporting files returns exactly its body.
  */
 public final class SkillsTool {
 
+    private static final Logger log = LoggerFactory.getLogger(SkillsTool.class);
+
     private final SkillRegistry registry;
+    private final SkillLimits limits;
 
     /** Primary constructor: compose any set of sources (used by tests and explicit wiring). */
     public SkillsTool(SkillRegistry registry) {
+        this(registry, SkillLimits.defaults());
+    }
+
+    public SkillsTool(SkillRegistry registry, SkillLimits limits) {
         this.registry = registry;
+        this.limits = limits == null ? SkillLimits.defaults() : limits;
     }
 
     /**
@@ -45,12 +62,14 @@ public final class SkillsTool {
 
     @Tool(description = "List available skills from the skills directory")
     public String listSkills() {
-        List<String> names = registry.listNames();
-        if (names.isEmpty()) {
+        List<Skill> skills = registry.all();
+        if (skills.isEmpty()) {
             return "No skills found.";
         }
-        return names.stream().map(name -> "- " + name)
-                .reduce((a, b) -> a + "\n" + b).orElse("No skills found.");
+        return skills.stream()
+                .sorted(Comparator.comparing(Skill::name))
+                .map(this::formatListing)
+                .collect(Collectors.joining("\n"));
     }
 
     @Tool(description = "Load and read a skill's content by name")
@@ -60,9 +79,36 @@ public final class SkillsTool {
             return "Skill not found: " + skillName;
         }
         try {
-            return skill.get().content();
+            String body = skill.get().content();
+            return body + SupportingFilesRenderer.render(safeSupportingFiles(skill.get()), limits);
         } catch (IOException e) {
             return "Error: " + e.getMessage();
+        }
+    }
+
+    /** Progressive: format from metadata only (never reads the body). */
+    private String formatListing(Skill skill) {
+        SkillMetadata meta = safeMetadata(skill);
+        return meta.hasDescription() ? "- " + skill.name() + " — " + meta.description() : "- " + skill.name();
+    }
+
+    private SkillMetadata safeMetadata(Skill skill) {
+        try {
+            SkillMetadata m = skill.metadata();
+            return m != null ? m : SkillMetadata.ofName(skill.name());
+        } catch (RuntimeException e) {
+            log.warn("Failed to read metadata for skill '{}': {}", skill.name(), e.toString());
+            return SkillMetadata.ofName(skill.name());
+        }
+    }
+
+    private List<SkillResource> safeSupportingFiles(Skill skill) {
+        try {
+            List<SkillResource> files = skill.supportingFiles();
+            return files != null ? files : List.of();
+        } catch (RuntimeException e) {
+            log.warn("Failed to list supporting files for skill '{}': {}", skill.name(), e.toString());
+            return List.of();
         }
     }
 }

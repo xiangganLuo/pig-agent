@@ -1,3 +1,9 @@
+---
+name: tdd
+description: Write the test first, watch it fail, then write minimal code to pass (Red-Green-Refactor).
+keywords: tdd, test-first, red-green-refactor, unit tests, coverage
+version: 1.0.0
+---
 # Test-Driven Development
 
 Write the test first, watch it fail, then write the minimal code to make it pass.

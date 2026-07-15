@@ -1,3 +1,9 @@
+---
+name: git-commit
+description: Craft small, focused commits with clear conventional-commit messages.
+keywords: git, commit, conventional commits, message, staging
+version: 1.0.0
+---
 # Git Commit
 
 Craft small, focused commits with clear conventional-commit messages.

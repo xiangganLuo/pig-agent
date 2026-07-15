@@ -1,3 +1,9 @@
+---
+name: security-review
+description: Find and remediate security weaknesses before code is committed or shipped.
+keywords: security, vulnerability, owasp, secrets, injection
+version: 1.0.0
+---
 # Security Review
 
 Find and remediate security weaknesses before code is committed or shipped.
