@@ -22,6 +22,9 @@ class ChannelConfigTest {
         assertThat(c.getPath()).isNull();
         assertThat(c.getSigningSecret()).isNull();
         assertThat(c.getPort()).isZero();
+        assertThat(c.getWebhookUrl()).isNull();
+        assertThat(c.getSignSecret()).isNull();
+        assertThat(c.getVerificationToken()).isNull();
     }
 
     @Test
@@ -35,6 +38,9 @@ class ChannelConfigTest {
         c.setPort(8686);
         c.setPath("/hook");
         c.setSigningSecret("s");
+        c.setWebhookUrl("https://example.com/robot");
+        c.setSignSecret("ss");
+        c.setVerificationToken("vt");
 
         // Assert
         assertThat(c.isEnabled()).isTrue();
@@ -42,6 +48,9 @@ class ChannelConfigTest {
         assertThat(c.getPort()).isEqualTo(8686);
         assertThat(c.getPath()).isEqualTo("/hook");
         assertThat(c.getSigningSecret()).isEqualTo("s");
+        assertThat(c.getWebhookUrl()).isEqualTo("https://example.com/robot");
+        assertThat(c.getSignSecret()).isEqualTo("ss");
+        assertThat(c.getVerificationToken()).isEqualTo("vt");
     }
 
     @Test
@@ -71,6 +80,40 @@ class ChannelConfigTest {
         assertThat(webhook.getToken()).isEqualTo("secret-token");
         assertThat(slack.isEnabled()).isTrue();
         assertThat(slack.getSigningSecret()).isEqualTo("shhh");
+    }
+
+    @Test
+    void yamlRoundTripReadsRobotChannelFields() throws Exception {
+        // Arrange
+        String doc = """
+                channels:
+                  dingtalk:
+                    enabled: true
+                    webhook-url: https://oapi.dingtalk.com/robot/send?access_token=T
+                    sign-secret: ding-secret
+                  feishu:
+                    enabled: true
+                    webhook-url: https://open.feishu.cn/open-apis/bot/v2/hook/XYZ
+                    sign-secret: lark-secret
+                    verification-token: verif-token
+                    port: 9100
+                    path: /lark
+                """;
+
+        // Act
+        PigAgentConfig cfg = yaml.readValue(doc, PigAgentConfig.class);
+        PigAgentConfig.ChannelConfig dingtalk = cfg.getChannels().get("dingtalk");
+        PigAgentConfig.ChannelConfig feishu = cfg.getChannels().get("feishu");
+
+        // Assert
+        assertThat(dingtalk.isEnabled()).isTrue();
+        assertThat(dingtalk.getWebhookUrl()).contains("oapi.dingtalk.com");
+        assertThat(dingtalk.getSignSecret()).isEqualTo("ding-secret");
+        assertThat(feishu.getWebhookUrl()).contains("open.feishu.cn");
+        assertThat(feishu.getSignSecret()).isEqualTo("lark-secret");
+        assertThat(feishu.getVerificationToken()).isEqualTo("verif-token");
+        assertThat(feishu.getPort()).isEqualTo(9100);
+        assertThat(feishu.getPath()).isEqualTo("/lark");
     }
 
     @Test
