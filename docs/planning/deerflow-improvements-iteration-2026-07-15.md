@@ -27,7 +27,12 @@
   - A8 sandbox-warn-tier（`8b91aa2`/`503df36`，823 测试）→ merge 合入（自动解决相邻改动）。
   - A2 deferred-tools（`f3c9cc1`/`d16f51f`，815 测试）→ merge `c491cef`（AgentBootstrap 冲突已解=保留两 helper 方法）。
   - 收口：`main` 全量 `mvn test` = BUILD SUCCESS，0 失败/0 错误。
-- Wave 2：🔄 a3skill（复合 Skill）/ a4mem（记忆抽取）/ a5ctx（上下文增强）后台运行中（基于含 Wave-1 的 main）。
+- Wave 2：✅ **全部合入 `main` 且全量测试 BUILD SUCCESS**。
+  - A3 composite-skill（`b286c04`/`45fa3e1`）→ clean merge。
+  - A5 context-engineering（`198fc2d`/`1952a5c`，927 测试）→ clean merge（默认值保持旧行为，现有压缩测试零改动）。
+  - A4 memory-extraction（`09c35b6`/`5ca1534`，954 测试）→ merge `a11c9fc`（CLAUDE.md 两处冲突已解=模块表合并 + 保留 A4/A5 两段、删旧压缩段）。
+- **最终收口**：`main` 全量 `mvn test` = BUILD SUCCESS，**1015 测试 / 161 套件，0 失败/0 错误**（2 个真模型 *IT 按约跳过）。
+- 6 个子任务 worktree 已清理；分支 `feat/20260715-*` 均保留（已并入 main 的 merge 提交）。
 - 合并/归档前流程：全部自主处理，绿了合 main。
 
 ## 并行长线：AgentScope 2.0 迁移
