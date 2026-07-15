@@ -1,10 +1,5 @@
 package io.pigagent.channel;
 
-import io.pigagent.channel.cli.StdinPipeChannel;
-import io.pigagent.channel.discord.DiscordChannel;
-import io.pigagent.channel.slack.SlackChannel;
-import io.pigagent.channel.telegram.TelegramChannel;
-import io.pigagent.channel.webhook.WebhookChannel;
 import io.pigagent.config.PigAgentConfig.ChannelConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,10 +13,11 @@ import java.util.Optional;
  * Builds channel adapters from {@code channels.<id>} configuration and centralizes the enable gate.
  *
  * <p>A disabled or absent config produces no channel; an enabled but unknown id is logged and
- * skipped; an enabled known id ({@code telegram}/{@code discord}/{@code webhook}/{@code slack}/
- * {@code stdin}) yields the corresponding adapter. Channels default to disabled, so an unconfigured
- * deployment starts no channels (backward compatible). Adding a new adapter means adding a case
- * here — the frontend goes through this factory rather than an inline switch.
+ * skipped; an enabled known id yields the corresponding adapter. The known kinds and how to construct
+ * them are the single-source-of-truth {@link ChannelType} <b>enum registry</b> — this factory is
+ * driven by it (no ad-hoc string {@code switch}), so adding a channel means adding a
+ * {@link ChannelType} constant, not editing this class. Channels default to disabled, so an
+ * unconfigured deployment starts no channels (backward compatible).
  */
 public final class ChannelFactory {
 
@@ -32,19 +28,12 @@ public final class ChannelFactory {
         if (id == null || cfg == null || !cfg.isEnabled()) {
             return Optional.empty();
         }
-        Channel channel = switch (id) {
-            case "telegram" -> new TelegramChannel(cfg.getToken());
-            case "discord" -> new DiscordChannel(cfg.getToken());
-            case "webhook" -> new WebhookChannel(cfg.getPort(), cfg.getPath(), cfg.getToken());
-            case "slack" -> new SlackChannel(cfg.getPort(), cfg.getPath(), cfg.getSigningSecret());
-            case "stdin" -> new StdinPipeChannel();
-            default -> null;
-        };
-        if (channel == null) {
+        Optional<ChannelType> type = ChannelType.fromId(id);
+        if (type.isEmpty()) {
             log.warn("Channel '{}' is enabled but no adapter exists for it — skipping", id);
             return Optional.empty();
         }
-        return Optional.of(channel);
+        return Optional.of(type.get().create(cfg));
     }
 
     /** Build all enabled, known channels from the {@code channels} config map. */

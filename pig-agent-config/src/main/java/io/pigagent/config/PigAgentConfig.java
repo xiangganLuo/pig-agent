@@ -90,9 +90,12 @@ public final class PigAgentConfig {
 
     /**
      * 单个渠道的配置（键 {@code channels.<id>}）。缺省 {@code enabled=false}——不配置即不启动任何渠道。
-     * {@code token} 用作通用鉴权/机器人令牌；{@code port}/{@code path} 供 HTTP 类渠道（webhook/slack）
-     * 监听用（{@code port<=0} 或 {@code path} 为空时渠道取内置默认）；{@code signing-secret} 供 Slack
-     * 签名校验用。全部新字段可选且有安全缺省——旧配置（仅 {@code enabled}/{@code token}）照常解析。
+     * {@code token} 用作通用鉴权/机器人令牌；{@code port}/{@code path} 供 HTTP 类渠道（webhook/slack/
+     * dingtalk/feishu）监听用（{@code port<=0} 或 {@code path} 为空时渠道取内置默认）；{@code signing-secret}
+     * 供 Slack 签名校验用；{@code webhook-url} 为出站机器人 webhook（dingtalk/feishu）；{@code sign-secret}
+     * 为 dingtalk/feishu 出站+入站签名密钥；{@code verification-token} 为 feishu 事件订阅入站验签 token。
+     * 全部新字段可选且有安全缺省（缺省 null）——旧配置（仅 {@code enabled}/{@code token}）照常解析。
+     * 凭据字段（{@code sign-secret}/{@code verification-token}/{@code token}/{@code signing-secret}）不入日志/回显。
      */
     public static final class ChannelConfig {
         @JsonProperty("enabled") private boolean enabled = false;
@@ -100,6 +103,9 @@ public final class PigAgentConfig {
         @JsonProperty("port") private int port = 0;
         @JsonProperty("path") private String path;
         @JsonProperty("signing-secret") private String signingSecret;
+        @JsonProperty("webhook-url") private String webhookUrl;
+        @JsonProperty("sign-secret") private String signSecret;
+        @JsonProperty("verification-token") private String verificationToken;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
         public String getToken() { return token; }
@@ -110,6 +116,12 @@ public final class PigAgentConfig {
         public void setPath(String p) { this.path = p; }
         public String getSigningSecret() { return signingSecret; }
         public void setSigningSecret(String s) { this.signingSecret = s; }
+        public String getWebhookUrl() { return webhookUrl; }
+        public void setWebhookUrl(String u) { this.webhookUrl = u; }
+        public String getSignSecret() { return signSecret; }
+        public void setSignSecret(String s) { this.signSecret = s; }
+        public String getVerificationToken() { return verificationToken; }
+        public void setVerificationToken(String t) { this.verificationToken = t; }
     }
 
     public static final class CompressionConfig {
