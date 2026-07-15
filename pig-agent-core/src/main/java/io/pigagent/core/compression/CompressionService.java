@@ -3,7 +3,6 @@ package io.pigagent.core.compression;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
-import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.Model;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
@@ -16,26 +15,27 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
- * Automatic in-memory context compression.
+ * Automatic in-memory context compression, upgraded to structured <em>context engineering</em>.
  *
  * <p>Operates ONLY on the agent's in-memory conversation ({@code agent.getMemory()}); the
  * persisted session history and the two-tier memory are never read or modified here. When the
- * estimated token usage crosses the threshold, the oldest messages are replaced with a single
- * model-written summary while the most recent rounds are kept verbatim. Compression follows the
- * current model (it summarizes with whatever model the live agent uses) and is fully skipped on
- * any failure, leaving the original context intact.
+ * estimated token usage crosses the threshold, the conversation is rewritten by a
+ * {@link ContextEngineer}: a three-tier {@link ContextBudget} (pinned / recent verbatim /
+ * summarized), importance-based verbatim retention ({@link ImportanceScorer}), verbatim protection
+ * of code/commands/IDs ({@link VerbatimGuard}), recursive summarization ({@link RecursiveSummarizer})
+ * and a post-compression {@link ConsistencyChecker} with a safe (less-aggressive) fallback. The
+ * summarizer model call stays behind the {@link Summarizer} seam, so the whole pipeline is
+ * testable offline. Compression is fully skipped on any failure, leaving the original context intact.
  *
- * <p>After a successful compression, an optional {@link CompressionLineageRecorder} is fired to
- * record the session's provenance. Lineage recording is <em>independent of the compression core</em>:
- * it runs only once memory has already been rewritten, and any failure is logged and swallowed so
- * it can never break compression.
+ * <p>With {@link EngineeringOptions#defaults()} the pipeline reproduces the prior
+ * "summarize-old, keep-recent" behavior on small conversations, so it is a backward-compatible,
+ * additive upgrade. After a successful compression an optional {@link CompressionLineageRecorder}
+ * records session provenance — independent of the compression core, its failures are swallowed.
  */
 public final class CompressionService {
 
     private static final Logger log = LoggerFactory.getLogger(CompressionService.class);
 
-    /** Number of trailing messages kept verbatim (~3 user/assistant rounds). */
-    private static final int KEEP_RECENT = 6;
     /** Minimum new messages since the last compression before compressing again (anti-thrash). */
     private static final int MIN_GROWTH = 4;
     /** Per-block truncation cap for summarizer input, so one giant tool result can't blow it up. */
@@ -51,11 +51,13 @@ public final class CompressionService {
     }
 
     private final Supplier<Memory> memorySupplier;
-    private final Summarizer summarizer;
+    private final ContextEngineer engineer;
     private final CompressionLineageRecorder lineageRecorder;
     private final int budgetTokens;
     private final double threshold;
     private final boolean defaultEnabled;
+    private final int keepRecent;
+    private final BudgetRatios ratios;
 
     private final Map<String, Boolean> enabledBySession = new ConcurrentHashMap<>();
     private final Map<String, Long> lastCompressedAt = new ConcurrentHashMap<>();
@@ -67,23 +69,40 @@ public final class CompressionService {
 
     public CompressionService(AgentHolder agentHolder, int budgetTokens, double threshold,
                               boolean defaultEnabled, CompressionLineageRecorder lineageRecorder) {
+        this(agentHolder, budgetTokens, threshold, defaultEnabled, lineageRecorder, EngineeringOptions.defaults());
+    }
+
+    public CompressionService(AgentHolder agentHolder, int budgetTokens, double threshold,
+                              boolean defaultEnabled, CompressionLineageRecorder lineageRecorder,
+                              EngineeringOptions options) {
         this(() -> {
                     PigAgent agent = agentHolder.get();
                     return agent == null ? null : agent.getMemory();
                 },
                 new ModelSummarizer(agentHolder),
-                budgetTokens, threshold, defaultEnabled, lineageRecorder);
+                budgetTokens, threshold, defaultEnabled, lineageRecorder, options);
     }
 
-    /** Full constructor with injectable seams — package-private for unit tests. */
+    /** Injectable-seam constructor (default options) — package-private for unit tests. */
     CompressionService(Supplier<Memory> memorySupplier, Summarizer summarizer, int budgetTokens,
                        double threshold, boolean defaultEnabled, CompressionLineageRecorder lineageRecorder) {
+        this(memorySupplier, summarizer, budgetTokens, threshold, defaultEnabled, lineageRecorder,
+                EngineeringOptions.defaults());
+    }
+
+    /** Full injectable-seam constructor with engineering options — package-private for unit tests. */
+    CompressionService(Supplier<Memory> memorySupplier, Summarizer summarizer, int budgetTokens,
+                       double threshold, boolean defaultEnabled, CompressionLineageRecorder lineageRecorder,
+                       EngineeringOptions options) {
         this.memorySupplier = memorySupplier;
-        this.summarizer = summarizer;
+        EngineeringOptions opts = options == null ? EngineeringOptions.defaults() : options;
+        this.engineer = ContextEngineer.withDefaults(summarizer, opts);
         this.lineageRecorder = lineageRecorder == null ? CompressionLineageRecorder.NOOP : lineageRecorder;
         this.budgetTokens = budgetTokens;
         this.threshold = threshold;
         this.defaultEnabled = defaultEnabled;
+        this.keepRecent = opts.keepRecent();
+        this.ratios = opts.ratios();
     }
 
     public boolean isEnabled(String sessionId) {
@@ -114,7 +133,7 @@ public final class CompressionService {
             return;
         }
         List<Msg> messages = memory.getMessages();
-        if (messages == null || messages.size() <= KEEP_RECENT) {
+        if (messages == null || messages.size() <= keepRecent) {
             return;
         }
         if (TOKEN_ESTIMATOR.estimate(messages) < threshold * budgetTokens) {
@@ -134,7 +153,7 @@ public final class CompressionService {
             return false;
         }
         List<Msg> messages = memory.getMessages();
-        if (messages == null || messages.size() <= KEEP_RECENT) {
+        if (messages == null || messages.size() <= keepRecent) {
             return false;
         }
         return compress(sessionId, memory, messages);
@@ -152,28 +171,20 @@ public final class CompressionService {
                 budgetTokens,
                 (int) (threshold * budgetTokens),
                 messages.size(),
-                lastCompressedAt.getOrDefault(sessionId, 0L));
+                lastCompressedAt.getOrDefault(sessionId, 0L),
+                ContextBudget.allocate(budgetTokens, ratios));
     }
 
     private boolean compress(String sessionId, Memory memory, List<Msg> messages) {
         try {
-            int splitAt = messages.size() - KEEP_RECENT;
-            // Copy out of the live list: clear() below may invalidate sub-list views.
-            List<Msg> older = new java.util.ArrayList<>(messages.subList(0, splitAt));
-            List<Msg> kept = new java.util.ArrayList<>(messages.subList(splitAt, messages.size()));
-
-            String summary = summarize(older);
-            if (summary == null || summary.isBlank()) {
-                return false; // keep original context on empty summary
+            List<Msg> plan = engineer.rewrite(messages, budgetTokens);
+            if (plan == null || plan.isEmpty()) {
+                return false; // nothing to do / blank summary / safe fallback → keep original
             }
 
-            // Only mutate memory once we successfully have a summary.
+            // Only mutate memory once we have a valid rewrite plan.
             memory.clear();
-            memory.addMessage(Msg.builder().name("summary").role(MsgRole.ASSISTANT)
-                    .content(TextBlock.builder()
-                            .text("[Earlier conversation summary]\n" + summary).build())
-                    .build());
-            for (Msg m : kept) {
+            for (Msg m : plan) {
                 memory.addMessage(m);
             }
 
@@ -192,8 +203,8 @@ public final class CompressionService {
 
     /**
      * Record the session's compression lineage. Independent of the compression core: memory has
-     * already been rewritten and marked; any failure here is logged and swallowed so lineage
-     * tracking can never break a successful compression (design D4 / R3).
+     * already been rewritten; any failure here is logged and swallowed so lineage tracking can never
+     * break a successful compression (design D4 / R3).
      */
     private void recordLineage(String sessionId) {
         try {
@@ -201,10 +212,6 @@ public final class CompressionService {
         } catch (Exception e) {
             log.warn("Compression lineage record skipped for session {}: {}", sessionId, e.getMessage());
         }
-    }
-
-    private String summarize(List<Msg> older) {
-        return summarizer.summarize(older);
     }
 
     private Memory currentMemory() {
@@ -241,7 +248,7 @@ public final class CompressionService {
             // "what did that command/file return" context the prompt asks it to keep.
             String conversation = MsgContentRenderer.renderConversation(older, MAX_SUMMARY_CHARS_PER_BLOCK);
             Msg reply = summarizer.call(Msg.builder().name("user").role(MsgRole.USER)
-                    .content(TextBlock.builder().text(conversation).build()).build());
+                    .content(io.agentscope.core.message.TextBlock.builder().text(conversation).build()).build());
             return reply == null ? null : reply.getTextContent();
         }
     }

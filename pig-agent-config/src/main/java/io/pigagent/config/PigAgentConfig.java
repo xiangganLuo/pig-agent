@@ -128,16 +128,49 @@ public final class PigAgentConfig {
         public void setVerificationToken(String t) { this.verificationToken = t; }
     }
 
+    /**
+     * 上下文压缩配置。基础触发（enabled / max-context-tokens / threshold）之上，新增「上下文工程」
+     * 分层参数（context-engineering）：三层预算比例、递归摘要开关 + 限深、重要度/逐字/一致性开关、
+     * 最近保留条数。全部可选、缺省安全——缺省值复现引入本能力前的「摘要旧回合 + 保留最近」行为。
+     */
     public static final class CompressionConfig {
         @JsonProperty("enabled") private boolean enabled = true;
         @JsonProperty("max-context-tokens") private int maxContextTokens = 32000;
         @JsonProperty("threshold") private double threshold = 0.8;
+        @JsonProperty("keep-recent") private int keepRecent = 6;
+        @JsonProperty("recursive-summary") private boolean recursiveSummary = true;
+        @JsonProperty("max-summary-depth") private int maxSummaryDepth = 3;
+        @JsonProperty("importance-retention") private boolean importanceRetention = true;
+        @JsonProperty("verbatim-protection") private boolean verbatimProtection = true;
+        @JsonProperty("consistency-check") private boolean consistencyCheck = true;
+        @JsonProperty("pinned-ratio") private double pinnedRatio = 0.2;
+        @JsonProperty("recent-ratio") private double recentRatio = 0.3;
+        @JsonProperty("summarized-ratio") private double summarizedRatio = 0.5;
+
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
         public int getMaxContextTokens() { return maxContextTokens; }
         public void setMaxContextTokens(int t) { this.maxContextTokens = t; }
         public double getThreshold() { return threshold; }
         public void setThreshold(double t) { this.threshold = t; }
+        public int getKeepRecent() { return keepRecent; }
+        public void setKeepRecent(int k) { this.keepRecent = k; }
+        public boolean isRecursiveSummary() { return recursiveSummary; }
+        public void setRecursiveSummary(boolean r) { this.recursiveSummary = r; }
+        public int getMaxSummaryDepth() { return maxSummaryDepth; }
+        public void setMaxSummaryDepth(int d) { this.maxSummaryDepth = d; }
+        public boolean isImportanceRetention() { return importanceRetention; }
+        public void setImportanceRetention(boolean i) { this.importanceRetention = i; }
+        public boolean isVerbatimProtection() { return verbatimProtection; }
+        public void setVerbatimProtection(boolean v) { this.verbatimProtection = v; }
+        public boolean isConsistencyCheck() { return consistencyCheck; }
+        public void setConsistencyCheck(boolean c) { this.consistencyCheck = c; }
+        public double getPinnedRatio() { return pinnedRatio; }
+        public void setPinnedRatio(double r) { this.pinnedRatio = r; }
+        public double getRecentRatio() { return recentRatio; }
+        public void setRecentRatio(double r) { this.recentRatio = r; }
+        public double getSummarizedRatio() { return summarizedRatio; }
+        public void setSummarizedRatio(double r) { this.summarizedRatio = r; }
     }
 
     /**
