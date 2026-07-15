@@ -14,11 +14,15 @@ The README (in Chinese) is a detailed reference for the original architecture; t
 
 ```bash
 mvn compile                       # compile all modules
-mvn test                          # run all tests
+mvn test                          # run all tests (offline; jacoco instruments but does NOT gate here)
+mvn verify                        # tests + jacoco per-module coverage-floor gate (ratchet); *IT stay skipped
+mvn verify -Pit                   # also run the real-model *IT (needs a configured models.json)
 mvn install                       # build + install to local repo
 mvn exec:java -pl pig-agent-cli   # run the CLI REPL (main: io.pigagent.cli.PigAgentCli)
 mvn -pl pig-agent-cli -am compile # compile the CLI and everything it depends on
 ```
+
+> **CI quality gate (`ci-quality-gate`):** `mvn verify` enforces a **per-module jacoco line-coverage floor** (a ratchet set at "current − 2%", so coverage can't regress; stock jacoco has no cross-module aggregate `check`). `maven-failsafe-plugin` runs the `*IT` real-model tests only under `-Pit` (or `-DskipITs=false`); a credential-less `mvn verify` skips them and stays green.
 
 Run a single module's tests, or a single test class/method:
 
@@ -37,7 +41,7 @@ The provider module is organized by **protocol standard**, not vendor: 5 `ModelP
 
 ## Module Layout
 
-Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 13 modules. Each is one bounded responsibility; `pig-agent-cli` is the only entry point and depends on the rest.
+Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 14 modules. Each is one bounded responsibility; `pig-agent-cli` is the primary entry point and depends on the rest.
 
 | Module | Responsibility | Key types |
 |--------|---------------|-----------|
@@ -50,14 +54,15 @@ Maven multi-module project (`io.pigagent`, version `0.1.0-SNAPSHOT`), 13 modules
 | `pig-agent-mcp` | Dynamic MCP server management (stdio/SSE/streamable-http) + JSON store | `McpManager`, `McpServerSpec`, `McpStore`, `JsonMcpStore` |
 | `pig-agent-workspace` | `~/.pig-agent/workspace/` layout | `WorkspaceManager` |
 | `pig-agent-config` | YAML config + change listeners | `PigAgentConfig`, `ConfigurationManager`, `ConfigurationChangedEvent` |
-| `pig-agent-channel` | Channel abstraction + agent bridge | `Channel`, `ChannelAgentBridge`, `ChatChannel`, `TelegramChannel`, `DiscordChannel`, `ChannelRegistry` |
+| `pig-agent-channel` | Channel abstraction + agent bridge + adapter factory | `Channel`, `ChannelFactory`, `ChannelAgentBridge`, `ChatChannel`, `TelegramChannel`, `DiscordChannel`, `WebhookChannel`, `StdinPipeChannel`, `SlackChannel`, `ChannelRegistry` |
 | `pig-agent-onboarding` | Interactive first-run model setup | `OnboardingWizard` |
 | `pig-agent-plugin` | Plugin SPI (`register(ctx)` entrypoint) + discovery sources, composing the tool/hook SPIs | `Plugin`, `PluginContext`, `PluginSource`, `ServiceLoaderPluginSource`, `DirectoryPluginSource`, `PluginRegistry` |
+| `pig-agent-web` | Embedded local Web console — a second `AgentKernel` adapter (HTTP + SSE over the kernel façade), started optionally via `web.enabled` | `WebConsole`, `WebLauncher`, `WebContext`, `WebJson`, `ChatHandler`, `EventStreamHandler`, `StaticHandler` |
 | `pig-agent-cli` | picocli + JLine3 + Jansi REPL (CC-style), wiring, graceful shutdown | `PigAgentCli`, `Ansi`, `repl/{AgentRepl, ReplContext, ReplCommands, StatusLine, ModelSelection}`, `repl/render/{MarkdownAnsiRenderer, StreamingMarkdownPrinter, ToolCallFormatter}`, `repl/select/{InlineSelector, SelectorModel}` |
 
 ## Architecture Essentials
 
-**Wiring happens in `AgentBootstrap.build(...)`** (`pig-agent-cli`) — workspace, config, providers, model store/manager, the agent + kernel, sessions, compression, tasks, the channel agent, and MCP are all constructed and connected there, returned as an `AgentBootstrap.Services` holder. Read it first to trace how a component plugs in. **The CLI REPL is the single frontend**, adding its own surface on top of `Services`: `PigAgentCli.main` (REPL + channel bridges). (An embedded Web console module previously existed as a second adapter; it was removed when the frontend converged on the CC-style REPL — it may return later as another `AgentKernel` adapter.)
+**Wiring happens in `AgentBootstrap.build(...)`** (`pig-agent-cli`) — workspace, config, providers, model store/manager, the agent + kernel, sessions, compression, tasks, the channel agent, and MCP are all constructed and connected there, returned as an `AgentBootstrap.Services` holder. Read it first to trace how a component plugs in. **The CLI REPL is the primary frontend**, adding its own surface on top of `Services`: `PigAgentCli.main` (REPL + channel bridges + optional Web console). The embedded Web console has **returned** as the `pig-agent-web` module — a second `AgentKernel` adapter (HTTP + SSE over the kernel façade), started in-process when `web.enabled` (default off), sharing the one kernel with the REPL. "Add a frontend = add an adapter" now has two live examples (REPL + web).
 
 **The agent is swappable at runtime.** AgentScope's `Model` is fixed at build time, so to switch models without restarting, the `PigAgent` is built via `AgentFactory.create(model)` and stored in a mutable `AgentHolder`. Everything (REPL, channels, session manager, compression) reads the current agent through the holder. `ModelManager.ensureModel(...)` rebuilds the agent on a model switch; the session layer reloads the conversation afterward.
 
