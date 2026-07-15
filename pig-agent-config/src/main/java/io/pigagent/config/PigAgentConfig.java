@@ -1,6 +1,5 @@
 package io.pigagent.config;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
@@ -8,8 +7,9 @@ import java.util.Map;
  * Root application config. Unknown/unrecognized fields are ignored rather than failing the whole
  * load and reverting to all-defaults — so config schema drift (a new-version field read by an old
  * build, or a stale field left in the file) never silently discards the user's recognized settings.
+ * Tolerance is enforced mapper-level in {@code ConfigurationManager} (covers every nesting level and
+ * logs each ignored field), not by a per-class annotation.
  */
-@JsonIgnoreProperties(ignoreUnknown = true)
 public final class PigAgentConfig {
 
     @JsonProperty("workspace") private String workspacePath;

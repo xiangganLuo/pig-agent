@@ -6,7 +6,6 @@ import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
-import io.pigagent.web.WebConsole;
 import io.pigagent.web.WebLauncher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,22 +48,34 @@ public final class PigAgentCli {
         // Optional embedded Web console — another AgentKernel adapter in the same process, sharing
         // the one kernel with the REPL. Default disabled (web.enabled=false); loopback-only.
         PigAgentConfig.WebConfig webCfg = s.config.getWeb();
-        Optional<WebConsole> webConsole = WebLauncher.startIfEnabled(
+        // Opaque Runnable stop-handle (not the WebConsole type) so this class's shutdown path never
+        // references a pig-agent-web class — see WebLauncher#startIfEnabled.
+        Optional<Runnable> webStop = WebLauncher.startIfEnabled(
                 s.agentKernel, webCfg.isEnabled(), webCfg.getHost(), webCfg.getPort());
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("CLI shutting down...");
-            webConsole.ifPresent(WebConsole::stop);
+            // Each step guarded so one failure never aborts the rest of cleanup.
+            runQuietly(() -> webStop.ifPresent(Runnable::run));
             for (ChannelAgentBridge bridge : bridges) {
-                bridge.stop();
+                runQuietly(bridge::stop);
             }
-            s.shutdownCommon();
+            runQuietly(s::shutdownCommon);
         }));
 
         new AgentRepl(s.agentHolder, s.agentKernel, s.workspace.getReportsDir(),
                 s.configManager, s.registry, s.modelManager, s.compressionService,
                 s.mcpManager, bridges, s.sessionManager, s.workspace.getRootPath(), s.readerRef,
                 s.availabilityReport).run();
+    }
+
+    /** Run a shutdown step, swallowing+logging any error so one failure never aborts the rest. */
+    private static void runQuietly(Runnable step) {
+        try {
+            step.run();
+        } catch (Throwable t) {
+            log.warn("Shutdown step failed: {}", t.toString());
+        }
     }
 
     private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder, AgentKernel agentKernel,

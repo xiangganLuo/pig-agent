@@ -24,12 +24,15 @@ public final class WebLauncher {
     }
 
     /**
-     * Start the console when {@code enabled}. Returns the running {@link WebConsole} so the caller
-     * can {@link WebConsole#stop()} it on shutdown, or empty when disabled. On a bind failure the
-     * error is logged and empty is returned — a Web bind problem MUST NOT crash the CLI.
+     * Start the console when {@code enabled}. Returns a stop-action ({@code console::stop}) as an
+     * opaque {@link Runnable} — deliberately NOT the {@link WebConsole} type — so the caller (the CLI)
+     * can wire it into its shutdown hook without its bytecode referencing any {@code pig-agent-web}
+     * class in the exit path (avoids a {@link NoClassDefFoundError} on the web console class when the
+     * web jar is absent from the runtime classpath). Empty when disabled. On a bind failure the error
+     * is logged and empty is returned — a Web bind problem MUST NOT crash the CLI.
      */
-    public static Optional<WebConsole> startIfEnabled(AgentKernel kernel, boolean enabled,
-                                                      String host, int port) {
+    public static Optional<Runnable> startIfEnabled(AgentKernel kernel, boolean enabled,
+                                                    String host, int port) {
         Objects.requireNonNull(kernel, "kernel");
         if (!enabled) {
             return Optional.empty();
@@ -42,6 +45,6 @@ public final class WebLauncher {
             return Optional.empty();
         }
         log.info("Web console: http://{}:{}  (loopback-only, single-user)", host, console.boundPort());
-        return Optional.of(console);
+        return Optional.of(console::stop);
     }
 }
