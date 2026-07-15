@@ -54,6 +54,13 @@ import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.contract.ToolContractGuard;
+import io.pigagent.tool.deferred.DeferralPlan;
+import io.pigagent.tool.deferred.DeferredToolGate;
+import io.pigagent.tool.deferred.DeferredToolPlanner;
+import io.pigagent.tool.deferred.DeferredToolRegistry;
+import io.pigagent.tool.deferred.DeferredToolReveal;
+import io.pigagent.tool.deferred.ToolInfo;
+import io.pigagent.tool.deferred.ToolSearchTool;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.mcp.McpConfirmer;
@@ -281,15 +288,43 @@ public final class AgentBootstrap {
         toolkit.registration().tool(new McpTool(mcpManager,
                 () -> configManager.getConfig().getMcp().getAgentManagement(), confirmer)).apply();
 
+        // Deferred tools (deferred-tools): keep large/rarely-used tool schemas OUT of the model's
+        // initial tool list; the model discovers + reveals them on demand via `tool_search`. Enabled
+        // by config (default off → nothing here happens; full backward compat). The registry is
+        // shared: tool_search is built now (so the guard below wraps it and it never re-registers
+        // MCP tools) with the SAME empty registry the gate populates after MCP attaches; the reveal
+        // seam flips group active-state on this shared toolkit. MCP tools are grouped at attach time
+        // (namer below) so deferral is MCP-safe (never re-registers MCP tools → mcpClientName kept).
+        PigAgentConfig.DeferredToolsConfig deferredCfg = config.getTools().getDeferred();
+        boolean deferredEnabled = deferredCfg.isEnabled();
+        DeferredToolRegistry deferredRegistry = new DeferredToolRegistry();
+        if (deferredEnabled) {
+            DeferredToolReveal reveal = DeferredToolGate.reveal(toolkit, deferredRegistry);
+            toolkit.registration().tool(new ToolSearchTool(deferredRegistry, reveal)).apply();
+            mcpManager.setToolGroupNamer(name -> "mcp:" + name);
+        }
+
         // Dispatch-layer contract guard (tool-json-contract): wrap every built-in tool so any
         // exception a tool lets escape becomes a canonical {"error":...} result instead of aborting
-        // the turn. Installed after the built-in tools + McpTool but BEFORE MCP servers attach, so
-        // it never re-registers (and thus never breaks the identity/mcpClientName of) live MCP-server
-        // tools, which AgentScope manages separately. Per-agent toolkits built via Toolkit.copy()
-        // inherit the guarded built-in tools.
+        // the turn. Installed after the built-in tools + McpTool (+ tool_search) but BEFORE MCP
+        // servers attach, so it never re-registers (and thus never breaks the identity/mcpClientName
+        // of) live MCP-server tools, which AgentScope manages separately. Per-agent toolkits built
+        // via Toolkit.copy() inherit the guarded built-in tools.
         ToolContractGuard.install(toolkit);
 
         mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
+
+        // Now that all tools (built-in + plugin + MCP) are registered, decide + apply deferral:
+        // build the inventory from the live schemas (all active here), tag MCP tools with their
+        // attach-time group, plan (explicit list ∪ threshold rule), then hide the deferred ones.
+        if (deferredEnabled) {
+            List<ToolInfo> inventory = buildToolInventory(toolkit, mcpManager);
+            DeferralPlan plan = DeferredToolPlanner.plan(true, deferredCfg.getTools(),
+                    deferredCfg.isAutoDeferMcp(), deferredCfg.getThreshold(), inventory);
+            DeferredToolGate.applyTo(toolkit, plan, inventory, deferredRegistry);
+            log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
+                    deferredRegistry.deferredNames().size());
+        }
 
         // Fixed tool guidance (TOOL_GUIDANCE) appended to the (user-editable) AGENT.md + INFO.md. See
         // the constant's javadoc: it carries the always-on constraints (native-path file tools over
@@ -508,6 +543,31 @@ public final class AgentBootstrap {
                 detector,
                 () -> configManager.getConfig().getLoopDetection().isEnabled(),
                 Set.of(LoopDetectionHook.SENTINEL_TOOL_NAME, PermissionDeniedTool.TOOL_NAME));
+    }
+
+    /**
+     * Build the tool inventory for the deferral planner/gate from the live toolkit: one
+     * {@link ToolInfo} per registered tool (name + description from its schema), tagging MCP tools
+     * with the attach-time group ({@code "mcp:<server>"}) they live in — that tag both marks them as
+     * MCP and names the group the gate deactivates to defer them. Reads only in-memory group state
+     * (no MCP network calls).
+     */
+    static List<ToolInfo> buildToolInventory(Toolkit toolkit, McpManager mcpManager) {
+        java.util.Map<String, String> mcpToolGroup = new java.util.HashMap<>();
+        for (String group : mcpManager.managedToolGroups()) {
+            io.agentscope.core.tool.ToolGroup tg = toolkit.getToolGroup(group);
+            if (tg != null) {
+                for (String toolName : tg.getTools()) {
+                    mcpToolGroup.put(toolName, group);
+                }
+            }
+        }
+        List<ToolInfo> inventory = new ArrayList<>();
+        for (io.agentscope.core.model.ToolSchema schema : toolkit.getToolSchemas()) {
+            inventory.add(ToolInfo.of(schema.getName(), schema.getDescription(),
+                    mcpToolGroup.get(schema.getName())));
+        }
+        return inventory;
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own
