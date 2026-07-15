@@ -61,4 +61,32 @@ class SandboxPolicyTest {
         assertThatThrownBy(() -> p.extraDenyPatterns().add("baz"))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
+
+    @Test
+    void defaultsHaveEmptyWarnPatterns() {
+        assertThat(SandboxPolicy.defaults().extraWarnPatterns()).isEmpty();
+    }
+
+    @Test
+    void legacyFiveArgConstructorHasEmptyWarnPatterns() {
+        // Backward-compatible 5-arg constructor (no warnlist) still compiles + defaults warn to empty.
+        SandboxPolicy p = new SandboxPolicy(1000, 5, List.of("d"), true, null);
+        assertThat(p.extraDenyPatterns()).containsExactly("d");
+        assertThat(p.extraWarnPatterns()).isEmpty();
+    }
+
+    @Test
+    void withExtraWarnPatternsIsImmutableAndPreservesOthers() {
+        List<String> mutable = new ArrayList<>();
+        mutable.add("w");
+        SandboxPolicy p = SandboxPolicy.defaults().withExtraDenyPatterns(List.of("d"))
+                .withExtraWarnPatterns(mutable);
+
+        // defensive copy + preserves the deny list threaded through
+        mutable.add("w2");
+        assertThat(p.extraWarnPatterns()).containsExactly("w");
+        assertThat(p.extraDenyPatterns()).containsExactly("d");
+        assertThatThrownBy(() -> p.extraWarnPatterns().add("x"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
 }

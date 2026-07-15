@@ -25,4 +25,26 @@ class ShellToolsTest {
         List<String> inv = ShellTools.buildInvocation(false, "echo hi");
         assertThat(inv).containsExactly("bash", "-c", "echo hi");
     }
+
+    // --- warn note: purely additive, appended to an already-executed result (offline, no spawn) ---
+
+    @Test
+    void appendWarnNote_addsWarningAfterBaseOutput() {
+        String result = ShellTools.appendWarnNote("build ok", "package install (pip)");
+        assertThat(result).startsWith("build ok");
+        assertThat(result).contains(ShellTools.WARN_PREFIX + "package install (pip)");
+        assertThat(result).contains("⚠"); // the warning-sign glyph is present
+    }
+
+    @Test
+    void appendWarnNote_emptyBaseYieldsNoteOnly() {
+        String result = ShellTools.appendWarnNote("", "PATH reassignment");
+        assertThat(result).isEqualTo(ShellTools.WARN_PREFIX + "PATH reassignment");
+    }
+
+    @Test
+    void appendWarnNote_nullBaseYieldsNoteOnly() {
+        String result = ShellTools.appendWarnNote(null, "privilege escalation (sudo/su)");
+        assertThat(result).isEqualTo(ShellTools.WARN_PREFIX + "privilege escalation (sudo/su)");
+    }
 }

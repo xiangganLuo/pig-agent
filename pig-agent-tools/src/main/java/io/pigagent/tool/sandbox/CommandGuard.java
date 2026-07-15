@@ -22,20 +22,26 @@ import org.slf4j.LoggerFactory;
  * {@link ProcessBuilder} adapter:
  *
  * <ul>
- *   <li>{@link #checkDenied(String)} — refuse a catastrophic command before it is ever spawned.</li>
+ *   <li>{@link #classify(String)} — the three-tier verdict (block &gt; warn &gt; pass) for a command.</li>
+ *   <li>{@link #checkDenied(String)} — a block-only view of {@link #classify(String)} (the pre-existing
+ *       block/pass contract; a warn-matching command reads as "not denied" here).</li>
  *   <li>{@link #capOutput(InputStream)} — bounded output read (OOM/pipe-deadlock safe).</li>
  *   <li>{@link #buildEnv(Map)} — strip credential-bearing environment variables.</li>
  *   <li>{@link #applyTo(ProcessBuilder)} — set working dir + scrub env on a builder (assertable
  *       without spawning a process).</li>
  * </ul>
  *
- * <p><strong>Two-pass, most-severe-wins classification.</strong> A flat whole-string denylist has
- * bypass holes (e.g. {@code echo ok && rm -rf /}). {@link #checkDenied(String)} therefore (1) runs
- * cheap <em>input validation</em> (reject empty / oversized / null-byte commands), (2) scans the
- * <em>whole</em> normalized command for <em>structural</em> patterns that span operators (fork bombs,
- * {@code while true … & done} loops, download-pipe-to-shell), and (3) splits the command on shell
- * operators ({@code ; && || | &}, quote-aware) and matches each sub-command independently against the
- * single-command rules. Any match blocks (block outranks allow).
+ * <p><strong>Two-pass, three-tier, most-severe-wins classification.</strong> A flat whole-string
+ * denylist has bypass holes (e.g. {@code echo ok && rm -rf /}). {@link #classify(String)} therefore
+ * (1) runs cheap <em>input validation</em> (reject empty / oversized / null-byte commands → block),
+ * (2) scans the <em>whole</em> normalized command for <em>structural</em> block patterns that span
+ * operators (fork bombs, {@code while true … & done} loops, download-pipe-to-shell), and (3) splits the
+ * command on shell operators ({@code ; && || | &}, quote-aware) and matches each sub-command against the
+ * single-command rules. The same two passes carry three tiers: <em>block</em> (catastrophic floor —
+ * refuse) outranks <em>warn</em> (medium-risk but legitimate — run, then append a ⚠️ note) outranks
+ * <em>pass</em> (clean — run silently). Block is scanned first and short-circuits, so a command matching
+ * both a block and a warn pattern is blocked. Warn is purely additive — it never changes the block/pass
+ * contract, and {@link #checkDenied(String)} keeps reporting block only.
  *
  * <p><strong>Security posture (deliberately best-effort, not a boundary):</strong> the built-in
  * denylist is a <em>conservative floor</em> that blocks obviously catastrophic commands. It is a
@@ -43,7 +49,9 @@ import org.slf4j.LoggerFactory;
  * determined adversary (base64/alias/variable tricks defeat any regex denylist — OS-level isolation is
  * a later phase). It matches conservatively so it never blocks normal dev commands
  * (mvn/git/npm/ls/`rm -rf target`/…). The floor is compiled in and <em>cannot be weakened</em> by
- * config; user {@code exec.denylist} regexes only add to it.
+ * config; user {@code exec.denylist} regexes only add to it. A parallel built-in <em>warn</em> set flags
+ * medium-risk-but-legitimate commands (pip/apt install, sudo/su, non-root chmod 777, {@code PATH=}
+ * reassignment, {@code npm install -g}) — same best-effort caveat; {@code exec.warnlist} only adds to it.
  */
 public final class CommandGuard {
 
@@ -57,14 +65,15 @@ public final class CommandGuard {
     /** Reject commands longer than this (cheap input validation before regex work). */
     private static final int MAX_COMMAND_LENGTH = 10_000;
 
-    private record DenyRule(Pattern pattern, String reason) {
+    /** A compiled classification rule (pattern + category reason), shared by the block and warn tiers. */
+    private record Rule(Pattern pattern, String reason) {
     }
 
     /**
      * Structural rules matched against the <em>whole</em> normalized command — these deliberately span
      * shell operators, so they MUST NOT be split into sub-commands.
      */
-    private static final List<DenyRule> STRUCTURAL = List.of(
+    private static final List<Rule> STRUCTURAL = List.of(
             // Pipe a download straight into a shell (curl … | sh, wget … | bash).
             rule("\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?(?:sh|bash|zsh|dash|ksh|fish)\\b",
                     "pipe-to-shell install"),
@@ -86,7 +95,7 @@ public final class CommandGuard {
      * command-name AND a recursive/dangerous flag AND a root/home target <em>together</em>, so a
      * normal recursive delete of a project dir never matches.
      */
-    private static final List<DenyRule> PER_COMMAND = List.of(
+    private static final List<Rule> PER_COMMAND = List.of(
             // Recursive delete of root / home (Unix rm): rm + recursive flag + root/home target.
             rule("^(?=.*\\brm\\b)(?=.*\\s-{1,2}\\S*r\\S*)"
                             + "(?=.*\\s(?:/|~|\\$home)(?:[\\s*;/&|]|$)).*$",
@@ -109,64 +118,143 @@ public final class CommandGuard {
                             + "(?=.*\\s(?:/|~|\\$home)(?:[\\s*;&|]|$)).*$",
                     "world-writable chmod on root/home"));
 
-    private static DenyRule rule(String regex, String reason) {
-        return new DenyRule(Pattern.compile(regex, FLAGS), reason);
+    /**
+     * Medium-risk (warn) rules matched against <em>each</em> sub-command (like {@link #PER_COMMAND}).
+     * These commands are legitimate but risky enough to surface: a match runs the command normally but
+     * appends a ⚠️ note to the tool result (see {@link #classify(String)}). They are anchored to the
+     * sub-command start (optionally after {@code sudo}/{@code python -m }) so they do not fire on the same
+     * tokens quoted inside an argument, and stay conservative so normal dev commands never warn. The
+     * root/home {@code chmod 777} case is a <em>block</em> and wins by most-severe ordering, so the warn
+     * chmod rule only fires on non-root paths. More specific rules (pip/apt/npm) precede the generic
+     * {@code sudo/su} rule so a {@code sudo apt install} reports the more informative category.
+     */
+    private static final List<Rule> WARN = List.of(
+            // Package installs (pip / apt) — legitimate, but mutate the machine.
+            rule("^(?:sudo\\s+)?(?:python[0-9.]*\\s+-m\\s+)?pip[0-9.]*\\s+install\\b",
+                    "package install (pip)"),
+            rule("^(?:sudo\\s+)?apt(?:-get)?\\s+install\\b", "package install (apt)"),
+            // Global npm install (mutates the global prefix / installs a binary onto PATH).
+            rule("^(?:sudo\\s+)?npm\\s+(?:install|i)\\b[^\\n]*(?:\\s-g\\b|--global\\b)",
+                    "global npm install"),
+            // Privilege escalation.
+            rule("^(?:sudo|su)\\b", "privilege escalation (sudo/su)"),
+            // World-writable chmod 777 on a non-root path (root/home 777 is a block and wins).
+            rule("^(?=.*\\bchmod\\b)(?=.*\\b0*777\\b).*$", "permissive chmod 777"),
+            // PATH reassignment (shadows system binaries / injects a lookup dir).
+            rule("(?:^(?:export\\s+|set\\s+)?PATH\\s*=|\\$env:PATH\\s*=)", "PATH reassignment"));
+
+    private static Rule rule(String regex, String reason) {
+        return new Rule(Pattern.compile(regex, FLAGS), reason);
     }
 
     private final SandboxPolicy policy;
-    private final List<DenyRule> extraRules;
+    private final List<Rule> extraDenyRules;
+    private final List<Rule> extraWarnRules;
 
     public CommandGuard(SandboxPolicy policy) {
         this.policy = policy == null ? SandboxPolicy.defaults() : policy;
-        List<DenyRule> compiled = new ArrayList<>();
-        for (String extra : this.policy.extraDenyPatterns()) {
+        this.extraDenyRules = compileExtra(this.policy.extraDenyPatterns(),
+                "matched configured denylist pattern", "denylist");
+        this.extraWarnRules = compileExtra(this.policy.extraWarnPatterns(),
+                "matched configured warnlist pattern", "warnlist");
+    }
+
+    /**
+     * Compile user-supplied regexes into rules, appended on top of the built-in tier. Fault-tolerant: a
+     * bad pattern is skipped (never weakens the built-in floor/set, never crashes the guard); the pattern
+     * text is not logged verbatim to keep logs clean.
+     */
+    private static List<Rule> compileExtra(List<String> patterns, String reason, String kind) {
+        List<Rule> compiled = new ArrayList<>();
+        for (String extra : patterns) {
             if (extra == null || extra.isBlank()) {
                 continue;
             }
             try {
-                compiled.add(new DenyRule(Pattern.compile(extra, FLAGS),
-                        "matched configured denylist pattern"));
+                compiled.add(new Rule(Pattern.compile(extra, FLAGS), reason));
             } catch (PatternSyntaxException e) {
-                // Fault-tolerant: a bad user pattern is skipped (never weakens the built-in floor,
-                // never crashes the guard). The pattern text is not logged verbatim to keep logs clean.
-                log.warn("Skipping invalid sandbox denylist pattern: {}", e.getDescription());
+                log.warn("Skipping invalid sandbox {} pattern: {}", kind, e.getDescription());
             }
         }
-        this.extraRules = List.copyOf(compiled);
+        return List.copyOf(compiled);
     }
 
     /**
-     * Two-pass classification. Returns a category reason if {@code command} is rejected (input
-     * validation), matches a structural pattern (whole command), or matches a single-command rule in
-     * any sub-command; empty otherwise. The reason names the category only — it never echoes the
-     * command.
+     * Three-tier, most-severe-wins classification. Returns {@code BLOCK} (with a category reason) when
+     * {@code command} fails input validation or matches a block pattern; else {@code WARN} (with a
+     * category reason) when it matches a warn pattern; else {@code PASS}. Both tiers reuse the same
+     * two-pass structure (whole-command structural scan + quote-aware sub-command split). Block is
+     * evaluated first and short-circuits, so a command matching both a block and a warn pattern is
+     * {@code BLOCK}. The reason names the category only — it never echoes the command.
      */
-    public Optional<String> checkDenied(String command) {
+    public CommandClassification classify(String command) {
         Optional<String> invalid = validateInput(command);
         if (invalid.isPresent()) {
-            return invalid;
+            return CommandClassification.block(invalid.get());
         }
         String normalized = WHITESPACE.matcher(command).replaceAll(" ").trim();
+        List<String> subs = splitSubCommands(normalized); // split once, reused by both tiers
 
-        // Pass 1: structural patterns + configured extras over the whole command.
-        for (DenyRule r : STRUCTURAL) {
+        Optional<String> blocked = scanBlock(normalized, subs);
+        if (blocked.isPresent()) {
+            return CommandClassification.block(blocked.get());
+        }
+        Optional<String> warned = scanWarn(subs);
+        if (warned.isPresent()) {
+            return CommandClassification.warn(warned.get());
+        }
+        return CommandClassification.PASS;
+    }
+
+    /**
+     * The pre-existing block/pass contract, unchanged: a category reason iff {@code command} is
+     * {@code BLOCK}, empty otherwise. A warn-matching command reads as "not denied" here (its warning is
+     * surfaced additively by the caller via {@link #classify(String)}).
+     */
+    public Optional<String> checkDenied(String command) {
+        CommandClassification verdict = classify(command);
+        return verdict.isBlocked() ? Optional.of(verdict.reason()) : Optional.empty();
+    }
+
+    /** Block tier: Pass 1 structural + configured deny over the whole command; Pass 2 per sub-command. */
+    private Optional<String> scanBlock(String normalized, List<String> subs) {
+        for (Rule r : STRUCTURAL) {
             if (r.pattern().matcher(normalized).find()) {
                 return Optional.of(r.reason());
             }
         }
-        for (DenyRule r : extraRules) {
+        for (Rule r : extraDenyRules) {
             if (r.pattern().matcher(normalized).find()) {
                 return Optional.of(r.reason());
             }
         }
-
-        // Pass 2: single-command rules against each operator-split sub-command.
-        for (String sub : splitSubCommands(normalized)) {
+        for (String sub : subs) {
             String piece = sub.trim();
             if (piece.isEmpty()) {
                 continue;
             }
-            for (DenyRule r : PER_COMMAND) {
+            for (Rule r : PER_COMMAND) {
+                if (r.pattern().matcher(piece).find()) {
+                    return Optional.of(r.reason());
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Warn tier: built-in + configured warn rules against each operator-split sub-command. */
+    private Optional<String> scanWarn(List<String> subs) {
+        for (String sub : subs) {
+            String piece = sub.trim();
+            if (piece.isEmpty()) {
+                continue;
+            }
+            for (Rule r : WARN) {
+                if (r.pattern().matcher(piece).find()) {
+                    return Optional.of(r.reason());
+                }
+            }
+            for (Rule r : extraWarnRules) {
                 if (r.pattern().matcher(piece).find()) {
                     return Optional.of(r.reason());
                 }
