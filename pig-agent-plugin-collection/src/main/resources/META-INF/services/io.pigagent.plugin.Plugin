@@ -1,0 +1,8 @@
+# Built-in plugin collection (pig-agent-plugin-collection). Each line is a Plugin SPI implementation
+# discovered by ServiceLoaderPluginSource. Keep in sync with PluginCatalog.all() (a test enforces it).
+io.pigagent.plugin.collection.TimePlugin
+io.pigagent.plugin.collection.UuidPlugin
+io.pigagent.plugin.collection.Base64Plugin
+io.pigagent.plugin.collection.HashPlugin
+io.pigagent.plugin.collection.JsonPlugin
+io.pigagent.plugin.collection.RandomPlugin
