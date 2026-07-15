@@ -73,6 +73,12 @@
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-plugin-builtin</artifactId>
         </dependency>
+        <!-- Built-in skills: on the runtime classpath so ClasspathSkillSource (ServiceLoader<SkillProvider>)
+             discovers the curated SKILL.md resources shipped with the product. -->
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-skills-builtin</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-web</artifactId>
