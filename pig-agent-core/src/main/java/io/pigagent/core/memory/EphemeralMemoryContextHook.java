@@ -49,7 +49,14 @@ public final class EphemeralMemoryContextHook implements Hook {
     private final LongTermMemory longTermMemory;
 
     public EphemeralMemoryContextHook(LongTermMemory longTermMemory) {
-        this.longTermMemory = Objects.requireNonNull(longTermMemory, "longTermMemory");
+        Objects.requireNonNull(longTermMemory, "longTermMemory");
+        // Decorator: cache retrieve() within a turn. injectMemory runs on EVERY PreReasoningEvent
+        // (every reasoning step), but the query (last user message) is unchanged across a turn, so
+        // the retrieved memory is identical — this collapses the N per-turn disk reads to one.
+        // Wrapping here keeps this hook's retrieve/record logic untouched (no ad-hoc caching fields).
+        this.longTermMemory = longTermMemory instanceof CachingLongTermMemory
+                ? longTermMemory
+                : new CachingLongTermMemory(longTermMemory);
     }
 
     @Override

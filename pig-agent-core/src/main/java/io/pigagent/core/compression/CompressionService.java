@@ -38,7 +38,11 @@ public final class CompressionService {
     private static final int KEEP_RECENT = 6;
     /** Minimum new messages since the last compression before compressing again (anti-thrash). */
     private static final int MIN_GROWTH = 4;
-    private static final int CHARS_PER_TOKEN = 4;
+    /** Per-block truncation cap for summarizer input, so one giant tool result can't blow it up. */
+    private static final int MAX_SUMMARY_CHARS_PER_BLOCK = 4000;
+
+    /** Strategy for token estimation (shares {@link MsgContentRenderer} with the summarizer). */
+    private static final TokenEstimator TOKEN_ESTIMATOR = new CharBudgetTokenEstimator();
 
     /** Summarizes a batch of older messages into a single string (null/blank aborts compression). */
     @FunctionalInterface
@@ -113,7 +117,7 @@ public final class CompressionService {
         if (messages == null || messages.size() <= KEEP_RECENT) {
             return;
         }
-        if (estimateTokens(messages) < threshold * budgetTokens) {
+        if (TOKEN_ESTIMATOR.estimate(messages) < threshold * budgetTokens) {
             return;
         }
         int sinceLast = messages.size() - lastCompressedSize.getOrDefault(sessionId, 0);
@@ -144,7 +148,7 @@ public final class CompressionService {
         }
         return new CompressionStatus(
                 isEnabled(sessionId),
-                estimateTokens(messages),
+                TOKEN_ESTIMATOR.estimate(messages),
                 budgetTokens,
                 (int) (threshold * budgetTokens),
                 messages.size(),
@@ -207,17 +211,6 @@ public final class CompressionService {
         return memorySupplier.get();
     }
 
-    private int estimateTokens(List<Msg> messages) {
-        long chars = 0;
-        for (Msg m : messages) {
-            String text = m.getTextContent();
-            if (text != null) {
-                chars += text.length();
-            }
-        }
-        return (int) (chars / CHARS_PER_TOKEN);
-    }
-
     /** Default summarizer: spins up a throwaway agent on the live model to write the summary. */
     private static final class ModelSummarizer implements Summarizer {
 
@@ -243,16 +236,12 @@ public final class CompressionService {
                     .sysPrompt(SUMMARY_PROMPT)
                     .model(model)
                     .build();
-            StringBuilder sb = new StringBuilder();
-            for (Msg m : older) {
-                String text = m.getTextContent();
-                if (text == null || text.isBlank()) {
-                    continue;
-                }
-                sb.append(m.getRole()).append(": ").append(text).append("\n");
-            }
+            // Render the full content of each older message — text AND tool-call input + tool
+            // results (compactly, truncated per block) — so the summary can actually preserve the
+            // "what did that command/file return" context the prompt asks it to keep.
+            String conversation = MsgContentRenderer.renderConversation(older, MAX_SUMMARY_CHARS_PER_BLOCK);
             Msg reply = summarizer.call(Msg.builder().name("user").role(MsgRole.USER)
-                    .content(TextBlock.builder().text(sb.toString()).build()).build());
+                    .content(TextBlock.builder().text(conversation).build()).build());
             return reply == null ? null : reply.getTextContent();
         }
     }
