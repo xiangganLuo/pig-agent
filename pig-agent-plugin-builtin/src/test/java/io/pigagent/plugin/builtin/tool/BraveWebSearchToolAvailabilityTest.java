@@ -1,4 +1,4 @@
-package io.pigagent.tool.websearch;
+package io.pigagent.plugin.builtin.tool;
 
 import io.pigagent.tool.availability.Availability;
 import org.junit.jupiter.api.Test;

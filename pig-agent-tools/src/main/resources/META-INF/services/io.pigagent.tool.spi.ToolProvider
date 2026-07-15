@@ -1,10 +1,8 @@
 # Builtin tools auto-discovered and registered by ToolRegistrar (change tool-autoregister).
 # Add a new builtin tool by adding its class + a ToolProvider + one line here — no wiring edit.
+# Core tools only (tools-core-slim); web search / web fetch / checklist moved to pig-agent-plugin-builtin.
 io.pigagent.tool.spi.providers.ShellToolsProvider
 io.pigagent.tool.spi.providers.FileSystemToolsProvider
-io.pigagent.tool.spi.providers.SmartWebFetchToolProvider
-io.pigagent.tool.spi.providers.BraveWebSearchToolProvider
-io.pigagent.tool.spi.providers.CheckListToolProvider
 io.pigagent.tool.spi.providers.PermissionDeniedToolProvider
 io.pigagent.tool.spi.providers.TaskToolProvider
 io.pigagent.tool.spi.providers.SkillsToolProvider

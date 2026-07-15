@@ -26,21 +26,22 @@ class ToolRegistrarTest {
     // --- SPI auto discovery (ServiceLoader path) ---
 
     @Test
-    void registerAll_discoversFullBuiltinToolSet(@TempDir Path tmp) {
+    void registerAll_discoversFullCoreToolSet(@TempDir Path tmp) {
         // Arrange
         Toolkit toolkit = new Toolkit();
 
         // Act
         ToolRegistrar.Result result = ToolRegistrar.registerAll(toolkit, context(tmp), List.of());
 
-        // Assert — every builtin tool name is present, none missing
+        // Assert — every CORE builtin tool name is present (tools-core-slim): web search / web fetch /
+        // checklist are no longer here — they moved to pig-agent-plugin-builtin as plugins.
         assertThat(toolkit.getToolNames()).contains(
                 "executeCommand",
                 "readFile", "writeFile", "listDirectory",
-                "fetchUrl", "webSearch",
                 "createTask", "listTasks", "updateTaskStatus",
                 "listSkills", "loadSkill",
                 "permissionDenied");
+        assertThat(toolkit.getToolNames()).doesNotContain("fetchUrl", "webSearch");
         assertThat(result.failures).isEmpty();
         assertThat(result.duplicatesSkipped).isEmpty();
     }

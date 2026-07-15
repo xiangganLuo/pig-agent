@@ -1,4 +1,4 @@
-package io.pigagent.tool.webfetch;
+package io.pigagent.plugin.builtin.tool;
 
 import java.net.InetAddress;
 import java.net.URI;

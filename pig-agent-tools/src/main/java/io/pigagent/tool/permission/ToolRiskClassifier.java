@@ -9,6 +9,8 @@ import java.util.Map;
  */
 public final class ToolRiskClassifier {
 
+    // 本表是「工具名 → 风险」的中央目录，与工具物理所在模块解耦（字符串键，无编译期反向依赖）：
+    // 即便工具住在别的模块（如 pig-agent-plugin-builtin 的 webSearch/fetchUrl 与计算工具），仍在此登记分级。
     private static final Map<String, ToolRisk> DEFAULTS = Map.ofEntries(
             // 只读
             Map.entry("readFile", ToolRisk.READ_ONLY),
@@ -18,7 +20,7 @@ public final class ToolRiskClassifier {
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
             Map.entry("loadSkill", ToolRisk.READ_ONLY),
-            // 内置插件集合（pig-agent-plugin-collection）——纯计算工具，无 shell/网络/写盘
+            // 内置计算插件（pig-agent-plugin-builtin）——纯计算工具，无 shell/网络/写盘
             Map.entry("currentDateTime", ToolRisk.READ_ONLY),
             Map.entry("convertTimezone", ToolRisk.READ_ONLY),
             Map.entry("epochToIso", ToolRisk.READ_ONLY),

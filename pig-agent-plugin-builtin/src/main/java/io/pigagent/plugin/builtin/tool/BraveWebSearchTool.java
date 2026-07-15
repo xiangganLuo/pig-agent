@@ -1,4 +1,4 @@
-package io.pigagent.tool.websearch;
+package io.pigagent.plugin.builtin.tool;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;

@@ -1,0 +1,11 @@
+# Built-in plugins (pig-agent-plugin-builtin). Each line is a Plugin SPI implementation discovered by
+# ServiceLoaderPluginSource. Keep in sync with PluginCatalog.all() (a test enforces it).
+io.pigagent.plugin.builtin.TimePlugin
+io.pigagent.plugin.builtin.UuidPlugin
+io.pigagent.plugin.builtin.Base64Plugin
+io.pigagent.plugin.builtin.HashPlugin
+io.pigagent.plugin.builtin.JsonPlugin
+io.pigagent.plugin.builtin.RandomPlugin
+io.pigagent.plugin.builtin.WebSearchPlugin
+io.pigagent.plugin.builtin.WebFetchPlugin
+io.pigagent.plugin.builtin.ChecklistPlugin

@@ -1,4 +1,4 @@
-package io.pigagent.tool.webfetch;
+package io.pigagent.plugin.builtin.tool;
 
 import org.junit.jupiter.api.Test;
 

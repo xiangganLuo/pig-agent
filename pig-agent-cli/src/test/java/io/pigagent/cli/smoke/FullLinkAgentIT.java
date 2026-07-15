@@ -30,7 +30,7 @@ import io.pigagent.session.SessionManager;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.Task;
 import io.pigagent.task.TaskManager;
-import io.pigagent.tool.checklist.CheckListTool;
+import io.pigagent.plugin.builtin.tool.CheckListTool;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
