@@ -1,0 +1,3 @@
+# Built-in skills (pig-agent-skills-builtin). Discovered by ClasspathSkillSource via ServiceLoader.
+# A single provider exposes every curated SKILL.md listed in SkillCatalog (a drift test guards them).
+io.pigagent.skills.builtin.BuiltinSkillProvider

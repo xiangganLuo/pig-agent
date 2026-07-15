@@ -55,6 +55,7 @@
         <module>pig-agent-mcp</module>
         <module>pig-agent-plugin</module>
         <module>pig-agent-plugin-builtin</module>
+        <module>pig-agent-skills-builtin</module>
         <module>pig-agent-web</module>
         <module>pig-agent-cli</module>
     </modules>
@@ -196,6 +197,11 @@
             <dependency>
                 <groupId>io.pigagent</groupId>
                 <artifactId>pig-agent-plugin-builtin</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.pigagent</groupId>
+                <artifactId>pig-agent-skills-builtin</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
