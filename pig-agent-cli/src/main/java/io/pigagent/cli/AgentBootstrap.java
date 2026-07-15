@@ -92,6 +92,30 @@ public final class AgentBootstrap {
     /** System property to disable SPI tool auto-registration and fall back to pure-manual wiring. */
     static final String TOOLS_AUTO_REGISTER_PROP = "pigagent.tools.auto-register";
 
+    /**
+     * Fixed tool guidance appended to the (user-editable) {@code AGENT.md} + {@code INFO.md} when the
+     * system prompt is assembled ({@code readAgentMd() + readInfoMd() + TOOL_GUIDANCE}). Unlike
+     * {@code AGENT.md} (which a user may rewrite), this block ships with the release and therefore
+     * carries the always-on operational constraints that must hold regardless of prompt edits:
+     * native-path file tools instead of the shell (writeFile is WRITE → allowed in {@code auto};
+     * shell is EXEC → still confirmed; native paths avoid WSL's /mnt/c on Windows), graceful
+     * degradation when a tool is confirmed/denied/unavailable, and never echoing credentials. It is a
+     * constant, so the assembled system prompt stays byte-stable per run (prefix-cache friendly).
+     */
+    static final String TOOL_GUIDANCE = """
+
+            ## Tooling & safety (always applies)
+            - File CRUD: ALWAYS use the writeFile / readFile / listDirectory tools with a native\
+             absolute path (Windows e.g. C:\\Users\\you\\file.txt, Unix e.g. /home/you/file.txt).\
+             NEVER use executeCommand (the shell) to create, read or edit files — use executeCommand\
+             only to run programs/commands.
+            - Some tools are mutating, run commands, access the network or administer MCP servers; they\
+             may require user confirmation or be denied by the active permission mode, and some tools\
+             (e.g. webSearch) may be unavailable. If a call is denied or a tool is missing, do NOT retry\
+             in a loop or bypass the safeguard — adapt or ask.
+            - Never print secrets, API keys or tokens in your output; credential files are off-limits.
+            """;
+
     private AgentBootstrap() {
     }
 
@@ -255,19 +279,10 @@ public final class AgentBootstrap {
 
         mcpManager.initialize(new JsonMcpStore(workspace.getMcpFile()), toolkit, config.getMcp());
 
-        // Fixed tool guidance appended to the (user-editable) AGENT.md + INFO.md — steers the agent to
-        // the native-path file tools instead of the shell (writeFile is WRITE → allowed in `auto`;
-        // shell is EXEC → still confirmed; and native paths avoid WSL's /mnt/c on Windows).
-        String toolGuidance = """
-
-                ## File operations (important)
-                - To create, read, or list files, ALWAYS use the writeFile / readFile / listDirectory\
-                 tools with a native absolute path (Windows e.g. C:\\Users\\you\\file.txt, Unix e.g.\
-                 /home/you/file.txt).
-                - Do NOT use executeCommand (the shell) to create or edit files. Use executeCommand\
-                 only to run programs/commands, never for file CRUD.
-                """;
-        String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd() + toolGuidance;
+        // Fixed tool guidance (TOOL_GUIDANCE) appended to the (user-editable) AGENT.md + INFO.md. See
+        // the constant's javadoc: it carries the always-on constraints (native-path file tools over
+        // the shell, graceful degradation on denied/unavailable tools, never echo credentials).
+        String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd() + TOOL_GUIDANCE;
 
         FileSystemLongTermMemory globalMemory = new FileSystemLongTermMemory(
                 workspace.getContextDir().resolve("memory.md"));
