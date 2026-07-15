@@ -13,6 +13,11 @@
     <name>Pig Agent - CLI</name>
     <description>Terminal REPL entry point</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.27</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.pigagent</groupId>
@@ -57,6 +62,14 @@
         <dependency>
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-mcp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-plugin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.jline</groupId>

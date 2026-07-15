@@ -83,6 +83,7 @@ public final class PigAgent {
         private Toolkit toolkit;
         private List<io.agentscope.core.hook.Hook> hooks;
         private LongTermMemory longTermMemory;
+        private int maxIters; // 0 = do not set (keep AgentScope's default)
 
         private Builder() {}
 
@@ -116,6 +117,16 @@ public final class PigAgent {
             return this;
         }
 
+        /**
+         * Bound the reasoning-tool loop of the underlying {@code ReActAgent}. Only applied when
+         * {@code > 0}; {@code <= 0} leaves AgentScope's own default in place. Guards autonomous and
+         * interactive agents alike against unbounded tool-call ping-pong.
+         */
+        public Builder maxIters(int maxIters) {
+            this.maxIters = maxIters;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -124,6 +135,10 @@ public final class PigAgent {
                     .sysPrompt(sysPrompt)
                     .model(model)
                     .memory(new InMemoryMemory());
+
+            if (maxIters > 0) {
+                reactBuilder.maxIters(maxIters);
+            }
 
             // Long-term memory is injected on the user side, ephemerally, via our own hook — NOT
             // through AgentScope's STATIC_CONTROL wiring, whose PreCallEvent injection is persisted

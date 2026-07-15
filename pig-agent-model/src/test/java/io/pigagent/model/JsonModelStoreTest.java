@@ -6,8 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class JsonModelStoreTest {
 
@@ -67,6 +70,19 @@ class JsonModelStoreTest {
         assertThat(reopened.findAll()).hasSize(1);
         assertThat(reopened.findById(m.id())).get().extracting(StoredModel::baseUrl).isEqualTo("https://x");
         assertThat(reopened.getDefaultId()).isEqualTo(m.id());
+    }
+
+    @Test
+    void savedCredentialFileWritesSuccessfully_andIsOwnerOnlyOnPosix() throws IOException {
+        Path f = file();
+        ModelStore store = new JsonModelStore(f);
+        store.save(StoredModel.create("openai", "sk-super-secret", null, "gpt-4o"));
+
+        assertThat(f).exists(); // write succeeds on every platform
+        boolean posix = Files.getFileAttributeView(f, PosixFileAttributeView.class) != null;
+        assumeTrue(posix, "POSIX file permissions not supported on this platform");
+        assertThat(Files.getPosixFilePermissions(f))
+                .isEqualTo(PosixFilePermissions.fromString("rw-------"));
     }
 
     @Test

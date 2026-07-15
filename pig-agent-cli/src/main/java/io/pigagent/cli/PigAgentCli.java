@@ -1,24 +1,25 @@
 package io.pigagent.cli;
 
-import io.pigagent.channel.Channel;
 import io.pigagent.channel.ChannelAgentBridge;
-import io.pigagent.channel.discord.DiscordChannel;
-import io.pigagent.channel.telegram.TelegramChannel;
+import io.pigagent.channel.ChannelFactory;
 import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.web.WebLauncher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Terminal (REPL) entry point. Builds the shared runtime via {@link AgentBootstrap}, starts the
- * channel bridges, then hands control to {@link AgentRepl} for the interactive (picocli + JLine)
- * loop. Colored output is produced via {@link Ansi}.
+ * channel bridges, optionally starts the embedded Web console ({@code web.enabled}), then hands
+ * control to {@link AgentRepl} for the interactive (picocli + JLine) loop. The Web console is
+ * another {@link AgentKernel} adapter sharing the same kernel. Colored output is via {@link Ansi}.
  */
 public final class PigAgentCli {
 
@@ -44,12 +45,22 @@ public final class PigAgentCli {
 
         List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());
 
+        // Optional embedded Web console — another AgentKernel adapter in the same process, sharing
+        // the one kernel with the REPL. Default disabled (web.enabled=false); loopback-only.
+        PigAgentConfig.WebConfig webCfg = s.config.getWeb();
+        // Opaque Runnable stop-handle (not the WebConsole type) so this class's shutdown path never
+        // references a pig-agent-web class — see WebLauncher#startIfEnabled.
+        Optional<Runnable> webStop = WebLauncher.startIfEnabled(
+                s.agentKernel, webCfg.isEnabled(), webCfg.getHost(), webCfg.getPort());
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("CLI shutting down...");
+            // Each step guarded so one failure never aborts the rest of cleanup.
+            runQuietly(() -> webStop.ifPresent(Runnable::run));
             for (ChannelAgentBridge bridge : bridges) {
-                bridge.stop();
+                runQuietly(bridge::stop);
             }
-            s.shutdownCommon();
+            runQuietly(s::shutdownCommon);
         }));
 
         new AgentRepl(s.agentHolder, s.agentKernel, s.workspace.getReportsDir(),
@@ -58,28 +69,28 @@ public final class PigAgentCli {
                 s.availabilityReport).run();
     }
 
+    /** Run a shutdown step, swallowing+logging any error so one failure never aborts the rest. */
+    private static void runQuietly(Runnable step) {
+        try {
+            step.run();
+        } catch (Throwable t) {
+            log.warn("Shutdown step failed: {}", t.toString());
+        }
+    }
+
     private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder, AgentKernel agentKernel,
                                                           Map<String, PigAgentConfig.ChannelConfig> channelConfigs) {
         List<ChannelAgentBridge> bridges = new ArrayList<>();
+        ChannelFactory factory = new ChannelFactory();
+        // Construction + enable gating live in ChannelFactory (unit-tested); adding a new adapter
+        // needs no edit here. Each enabled, known channel is bridged to the live agent and started.
         for (var entry : channelConfigs.entrySet()) {
-            String id = entry.getKey();
-            PigAgentConfig.ChannelConfig cfg = entry.getValue();
-            if (!cfg.isEnabled()) continue;
-
-            Channel channel = switch (id) {
-                case "telegram" -> new TelegramChannel(cfg.getToken());
-                case "discord" -> new DiscordChannel(cfg.getToken());
-                default -> {
-                    log.warn("Unknown channel type: {}, skipping", id);
-                    yield null;
-                }
-            };
-            if (channel == null) continue;
-
-            ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
-            bridge.start();
-            bridges.add(bridge);
-            log.info("Channel started: {}", channel.displayName());
+            factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
+                ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
+                bridge.start();
+                bridges.add(bridge);
+                log.info("Channel started: {}", channel.displayName());
+            });
         }
         return bridges;
     }

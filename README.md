@@ -206,15 +206,16 @@ ReActAgent 推理循环:
 
 终端唯一前端：Claude-Code 风格的**行式对话** REPL（非全屏 TUI），基于 JLine3 + picocli。
 
-| 类 / 包                              | 职责                                                                     |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `PigAgentCli`                        | 主入口，构建共享运行时 + 启动 channel + 交给 `AgentRepl`                  |
-| `repl/AgentRepl`                     | REPL 主循环；回合走 `kernel.chat` 并流式富渲染；Ctrl-C 真中断             |
-| `repl/render/MarkdownAnsiRenderer`   | markdown→ANSI（粗体/行内代码/代码块/列表/标题），纯函数                   |
-| `repl/render/StreamingMarkdownPrinter` | 答案按完成行增量出字，fence 状态跨 chunk                                 |
-| `repl/render/ToolCallFormatter`      | 工具调用块 `⏺工具名 / └结果摘要`，凭据 redact                            |
-| `repl/StatusLine`                    | 提示符上方状态行 `model · session · perms`（不含凭据）                    |
-| `repl/select/InlineSelector` + `SelectorModel` | 方向键行内选择器（`/model` 无参用；数字降级）                   |
+
+| 类 / 包                                         | 职责                                                                                                                                                           |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PigAgentCli`                                   | 主入口，构建共享运行时 + 启动 channel + 交给`AgentRepl`                                                                                                        |
+| `repl/AgentRepl`                                | REPL 主循环；回合走`kernel.chat` 并流式富渲染；Ctrl-C 真中断                                                                                                   |
+| `repl/render/MarkdownAnsiRenderer`              | markdown→ANSI（粗体/行内代码/代码块/列表/标题），纯函数                                                                                                       |
+| `repl/render/StreamingMarkdownPrinter`          | 答案按完成行增量出字，fence 状态跨 chunk                                                                                                                       |
+| `repl/render/ToolCallFormatter`                 | 工具调用块`⏺工具名 / └结果摘要`，凭据 redact                                                                                                                 |
+| `repl/StatusLine`                               | 提示符上方状态行`model · session · perms`（不含凭据）                                                                                                        |
+| `repl/select/InlineSelector` + `SelectorModel`  | 方向键行内选择器（`/model` 无参用；数字降级）                                                                                                                  |
 | `repl/SlashCommands` + `SlashCompletionWidgets` | 斜杠命令边打边弹补全（`/` 起自动列出、随输入过滤、`↑/↓` 选择、Enter 补全、Esc 退出）；仅 `/` 缓冲触发，普通对话不打扰；纯 TTY 才装，dumb 终端降级为 Tab 补全 |
 
 **富渲染 / 交互**：流式出字 + markdown 高亮；`REASONING` 显示 `⋯ thinking`；工具调用缩进成块；输入 `/` **自动弹出全部命令补全菜单**（无需按 Tab），随输入实时过滤（如 `/mo` → 只剩 `/model`），`↑/↓` 移动高亮、Enter 补全、Esc/退格退出——**仅当缓冲以 `/` 开头**，普通对话不弹菜单；`/model` 无参弹方向键选择器（Enter 选定、Esc 取消）；破坏性操作 y/N 确认。
@@ -349,7 +350,9 @@ model:
 
 agent:
   name: PigAgent
-  max-iters: 10
+  # 迭代上限：现约束**全部** agent（交互/渠道/自主），仅在 > 0 时生效、换模型后仍保留。
+  # 交互/渠道默认 40（够用、不截断复杂任务）；自主/数字员工用 AgentSpec.maxIters（默认 10，保守防失控）。
+  max-iters: 40
 
 mcp:
   servers:
@@ -576,17 +579,27 @@ channels:
 配置（`application.yaml`）：
 
 ```yaml
-permissions:
-  mode: ask                 # 缺省 ask；升级后危险工具开始要确认，可设 bypass 恢复旧行为
-  channel-mode: auto
-  tool-overrides:           # 可选：重分类某工具
-    fetchUrl: high
-  allowlist:
-    tools: []
-    commands: []
+span
 ```
 
 > 说明：默认 `ask` 会改变旧行为（此前等同 bypass）。MCP 自助接入的 D-SEC 门保持不变（不重复弹窗）。渠道回合共享交互门（fail-safe，不会自动执行需确认的工具）；完整 per-origin `channel-mode` 为后续跟进。
+
+## 工具出口边界与凭据保护
+
+在权限门之外再加一道**出口边界**（约束"可见且获准的工具能触达什么"），并收敛凭据存取卫生：
+
+- **文件出口（凭据文件黑名单）**：`readFile`/`writeFile` 拒绝触碰工作区凭据文件（`models.json`/`mcp.json` 及 `.bak`）。这是**黑名单护凭据**、**不是工作目录沙箱**——本项目是终端编码助手，任意项目文件照常读写。路径规范化（`toRealPath`/`normalize`）使 `../` 与符号链接间接指向同样被拦。
+- **网络出口（SSRF 防护）**：`fetchUrl` 请求前解析目标 host 的**全部 IP**，任一命中回环/私网/链路本地（含 `169.254.169.254` 云 metadata）/IPv6 ULA/multicast 即拒；判定基于**解析 IP** 而非字面 host，故十进制 IP、`[::1]`、DNS 指向内网等绕过失效；保持不跟随重定向。可选主机白名单：
+
+  ```yaml
+  tools:
+    web:
+      allowed-hosts: []      # 非空时 fetchUrl 仅放行白名单内主机；空则仅施加 SSRF 私网守卫
+  ```
+- **凭据录入掩码**：`/model add`、`/model edit`、`/mcp add|edit`（敏感键 token/key/authorization/secret/password）与首启向导录入 API key 时不回显（无交互 console 时降级可见并告警）。
+- **凭据文件 0600**：`models.json`/`mcp.json` 在 POSIX 平台落盘后收敛为仅属主可读写（`rw-------`），非 POSIX 忽略。
+
+> 安全默认无需配置：黑名单随工作区根自动生效，SSRF 恒拒私网。凭据仍**明文存储**（依赖 `0600` + 目录权限保护），**请勿在共享主机使用**。
 
 ## 24 小时不间断运行
 
@@ -633,6 +646,9 @@ WantedBy=multi-user.target
 | 通道常驻   | Telegram/Discord 通道持续监听消息，收到即响应     |
 | 定时任务   | TaskScheduler 后台执行 CRON/DELAYED 任务          |
 | MCP 长连接 | MCP Server 连接保持，工具随时可用                 |
+| 运行上限   | `maxIters` 约束**全部** agent（交互/渠道默认 40，自主默认 10），防推理-工具循环失控 |
+| 任务无损/容错 | 任务 `.md` 无损往返（CRON/DELAYED 重启后正确重排），坏文件跳过不崩启动 |
+| 配置容错   | 配置忽略未知字段，schema 漂移不再让整份配置回退默认               |
 | 优雅关闭   | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
 | 自动重启   | 配合 systemd`Restart=always` 实现故障自愈         |
 

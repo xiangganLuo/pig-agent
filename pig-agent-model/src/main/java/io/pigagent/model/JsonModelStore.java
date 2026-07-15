@@ -60,8 +60,23 @@ public final class JsonModelStore implements ModelStore {
         try {
             Files.createDirectories(file.getParent());
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), data);
+            restrictToOwner(file);
         } catch (IOException e) {
             log.error("Failed to write models.json: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Restrict the credential file to owner read/write ({@code 0600}) on POSIX platforms. On
+     * non-POSIX platforms (e.g. Windows) this is silently ignored — the write already succeeded and
+     * directory permissions are relied upon there.
+     */
+    private static void restrictToOwner(Path file) {
+        try {
+            Files.setPosixFilePermissions(file,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // non-POSIX filesystem or transient error — do not fail the (already successful) write
         }
     }
 

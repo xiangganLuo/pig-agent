@@ -1,6 +1,10 @@
 package io.pigagent.config;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.deser.DeserializationProblemHandler;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +18,30 @@ import java.util.function.Consumer;
 public final class ConfigurationManager {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigurationManager.class);
-    private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
+    private static final ObjectMapper YAML_MAPPER = buildYamlMapper();
+
+    /**
+     * The YAML mapper with <b>mapper-level</b> unknown-field tolerance: an unrecognized field at
+     * <em>any</em> nesting level is skipped (not fatal) so config schema drift never drops the whole
+     * file to defaults, and each ignored field is logged so a typo'd key leaves a trace instead of
+     * silently doing nothing. Genuinely malformed YAML still fails (→ caller reverts to defaults).
+     */
+    private static ObjectMapper buildYamlMapper() {
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+        mapper.addHandler(new DeserializationProblemHandler() {
+            @Override
+            public boolean handleUnknownProperty(DeserializationContext ctxt, JsonParser p,
+                    JsonDeserializer<?> deserializer, Object beanOrClass, String propertyName)
+                    throws java.io.IOException {
+                String owner = beanOrClass instanceof Class<?> c ? c.getSimpleName()
+                        : (beanOrClass == null ? "?" : beanOrClass.getClass().getSimpleName());
+                log.warn("忽略未知配置字段 '{}'（{}）—— 请检查是否拼写有误", propertyName, owner);
+                p.skipChildren();
+                return true;
+            }
+        });
+        return mapper;
+    }
     private final Path configPath;
     private volatile PigAgentConfig config;
     private final List<Consumer<ConfigurationChangedEvent>> listeners = new ArrayList<>();

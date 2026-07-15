@@ -58,12 +58,25 @@ public final class JsonMcpStore implements McpStore {
     private void persist() {
         try {
             Files.createDirectories(file.getParent());
-            // TODO: @luoxianggan 安全审查 M-2：env/headers（可能含 Bearer token）明文写入 mcp.json，
-            // 且未收敛文件权限（POSIX 0600）。与 models.json 同等姿态、设计已知接受；是否加 0600
-            // 权限收敛 / 改为引用环境变量，需人工确认。详见 docs/review/mcp-security-followups.md（不入库）。
+            // env/headers 可能含 Bearer token：写入后在 POSIX 上收敛为 0600（解决安全审查 M-2）。
+            // 凭据仍明文存储，依赖 0600 + 目录权限保护，勿在共享主机使用。
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), data);
+            restrictToOwner(file);
         } catch (IOException e) {
             log.error("写入 mcp.json 失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 在 POSIX 平台把凭据文件权限收敛为仅属主可读写（{@code 0600}）；非 POSIX 平台
+     * （如 Windows）静默忽略——写入已成功，那里依赖目录权限。
+     */
+    private static void restrictToOwner(Path file) {
+        try {
+            Files.setPosixFilePermissions(file,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // 非 POSIX 文件系统或瞬时错误——不影响已成功的写入
         }
     }
 

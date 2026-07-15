@@ -13,6 +13,11 @@
     <name>Pig Agent - Workspace</name>
     <description>Workspace directory structure and AGENT.md/INFO.md management</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.71</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

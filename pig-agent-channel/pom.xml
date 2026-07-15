@@ -18,5 +18,9 @@
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-config</artifactId>
+        </dependency>
     </dependencies>
 </project>

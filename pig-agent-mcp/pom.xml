@@ -14,6 +14,11 @@
     <name>Pig Agent - MCP Integration</name>
     <description>MCP client management for connecting to external MCP servers</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.41</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.agentscope</groupId>

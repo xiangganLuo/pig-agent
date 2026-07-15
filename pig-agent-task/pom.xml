@@ -13,6 +13,11 @@
     <name>Pig Agent - Task Management</name>
     <description>Task creation, scheduling, and tracking as Markdown files</description>
 
+    <properties>
+        <!-- Coverage ratchet floor (ci-quality-gate): floor(current) - 0.02. -->
+        <jacoco.line.min>0.41</jacoco.line.min>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

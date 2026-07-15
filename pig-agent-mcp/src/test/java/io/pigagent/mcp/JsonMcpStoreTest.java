@@ -6,10 +6,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class JsonMcpStoreTest {
 
@@ -72,6 +75,19 @@ class JsonMcpStoreTest {
 
         McpStore reopened = new JsonMcpStore(file());
         assertThat(reopened.findAll()).extracting(McpServerSpec::name).containsExactly("a");
+    }
+
+    @Test
+    void savedCredentialFileWritesSuccessfully_andIsOwnerOnlyOnPosix() throws IOException {
+        Path f = file();
+        McpStore store = new JsonMcpStore(f);
+        store.save(url("remote", "https://h/sse")); // headers hold a Bearer token
+
+        assertThat(f).exists(); // write succeeds on every platform
+        boolean posix = Files.getFileAttributeView(f, PosixFileAttributeView.class) != null;
+        assumeTrue(posix, "POSIX file permissions not supported on this platform");
+        assertThat(Files.getPosixFilePermissions(f))
+                .isEqualTo(PosixFilePermissions.fromString("rw-------"));
     }
 
     @Test

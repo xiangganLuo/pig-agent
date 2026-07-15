@@ -85,8 +85,11 @@ public final class SlashCompletionWidgets {
     }
 
     boolean backwardDelete() {
+        // Delete only — do NOT re-run expand-or-complete here. Re-completing after a delete would
+        // re-insert the just-removed char whenever the shrunken buffer still uniquely matches a
+        // command (e.g. "/model" → ⌫ → "/mode" → auto-completes back to "/model"), making the
+        // command impossible to delete. The candidate menu still narrows on the next typed char.
         reader.callWidget(LineReader.BACKWARD_DELETE_CHAR);
-        maybeList();
         return true;
     }
 

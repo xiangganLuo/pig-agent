@@ -3,6 +3,13 @@ package io.pigagent.config;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
+/**
+ * Root application config. Unknown/unrecognized fields are ignored rather than failing the whole
+ * load and reverting to all-defaults — so config schema drift (a new-version field read by an old
+ * build, or a stale field left in the file) never silently discards the user's recognized settings.
+ * Tolerance is enforced mapper-level in {@code ConfigurationManager} (covers every nesting level and
+ * logs each ignored field), not by a per-class annotation.
+ */
 public final class PigAgentConfig {
 
     @JsonProperty("workspace") private String workspacePath;
@@ -12,6 +19,8 @@ public final class PigAgentConfig {
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
+    @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
+    @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -23,6 +32,8 @@ public final class PigAgentConfig {
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
     public PermissionConfig getPermissions() { return permissions; }
+    public ToolsConfig getTools() { return tools; }
+    public WebConfig getWeb() { return web; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -68,20 +79,37 @@ public final class PigAgentConfig {
 
     public static final class AgentConfig {
         @JsonProperty("name") private String name = "PigAgent";
-        @JsonProperty("max-iters") private int maxIters = 10;
+        // Interactive/channel default: 40 iterations is generous enough for complex coding turns
+        // without truncating them; autonomous agents stay conservative at AgentSpec.DEFAULT_MAX_ITERS (10).
+        @JsonProperty("max-iters") private int maxIters = 40;
         public String getName() { return name; }
         public void setName(String n) { this.name = n; }
         public int getMaxIters() { return maxIters; }
         public void setMaxIters(int i) { this.maxIters = i; }
     }
 
+    /**
+     * 单个渠道的配置（键 {@code channels.<id>}）。缺省 {@code enabled=false}——不配置即不启动任何渠道。
+     * {@code token} 用作通用鉴权/机器人令牌；{@code port}/{@code path} 供 HTTP 类渠道（webhook/slack）
+     * 监听用（{@code port<=0} 或 {@code path} 为空时渠道取内置默认）；{@code signing-secret} 供 Slack
+     * 签名校验用。全部新字段可选且有安全缺省——旧配置（仅 {@code enabled}/{@code token}）照常解析。
+     */
     public static final class ChannelConfig {
         @JsonProperty("enabled") private boolean enabled = false;
         @JsonProperty("token") private String token;
+        @JsonProperty("port") private int port = 0;
+        @JsonProperty("path") private String path;
+        @JsonProperty("signing-secret") private String signingSecret;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
         public String getToken() { return token; }
         public void setToken(String t) { this.token = t; }
+        public int getPort() { return port; }
+        public void setPort(int p) { this.port = p; }
+        public String getPath() { return path; }
+        public void setPath(String p) { this.path = p; }
+        public String getSigningSecret() { return signingSecret; }
+        public void setSigningSecret(String s) { this.signingSecret = s; }
     }
 
     public static final class CompressionConfig {
@@ -126,6 +154,41 @@ public final class PigAgentConfig {
             public java.util.List<String> getCommands() { return commands; }
             public void setCommands(java.util.List<String> c) { this.commands = c; }
         }
+    }
+
+    /** 内置工具配置。缺省全空，向后兼容。 */
+    public static final class ToolsConfig {
+        @JsonProperty("web") private WebToolConfig web = new WebToolConfig();
+        public WebToolConfig getWeb() { return web; }
+        public void setWeb(WebToolConfig w) { this.web = w; }
+    }
+
+    /**
+     * web-fetch 工具配置。{@code allowed-hosts} 为可选主机白名单：非空时 {@code fetchUrl} 仅放行
+     * 白名单内主机（叠加在 SSRF IP 守卫之上）；为空则仅施加 SSRF 守卫。缺省空。
+     */
+    public static final class WebToolConfig {
+        @JsonProperty("allowed-hosts") private java.util.List<String> allowedHosts = java.util.List.of();
+        public java.util.List<String> getAllowedHosts() { return allowedHosts; }
+        public void setAllowedHosts(java.util.List<String> h) {
+            this.allowedHosts = h == null ? java.util.List.of() : h;
+        }
+    }
+
+    /**
+     * 本地 Web 控制台（{@code web-console}）。默认关闭；启用时嵌入式 HTTP server 随
+     * CLI 进程启停，MUST 仅绑本机（{@code host} 默认 127.0.0.1）——个人电脑、单用户、无 DB 的安全底线。
+     */
+    public static final class WebConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("host") private String host = "127.0.0.1";
+        @JsonProperty("port") private int port = 7317;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getHost() { return host; }
+        public void setHost(String h) { this.host = h; }
+        public int getPort() { return port; }
+        public void setPort(int p) { this.port = p; }
     }
 
     public static final class McpConfig {

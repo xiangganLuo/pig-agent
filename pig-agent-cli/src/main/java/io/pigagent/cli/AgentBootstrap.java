@@ -1,6 +1,7 @@
 package io.pigagent.cli;
 
 import io.agentscope.core.session.JsonSession;
+import io.agentscope.core.hook.Hook;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.ConfigurationManager;
@@ -32,6 +33,10 @@ import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.onboarding.OnboardingWizard;
+import io.pigagent.plugin.DirectoryPluginSource;
+import io.pigagent.plugin.PluginRegistry;
+import io.pigagent.plugin.PluginSource;
+import io.pigagent.plugin.ServiceLoaderPluginSource;
 import io.pigagent.provider.anthropic.AnthropicProtocol;
 import io.pigagent.provider.dashscope.DashScopeProtocol;
 import io.pigagent.provider.gemini.GeminiProtocol;
@@ -189,7 +194,8 @@ public final class AgentBootstrap {
         // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
         // to fall back to the pure-manual registration below (legacy behavior). Either way we keep the
         // registered instances so the availability gate (tool-availability) can inspect them below.
-        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir());
+        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
+                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts());
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
@@ -211,9 +217,23 @@ public final class AgentBootstrap {
             }
         }
 
+        // Plugins (change plugin-system): after built-in tool auto-registration, load external
+        // plugins from the classpath (ServiceLoader<Plugin>) and workspace/plugins/*.jar, letting
+        // each contribute tools + hooks via a single register(ctx) entrypoint. Plugin tools register
+        // with the same first-wins de-dup as auto discovery (a built-in wins a name collision) and a
+        // plugin that throws is isolated (fail-safe). No plugins → no-op (behavior unchanged). Runs
+        // before the availability gate + ToolContractGuard so plugin tools get gated/guarded too.
+        List<PluginSource> pluginSources = List.of(
+                new ServiceLoaderPluginSource(),
+                new DirectoryPluginSource(workspace.getPluginsDir()));
+        PluginRegistry.Result pluginResult =
+                PluginRegistry.loadAndRegister(pluginSources, toolContext, toolkit);
+        List<Object> gatedTools = new ArrayList<>(builtinTools);
+        gatedTools.addAll(pluginResult.toolInstances);
+
         // First-line availability filter: unavailable tools never enter the schema handed to the
         // model (prevents hallucinated calls, saves tokens). Orthogonal to the permission veto.
-        ToolAvailabilityReport availabilityReport = ToolAvailabilityGate.applyTo(toolkit, builtinTools);
+        ToolAvailabilityReport availabilityReport = ToolAvailabilityGate.applyTo(toolkit, gatedTools);
 
         McpManager mcpManager = new McpManager();
 
@@ -332,10 +352,18 @@ public final class AgentBootstrap {
         // in-flight model call. Interactive, channel, per-agent and autonomous models all share it.
         InterruptController interruptController = new InterruptController();
 
+        // Interactive agent hooks: the fixed pig hooks + any hooks contributed by plugins
+        // (change plugin-system). Hooks are ordered by Hook.priority() at dispatch, so appending
+        // plugin hooks at the end does not disturb the permission hook's priority()=0 precedence.
+        List<Hook> interactiveHooks = new ArrayList<>();
+        interactiveHooks.add(permissionHook);
+        interactiveHooks.add(new LoggingHook());
+        interactiveHooks.add(new ToolCallLoggingHook());
+        interactiveHooks.addAll(pluginResult.hooks);
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(permissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
-                interactiveRetry, interruptController);
+                interactiveHooks, memory,
+                interactiveRetry, interruptController, config.getAgent().getMaxIters());
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -387,6 +415,7 @@ public final class AgentBootstrap {
                     .model(runModel)
                     .toolkit(AgentWiring.toolkitFor(toolkit, spec.toolNames()))
                     .hooks(List.of(unattended, new LoggingHook(), new ToolCallLoggingHook()))
+                    .maxIters(spec.maxIters())
                     .build();
         };
         AgentRunner agentRunner = new AgentRunner(
@@ -412,7 +441,8 @@ public final class AgentBootstrap {
         // to the interrupt controller (which is scoped to the interactive kernel turn).
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory, channelRetry);
+                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
+                channelRetry, null, config.getAgent().getMaxIters());
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);

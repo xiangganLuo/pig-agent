@@ -10,7 +10,7 @@
 ## 五阶段与三道人工门
 
 ```
-⏸ 需求澄清   → /ls:clarify   （AskUserQuestion 问清 + 拆分 + 建 <type>/<name> 分支）
+⏸ 需求澄清   → /ls:clarify   （AskUserQuestion 问清 + 拆分 + 建 <type>/YYYYMMDD-<name> 分支）
 ⏸ spec 设计  → /ls:spec      （/opsx:propose 生成 proposal/design/tasks + delta spec，validate --strict）
 ┌─ 外环（自动，反复至绿）──────────────────────────┐
 │  编码⇄单测 → /ls:code   （内环：逐 task TDD，mvn test/compile 绿）│
@@ -35,7 +35,8 @@
 
 ## 分支约定
 
-- 前缀：`feat/`（特性）、`bug/`（修复）、`docs/`（文档）、`opt/`（优化）。
+- 命名格式：**`<type>/YYYYMMDD-<功能名>`**（`YYYYMMDD`=建分支当天日期，`功能名` kebab-case），例如 `feat/20260715-plugin-collection`。
+- `type` 前缀：`feat`（特性）、`bug`（修复）、`docs`（文档）、`opt`（优化）。
 - `bug/` 分支的提交信息仍用 conventional-commit 的 `fix:`。
 - 从 `origin/main` 拉分支；多 spec 可各自分支（依赖允许时并行）。
 
@@ -48,7 +49,7 @@
 ## 阶段推进时持续汇报
 
 ```
-## /ls 流水线：<name>（分支 <type>/<name>）
+## /ls 流水线：<name>（分支 <type>/YYYYMMDD-<name>）
 [✓] 澄清  [✓] spec  [进行中] 外环 code→itest（第 K 轮）  [ ] 归档
 <当前阶段的关键结果 + 下一步>
 ```

@@ -24,6 +24,12 @@ class AgentSpecTest {
     }
 
     @Test
+    void defaultMaxIters_staysTenForAutonomousSafety() {
+        // Autonomous / per-agent cap stays conservative; the interactive default (40) lives in config.
+        assertThat(AgentSpec.DEFAULT_MAX_ITERS).isEqualTo(10);
+    }
+
+    @Test
     void create_appliesDefaults() {
         // Act
         AgentSpec spec = AgentSpec.create("a1", "Agent One");

@@ -30,6 +30,21 @@ class AgentInstanceFactoryTest {
     }
 
     @Test
+    void create_appliesSpecMaxIters() {
+        // Arrange
+        Model model = mock(Model.class);
+        AgentInstanceFactory factory = new AgentInstanceFactory(
+                spec -> model, spec -> new Toolkit(), spec -> List.of(), null);
+        AgentSpec spec = AgentSpec.create("x", "X").withMaxIters(17);
+
+        // Act
+        AgentInstance inst = factory.create(spec);
+
+        // Assert — the per-agent iteration cap comes from the spec
+        assertThat(inst.agent().getReactAgent().getMaxIters()).isEqualTo(17);
+    }
+
+    @Test
     void create_resolvesModelPerAgent() {
         // Arrange — resolver returns a different model depending on the spec
         Model m1 = mock(Model.class);

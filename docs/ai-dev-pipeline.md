@@ -11,14 +11,14 @@
 一条**半自动 AI 开发流水线**，把本项目既有能力（openspec、Maven、规约）串成标准流程，用 `.claude/commands/ls/` 下的 `/ls:*` slash 命令驱动。核心原则：**复用而非重造**——`/ls:*` 只补缺失的胶水，spec/编码/归档三段直接委托 `/opsx:propose`、`/opsx:apply`、`/opsx:archive`。
 
 ```
-需求澄清 → 特性分支(feat/bug/docs/opt) → spec 设计 → [编码⇄单测 内环] → 集成测试 外环 → openspec 归档
+需求澄清 → 特性分支(<type>/YYYYMMDD-功能名) → spec 设计 → [编码⇄单测 内环] → 集成测试 外环 → openspec 归档
 ```
 
 ## 六个命令
 
 | 命令 | 阶段 | 人工门 | 职责 |
 |------|------|--------|------|
-| `/ls:clarify` | 需求澄清 + 拆分 + 建分支 | ⏸ 人工 | 问清需求；**大需求拆成多个可独立上线的 spec（人工审拆分）**；每个 spec 拉 `<type>/<name>` 分支（可并行） |
+| `/ls:clarify` | 需求澄清 + 拆分 + 建分支 | ⏸ 人工 | 问清需求；**大需求拆成多个可独立上线的 spec（人工审拆分）**；每个 spec 拉 `<type>/YYYYMMDD-<name>` 分支（可并行） |
 | `/ls:spec` | spec 设计 | ⏸ 人工审批 | 委托 `/opsx:propose` 生成 proposal/design/tasks + delta spec，`openspec validate --strict` |
 | `/ls:code` | 编码⇄单测（**内环**） | 自动 | 逐 task TDD：测试→实现→`mvn test`→勾选；组后 `mvn compile` |
 | `/ls:itest` | 集成测试（**外环**） | 自动 | 跑 `*IT` 真模型测试；失败回喂 `/ls:code`；连续 3 轮无进展升级人工 |
@@ -26,7 +26,7 @@
 | `/ls:status` | 进度汇报 | 只读 | 跨 澄清/设计/规格/任务 维度统计所有活跃 spec（多 spec 并行视图 + 卡点） |
 | `/ls:dev` | 总控 | 半自动 | 端到端串联五阶段，尊重上述人工门 |
 
-**多 spec 并行**：需求很大时，`/ls:clarify` 把它拆成多个**可独立上线**的 spec（拆分方案人工审），每个 spec 各自 `feat/<name>` 分支，可并行开发（不同会话/worktree）；`/ls:status` 汇总所有活跃 spec 的进度与卡点。
+**多 spec 并行**：需求很大时，`/ls:clarify` 把它拆成多个**可独立上线**的 spec（拆分方案人工审），每个 spec 各自 `<type>/YYYYMMDD-<name>` 分支，可并行开发（不同会话/worktree）；`/ls:status` 汇总所有活跃 spec 的进度与卡点。
 
 ## 两层 Loop Engine
 
@@ -41,7 +41,7 @@
 
 ## 约定
 
-- **分支前缀**：`feat` / `bug` / `docs` / `opt`。注意 `bug/` 分支的**提交信息**仍用 conventional-commit 的 `fix:`。
+- **分支命名**：**`<type>/YYYYMMDD-<功能名>`**（`YYYYMMDD`=建分支当天日期，`功能名` kebab-case），例如 `feat/20260715-plugin-collection`。`type` 前缀：`feat` / `bug` / `docs` / `opt`。注意 `bug/` 分支的**提交信息**仍用 conventional-commit 的 `fix:`。
 - **承重技术设 spike 卡点**：spec 若依赖未验证的承重假设（如框架语义、外部 API 行为），把 `tasks.md` 第 1 组设为 Spike，不过不进编码。
 - **规约基座**：`.claude/rules/common/{development-workflow,testing,git-workflow,code-review,security}.md`（TDD / ≥80% 覆盖 / conventional commit / 评审门）。
 

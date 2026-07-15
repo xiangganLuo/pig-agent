@@ -87,6 +87,32 @@ public final class ToolRegistrar {
     }
 
     /**
+     * Register already-instantiated tools (e.g. contributed by a plugin) into {@code toolkit},
+     * reusing the same de-dup/override plumbing as auto discovery: each tool registers with the
+     * <em>auto</em> (non-override) semantics, so a name that already exists (a built-in registered
+     * earlier, or an earlier tool in this list) is kept and the colliding tool is skipped
+     * ({@link Result#duplicatesSkipped}), never silently stacked. A tool that fails to name-resolve
+     * or register is isolated ({@link Result#failures}) and the rest still register (fail-safe).
+     *
+     * <p>Intended for composing external contributions (e.g. {@code pig-agent-plugin}) with built-in
+     * auto-registration without duplicating the collision/fail-safe logic.
+     *
+     * @param toolkit the toolkit to register into (built-ins already registered → they win collisions)
+     * @param tools   the tool instances to register; may be {@code null}/empty
+     */
+    public static Result registerTools(Toolkit toolkit, List<Object> tools) {
+        Result result = new Result();
+        if (tools != null) {
+            for (Object tool : tools) {
+                if (tool != null) {
+                    registerOne(toolkit, tool, false, result);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
      * Register auto-discovered providers (phase 1) then manual overrides (phase 2). Package-private so
      * tests can drive it with an explicit provider list (no reliance on the services file).
      */

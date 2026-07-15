@@ -265,7 +265,7 @@ public final class ReplCommands {
             }
             String apiKey = null;
             if (protocol.requiresApiKey()) {
-                apiKey = reader.readLine("API key: ").trim();
+                apiKey = reader.readLine("API key: ", '*').trim(); // masked: no echo / scrollback
                 if (apiKey.isBlank()) {
                     Ansi.println(t, Ansi.error("API key is required."));
                     return;
@@ -324,7 +324,7 @@ public final class ReplCommands {
                 return;
             }
             Ansi.println(t, Ansi.dim("Editing " + m.label() + " (press Enter to keep a value)"));
-            String key = reader.readLine("API key [keep]: ").trim();
+            String key = reader.readLine("API key [keep]: ", '*').trim(); // masked: no echo / scrollback
             String url = reader.readLine("Base URL [keep]: ").trim();
             String name = reader.readLine("Model name [" + m.modelName() + "]: ").trim();
             StoredModel updated = m;

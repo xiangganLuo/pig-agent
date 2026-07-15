@@ -143,21 +143,28 @@ public final class McpCommand implements Runnable {
 
     private Map<String, String> readKeyVals(LineReader reader, String label) {
         Map<String, String> out = new LinkedHashMap<>();
+        // Two-step entry so a sensitive value can be masked: the key is read visibly, then the value
+        // is read masked when the key names a credential (token/key/authorization/secret), else visibly.
+        // Resolves security review M-1 (was: whole KEY=VALUE line echoed, leaking tokens to scrollback).
         while (true) {
-            // TODO: @luoxianggan 安全审查 M-1：敏感键（token/key/authorization/secret）的 value
-            // 经 reader.readLine 明文回显到终端与 scrollback。是否对敏感键改用 JLine 掩码读取
-            // （reader.readLine(prompt, maskChar)）需人工确认。详见 docs/review/mcp-security-followups.md（不入库）。
-            String line = reader.readLine(label + " (KEY=VALUE, blank to finish): ").trim();
-            if (line.isBlank()) {
+            String key = reader.readLine(label + " key (blank to finish): ").trim();
+            if (key.isBlank()) {
                 break;
             }
-            int eq = line.indexOf('=');
-            if (eq <= 0) {
-                continue;
-            }
-            out.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+            String prompt = label + " value for '" + key + "': ";
+            String value = isSensitiveKey(key)
+                    ? reader.readLine(prompt, '*').trim()
+                    : reader.readLine(prompt).trim();
+            out.put(key, value);
         }
         return out;
+    }
+
+    /** Keys whose values are credentials and MUST be masked on input. */
+    static boolean isSensitiveKey(String key) {
+        String k = key.toLowerCase(java.util.Locale.ROOT);
+        return k.contains("token") || k.contains("key") || k.contains("secret")
+                || k.contains("authorization") || k.contains("password") || k.contains("passwd");
     }
 
     private void removeServer(Terminal t, McpManager mcp) {
