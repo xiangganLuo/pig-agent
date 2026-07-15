@@ -22,8 +22,12 @@
 - A4/A5 与 AgentScope 2.0 原生分层记忆/结构化压缩重叠：本迭代在 v1 交付；v2 迁移时按 `agentscope-v2-migration.md` 的"evaluate vs native"再取舍（不浪费——设计/测试/洞察可迁移）。
 
 ## 状态（滚动）
-- Wave 1：🔄 a1loop / a2defer / a8warn 后台运行中。
-- Wave 2：⏳ 待 Wave 1 合并后启动。
+- Wave 1：✅ **全部合入 `main` 且全量测试 BUILD SUCCESS**。
+  - A1 loop-detection（`16293ca`/`a0994ae`，808 测试）→ merge 合入。
+  - A8 sandbox-warn-tier（`8b91aa2`/`503df36`，823 测试）→ merge 合入（自动解决相邻改动）。
+  - A2 deferred-tools（`f3c9cc1`/`d16f51f`，815 测试）→ merge `c491cef`（AgentBootstrap 冲突已解=保留两 helper 方法）。
+  - 收口：`main` 全量 `mvn test` = BUILD SUCCESS，0 失败/0 错误。
+- Wave 2：🔄 a3skill（复合 Skill）/ a4mem（记忆抽取）/ a5ctx（上下文增强）后台运行中（基于含 Wave-1 的 main）。
 - 合并/归档前流程：全部自主处理，绿了合 main。
 
 ## 并行长线：AgentScope 2.0 迁移
