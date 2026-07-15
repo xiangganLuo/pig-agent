@@ -19,6 +19,7 @@ public final class PigAgentConfig {
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
+    @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
@@ -32,6 +33,7 @@ public final class PigAgentConfig {
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
     public PermissionConfig getPermissions() { return permissions; }
+    public SandboxConfig getSandbox() { return sandbox; }
     public ToolsConfig getTools() { return tools; }
     public WebConfig getWeb() { return web; }
     public String getCurrentSessionId() { return currentSessionId; }
@@ -166,6 +168,43 @@ public final class PigAgentConfig {
             public java.util.List<String> getCommands() { return commands; }
             public void setCommands(java.util.List<String> c) { this.commands = c; }
         }
+    }
+
+    /**
+     * 命令执行沙箱配置（exec-sandbox）。全部可选、默认安全、向后兼容——缺 {@code sandbox} 块即等价于
+     * 「保守内置 denylist + 200KB 输出上限 + 30s 超时 + env 脱敏开 + 不限 cwd」。与 {@code permissions}
+     * （may-run）正交：权限决定能否运行，沙箱决定运行时被约束到什么程度。
+     */
+    public static final class SandboxConfig {
+        @JsonProperty("exec") private ExecSandboxConfig exec = new ExecSandboxConfig();
+        public ExecSandboxConfig getExec() { return exec; }
+        public void setExec(ExecSandboxConfig e) { this.exec = e; }
+    }
+
+    /**
+     * {@code executeCommand} 的受约束执行配置。{@code max-output-bytes}/{@code timeout-seconds} 非法
+     * （{@code <=0}）时由 {@code SandboxPolicy} 容错钳制回默认；{@code denylist} 只在内置灾难性模式
+     * 底线之上**追加**用户正则（不能削弱底线）；{@code scrub-env} 默认剔除凭据类环境变量；
+     * {@code working-dir} 为空则继承当前工作目录。
+     */
+    public static final class ExecSandboxConfig {
+        @JsonProperty("max-output-bytes") private long maxOutputBytes = 200_000;
+        @JsonProperty("timeout-seconds") private int timeoutSeconds = 30;
+        @JsonProperty("denylist") private java.util.List<String> denylist = new java.util.ArrayList<>();
+        @JsonProperty("scrub-env") private boolean scrubEnv = true;
+        @JsonProperty("working-dir") private String workingDir;
+        public long getMaxOutputBytes() { return maxOutputBytes; }
+        public void setMaxOutputBytes(long b) { this.maxOutputBytes = b; }
+        public int getTimeoutSeconds() { return timeoutSeconds; }
+        public void setTimeoutSeconds(int s) { this.timeoutSeconds = s; }
+        public java.util.List<String> getDenylist() { return denylist; }
+        public void setDenylist(java.util.List<String> d) {
+            this.denylist = d == null ? new java.util.ArrayList<>() : d;
+        }
+        public boolean isScrubEnv() { return scrubEnv; }
+        public void setScrubEnv(boolean e) { this.scrubEnv = e; }
+        public String getWorkingDir() { return workingDir; }
+        public void setWorkingDir(String w) { this.workingDir = w; }
     }
 
     /** 内置工具配置。缺省全空，向后兼容。 */

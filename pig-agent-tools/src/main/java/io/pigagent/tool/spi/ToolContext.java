@@ -1,6 +1,7 @@
 package io.pigagent.tool.spi;
 
 import io.pigagent.task.TaskManager;
+import io.pigagent.tool.sandbox.SandboxPolicy;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -16,6 +17,7 @@ public final class ToolContext {
     private final Path skillsDir;
     private final Path workspaceRoot;
     private final List<String> webAllowedHosts;
+    private final SandboxPolicy sandboxPolicy;
 
     public ToolContext(TaskManager taskManager, Path skillsDir) {
         this(taskManager, skillsDir, null, null);
@@ -23,10 +25,16 @@ public final class ToolContext {
 
     public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
                        List<String> webAllowedHosts) {
+        this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, null);
+    }
+
+    public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
+                       List<String> webAllowedHosts, SandboxPolicy sandboxPolicy) {
         this.taskManager = taskManager;
         this.skillsDir = skillsDir;
         this.workspaceRoot = workspaceRoot;
         this.webAllowedHosts = webAllowedHosts == null ? List.of() : List.copyOf(webAllowedHosts);
+        this.sandboxPolicy = sandboxPolicy;
     }
 
     /** The task manager (for the task tool); may be {@code null} in contexts that don't need it. */
@@ -53,5 +61,13 @@ public final class ToolContext {
      */
     public List<String> webAllowedHosts() {
         return webAllowedHosts;
+    }
+
+    /**
+     * The command-execution sandbox policy (for the shell tool); may be {@code null} in contexts that
+     * don't need it, in which case {@code ShellTools} uses {@link SandboxPolicy#defaults()}.
+     */
+    public SandboxPolicy sandboxPolicy() {
+        return sandboxPolicy;
     }
 }

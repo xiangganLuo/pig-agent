@@ -59,6 +59,7 @@ import io.pigagent.tool.permission.AllowlistWriter;
 import io.pigagent.tool.permission.PermissionConfirmer;
 import io.pigagent.tool.permission.PermissionDeniedTool;
 import io.pigagent.tool.permission.ToolPermissionHook;
+import io.pigagent.tool.sandbox.SandboxPolicy;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.spi.ToolContext;
@@ -191,8 +192,14 @@ public final class AgentBootstrap {
         // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
         // to fall back to the pure-manual registration below (legacy behavior). Either way we keep the
         // registered instances so the availability gate (tool-availability) can inspect them below.
+        // Command-execution sandbox (exec-sandbox): build a conservative, config-backed policy and
+        // inject it into ShellTools via ToolContext (mirrors how FileSystemTools gets workspaceRoot).
+        PigAgentConfig.ExecSandboxConfig execCfg = config.getSandbox().getExec();
+        SandboxPolicy sandboxPolicy = new SandboxPolicy(
+                execCfg.getMaxOutputBytes(), execCfg.getTimeoutSeconds(),
+                execCfg.getDenylist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
-                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts());
+                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy);
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
@@ -204,7 +211,7 @@ public final class AgentBootstrap {
             // pig-agent-plugin-builtin via PluginRegistry below, which runs regardless of this flag.
             builtinTools = List.of(
                     new TaskTool(taskManager),
-                    new ShellTools(),
+                    new ShellTools(sandboxPolicy),
                     new FileSystemTools(),
                     new SkillsTool(workspace.getSkillsDir()),
                     new PermissionDeniedTool());
