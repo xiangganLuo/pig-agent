@@ -1,3 +1,9 @@
+---
+name: code-review
+description: Review a code change for correctness, security, and maintainability before merge.
+keywords: code review, pull request, diff, quality, pre-commit
+version: 1.0.0
+---
 # Code Review
 
 A method for reviewing a code change for correctness, security, and maintainability before it is

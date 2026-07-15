@@ -1,3 +1,9 @@
+---
+name: refactoring
+description: Improve internal structure without changing observable behaviour, safely and in small steps.
+keywords: refactor, cleanup, code smell, restructure, technical debt
+version: 1.0.0
+---
 # Refactoring
 
 Improve the internal structure of code without changing its observable behaviour.

@@ -1,3 +1,9 @@
+---
+name: systematic-debugging
+description: A disciplined, evidence-driven loop for finding and fixing a bug rather than guessing.
+keywords: debugging, root cause, reproduce, bisect, hypothesis
+version: 1.0.0
+---
 # Systematic Debugging
 
 A disciplined loop for finding and fixing a bug by evidence rather than guesswork.

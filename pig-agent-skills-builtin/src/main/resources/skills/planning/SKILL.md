@@ -1,3 +1,9 @@
+---
+name: planning
+description: Turn a non-trivial request into a researched, ordered, low-risk plan before coding.
+keywords: planning, design, breakdown, roadmap, research
+version: 1.0.0
+---
 # Planning
 
 Turn a non-trivial request into a researched, ordered, low-risk implementation plan before coding.

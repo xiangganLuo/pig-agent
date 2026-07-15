@@ -62,7 +62,8 @@ class SkillRegistryBuiltinTest {
         Files.writeString(dir.resolve("SKILL.md"), "# My custom code review\noverridden");
         SkillsTool tool = toolOver(workspace);
 
-        // Act / Assert — workspace shadows the built-in, and the name is listed once
+        // Act / Assert — workspace shadows the built-in, and the name is listed once (the listing now
+        // carries a derived description after the name, so match on the "- <name>" prefix)
         assertThat(tool.loadSkill("code-review")).isEqualTo("# My custom code review\noverridden");
         assertThat(count(tool.listSkills(), "- code-review")).isEqualTo(1);
     }
@@ -75,6 +76,6 @@ class SkillRegistryBuiltinTest {
     }
 
     private static long count(String haystack, String needle) {
-        return haystack.lines().filter(line -> line.equals(needle)).count();
+        return haystack.lines().filter(line -> line.equals(needle) || line.startsWith(needle + " ")).count();
     }
 }
