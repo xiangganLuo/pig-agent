@@ -19,6 +19,19 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void collectionPureComputeToolsAreReadOnly() {
+        // 内置插件集合（pig-agent-plugin-collection）的纯计算工具应干净放行
+        for (String name : new String[]{
+                "currentDateTime", "convertTimezone", "epochToIso", "isoToEpoch",
+                "generateUuid", "base64Encode", "base64Decode", "md5Hash", "sha256Hash",
+                "jsonPrettyPrint", "jsonValidate", "randomNumber", "randomString"}) {
+            assertThat(ToolRiskClassifier.classify(name, Map.of()))
+                    .as("tool %s should be READ_ONLY", name)
+                    .isEqualTo(ToolRisk.READ_ONLY);
+        }
+    }
+
+    @Test
     void unknownToolDefaultsToExecFailSafe() {
         assertThat(ToolRiskClassifier.classify("someRandomTool", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify(null, Map.of())).isEqualTo(ToolRisk.EXEC);

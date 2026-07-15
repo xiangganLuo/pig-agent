@@ -18,6 +18,20 @@ public final class ToolRiskClassifier {
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
             Map.entry("loadSkill", ToolRisk.READ_ONLY),
+            // 内置插件集合（pig-agent-plugin-collection）——纯计算工具，无 shell/网络/写盘
+            Map.entry("currentDateTime", ToolRisk.READ_ONLY),
+            Map.entry("convertTimezone", ToolRisk.READ_ONLY),
+            Map.entry("epochToIso", ToolRisk.READ_ONLY),
+            Map.entry("isoToEpoch", ToolRisk.READ_ONLY),
+            Map.entry("generateUuid", ToolRisk.READ_ONLY),
+            Map.entry("base64Encode", ToolRisk.READ_ONLY),
+            Map.entry("base64Decode", ToolRisk.READ_ONLY),
+            Map.entry("md5Hash", ToolRisk.READ_ONLY),
+            Map.entry("sha256Hash", ToolRisk.READ_ONLY),
+            Map.entry("jsonPrettyPrint", ToolRisk.READ_ONLY),
+            Map.entry("jsonValidate", ToolRisk.READ_ONLY),
+            Map.entry("randomNumber", ToolRisk.READ_ONLY),
+            Map.entry("randomString", ToolRisk.READ_ONLY),
             // 写
             Map.entry("writeFile", ToolRisk.WRITE),
             // 执行

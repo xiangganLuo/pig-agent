@@ -67,6 +67,12 @@
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-plugin</artifactId>
         </dependency>
+        <!-- Built-in plugin collection: on the runtime classpath so ServiceLoaderPluginSource
+             discovers its plugins (no compile-time use here). -->
+        <dependency>
+            <groupId>io.pigagent</groupId>
+            <artifactId>pig-agent-plugin-collection</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-web</artifactId>
