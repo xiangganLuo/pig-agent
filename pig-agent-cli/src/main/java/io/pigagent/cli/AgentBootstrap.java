@@ -17,7 +17,9 @@ import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.agent.runner.FileReportWriter;
+import io.pigagent.core.compression.BudgetRatios;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.core.compression.EngineeringOptions;
 import io.pigagent.core.interrupt.InterruptController;
 import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.hook.LoggingHook;
@@ -520,9 +522,14 @@ public final class AgentBootstrap {
                 log.info("Session: {} [{}]", s.name(), s.id()));
 
         PigAgentConfig.CompressionConfig comp = config.getCompression();
+        EngineeringOptions engineeringOptions = new EngineeringOptions(
+                comp.isRecursiveSummary(), comp.getMaxSummaryDepth(),
+                comp.isImportanceRetention(), comp.isVerbatimProtection(), comp.isConsistencyCheck(),
+                comp.getKeepRecent(),
+                new BudgetRatios(comp.getPinnedRatio(), comp.getRecentRatio(), comp.getSummarizedRatio()));
         CompressionService compressionService = new CompressionService(
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled(),
-                new SessionLineageWriter(sessionRepository));
+                new SessionLineageWriter(sessionRepository), engineeringOptions);
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,

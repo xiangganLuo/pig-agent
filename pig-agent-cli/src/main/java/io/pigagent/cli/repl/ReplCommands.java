@@ -416,6 +416,9 @@ public final class ReplCommands {
                     Ansi.println(t, line("Auto", s.enabled() ? "on" : "off"));
                     Ansi.println(t, line("Tokens", s.estimatedTokens() + " / " + s.budgetTokens()
                             + " (trigger " + s.thresholdTokens() + ")"));
+                    Ansi.println(t, line("Budget", "pinned " + s.budget().pinnedTokens()
+                            + " · recent " + s.budget().recentTokens()
+                            + " · summarized " + s.budget().summarizedTokens()));
                     Ansi.println(t, line("Messages", String.valueOf(s.messageCount())));
                     Ansi.println(t, line("Last", s.lastCompressedEpochMs() == 0 ? "never"
                             : java.time.Instant.ofEpochMilli(s.lastCompressedEpochMs()).toString()));
