@@ -18,6 +18,7 @@ public final class PigAgentConfig {
     @JsonProperty("channels") private Map<String, ChannelConfig> channels = Map.of();
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
+    @JsonProperty("loop-detection") private LoopDetectionConfig loopDetection = new LoopDetectionConfig();
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
     @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
@@ -32,6 +33,7 @@ public final class PigAgentConfig {
     public Map<String, ChannelConfig> getChannels() { return channels; }
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
+    public LoopDetectionConfig getLoopDetection() { return loopDetection; }
     public PermissionConfig getPermissions() { return permissions; }
     public SandboxConfig getSandbox() { return sandbox; }
     public ToolsConfig getTools() { return tools; }
@@ -136,6 +138,26 @@ public final class PigAgentConfig {
         public void setMaxContextTokens(int t) { this.maxContextTokens = t; }
         public double getThreshold() { return threshold; }
         public void setThreshold(double t) { this.threshold = t; }
+    }
+
+    /**
+     * 工具调用循环检测（loop-detection）。缺省启用、阈值宽松、向后兼容——无配置即用默认值
+     * （窗口 20、warn 3、stop 5）；{@code enabled: false} 完全旁路，等同引入本能力之前的行为。
+     * 越界值由 {@code LoopDetector} 容错钳制（窗口/warn ≥ 1、stop ≥ warn），不会因坏配置崩溃。
+     */
+    public static final class LoopDetectionConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        @JsonProperty("window-size") private int windowSize = 20;
+        @JsonProperty("warn-threshold") private int warnThreshold = 3;
+        @JsonProperty("stop-threshold") private int stopThreshold = 5;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getWindowSize() { return windowSize; }
+        public void setWindowSize(int s) { this.windowSize = s; }
+        public int getWarnThreshold() { return warnThreshold; }
+        public void setWarnThreshold(int t) { this.warnThreshold = t; }
+        public int getStopThreshold() { return stopThreshold; }
+        public void setStopThreshold(int t) { this.stopThreshold = t; }
     }
 
     /** 工具权限体系配置（全局）。缺省 mode=ask、channel-mode=auto，向后兼容。 */

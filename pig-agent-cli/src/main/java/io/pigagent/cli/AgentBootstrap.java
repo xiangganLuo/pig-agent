@@ -22,6 +22,8 @@ import io.pigagent.core.interrupt.InterruptController;
 import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
+import io.pigagent.core.loop.LoopDetectionHook;
+import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
 import io.pigagent.core.retry.RetryPolicy;
@@ -53,6 +55,7 @@ import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
 import io.pigagent.tool.contract.ToolContractGuard;
 import io.pigagent.tool.filesystem.FileSystemTools;
+import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
 import io.pigagent.tool.permission.AllowlistWriter;
@@ -74,6 +77,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -238,7 +242,8 @@ public final class AgentBootstrap {
                     new ShellTools(sandboxPolicy),
                     new FileSystemTools(),
                     new SkillsTool(workspace.getSkillsDir()),
-                    new PermissionDeniedTool());
+                    new PermissionDeniedTool(),
+                    new LoopDetectedTool());
             for (Object tool : builtinTools) {
                 toolkit.registration().tool(tool).apply();
             }
@@ -375,6 +380,10 @@ public final class AgentBootstrap {
         // plugin hooks at the end does not disturb the permission hook's priority()=0 precedence.
         List<Hook> interactiveHooks = new ArrayList<>();
         interactiveHooks.add(permissionHook);
+        // Loop detection (loop-detection): after the permission veto (priority()=0) so it never
+        // interferes; STOP reuses the veto-to-sentinel mechanism, WARN reuses the ephemeral
+        // PreReasoning injection. Its own detector instance (per-agent), reset per turn by the hook.
+        interactiveHooks.add(newLoopDetectionHook(configManager));
         interactiveHooks.add(new LoggingHook());
         interactiveHooks.add(new ToolCallLoggingHook());
         interactiveHooks.addAll(pluginResult.hooks);
@@ -459,7 +468,8 @@ public final class AgentBootstrap {
         // to the interrupt controller (which is scoped to the interactive kernel turn).
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(channelPermissionHook, new LoggingHook(), new ToolCallLoggingHook()), memory,
+                List.of(channelPermissionHook, newLoopDetectionHook(configManager),
+                        new LoggingHook(), new ToolCallLoggingHook()), memory,
                 channelRetry, null, config.getAgent().getMaxIters());
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
@@ -482,6 +492,22 @@ public final class AgentBootstrap {
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
                 availabilityReport, readerRef, agentSession, taskScheduler);
+    }
+
+    /**
+     * Build a fresh {@link LoopDetectionHook} (with its own {@link LoopDetector} instance, so each
+     * agent's window is independent). Thresholds are read from config once here; {@code enabled} is
+     * read live via a supplier so {@code loop-detection.enabled=false} bypasses without a restart.
+     * The ignore set holds the two veto sentinels so denied/looped calls are never re-counted.
+     */
+    static LoopDetectionHook newLoopDetectionHook(ConfigurationManager configManager) {
+        PigAgentConfig.LoopDetectionConfig lc = configManager.getConfig().getLoopDetection();
+        LoopDetector detector = new LoopDetector(
+                lc.getWindowSize(), lc.getWarnThreshold(), lc.getStopThreshold());
+        return new LoopDetectionHook(
+                detector,
+                () -> configManager.getConfig().getLoopDetection().isEnabled(),
+                Set.of(LoopDetectionHook.SENTINEL_TOOL_NAME, PermissionDeniedTool.TOOL_NAME));
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own
