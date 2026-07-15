@@ -3,7 +3,6 @@ package io.pigagent.session;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.memory.CompositeLongTermMemory;
-import io.pigagent.core.memory.FileSystemLongTermMemory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,9 +32,11 @@ public final class SessionManager {
     private final SessionRepository repository;
     private final ConfigurationManager configManager;
     private final Path sessionsDir;
+    private final SessionMemoryFactory sessionMemoryFactory;
 
     private String currentSessionId;
 
+    /** Backward-compatible constructor: uses the raw {@link SessionMemoryFactory#DEFAULT}. */
     public SessionManager(AgentHolder agentHolder,
                           AgentModelSwitcher modelSwitcher,
                           io.agentscope.core.session.Session agentSession,
@@ -43,6 +44,18 @@ public final class SessionManager {
                           SessionRepository repository,
                           ConfigurationManager configManager,
                           Path sessionsDir) {
+        this(agentHolder, modelSwitcher, agentSession, memory, repository, configManager,
+                sessionsDir, SessionMemoryFactory.DEFAULT);
+    }
+
+    public SessionManager(AgentHolder agentHolder,
+                          AgentModelSwitcher modelSwitcher,
+                          io.agentscope.core.session.Session agentSession,
+                          CompositeLongTermMemory memory,
+                          SessionRepository repository,
+                          ConfigurationManager configManager,
+                          Path sessionsDir,
+                          SessionMemoryFactory sessionMemoryFactory) {
         this.agentHolder = agentHolder;
         this.modelSwitcher = modelSwitcher;
         this.agentSession = agentSession;
@@ -50,6 +63,8 @@ public final class SessionManager {
         this.repository = repository;
         this.configManager = configManager;
         this.sessionsDir = sessionsDir;
+        this.sessionMemoryFactory = sessionMemoryFactory == null
+                ? SessionMemoryFactory.DEFAULT : sessionMemoryFactory;
     }
 
     /** Restore the last active session on startup, or create a default one. */
@@ -86,7 +101,7 @@ public final class SessionManager {
 
         agentHolder.get().clearMemory();
         agentHolder.get().loadIfExists(agentSession, id);
-        memory.setSessionMemory(new FileSystemLongTermMemory(tempMemoryPath(id)));
+        memory.setSessionMemory(sessionMemoryFactory.create(tempMemoryPath(id)));
         currentSessionId = id;
         configManager.updateConfig(c -> c.setCurrentSessionId(id));
         touch(id);
