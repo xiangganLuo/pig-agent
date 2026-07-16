@@ -3,7 +3,15 @@
 > **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
 > (session/state rewrite) + Phase 4 (frontends: cli + web + channel) + Phase 5a (delete self-built
 > decorators → native retry/interrupt, hooks → native middleware, drop the 1.x `agentscope` dep)
-> + Phase 5b (adopt the `HarnessAgent` vehicle + native tool-result eviction) COMPLETE.**
+> + Phase 5b (adopt the `HarnessAgent` vehicle + native tool-result eviction) + Phase 6a (adopt native
+> subagent delegation, opt-in) + Phase 6b (subagent permission inheritance + command-granular allowlist
+> + the P0 contract-guard permission-bypass fix; `subagents.enabled` default flipped ON) COMPLETE.**
+> Phase 6b lives on branch `av2/20260716-subagent-perms` (off `av2/20260716-foundation-main`): pig
+> enforces subagent permission inheritance itself (custom `subagentFactory` builds each leaf child under
+> a fail-closed context derived from the parent — parent DENY binds the child), honors command-granular
+> `allowlist.commands` via a `CommandPermissionTool` (`ToolBase.checkPermissions`), and fixes a P0 where
+> the contract guard (a non-`ToolBase` wrapper) was bypassing the native permission engine for every
+> guarded tool in production. Whole reactor GREEN (1034 tests). See **§15 Phase 6b execution log**.
 > Phase 5b lives on branch `av2/20260716-harness-adopt` (off `av2/20260716-foundation-main`): every
 > `PigAgent` now wraps a `HarnessAgent` built directly via `HarnessAgent.builder()` (carrying pig's
 > exact `Toolkit`/middlewares/`stateStore`/`permissionContext`/`maxRetries`/`fallbackModel`/`maxIters`),
@@ -989,13 +997,118 @@ nested + labeled, distinct from the parent.
 
 ### Remaining Phase-6b items
 
-**Permission-inheritance wiring (top priority — security):** a custom `subagentFactory` (or a spawn-time
-middleware) that injects the parent's `PermissionContextState` into every spawned child, then flip
-`subagents.enabled` default ON. · Native Gateway for channels (`GatewayBootstrap`) + native channel
-adapters (DingTalk/Feishu/WeCom/GitHub/GitLab); Telegram/Discord/Slack stay custom `Channel`s. ·
-`expose_to_user` → Channel bridge (`agent.channel(...)` + `chat.sendToSubagent(...)`) so the operator can
-converse with an exposed subagent directly. · `enablePlanMode()` HITL. · command-granular allowlist as a
-`ToolBase` `checkPermissions`/`matchRule`. · surface peer-subagent declarations to switched-to peers (a
-registry back-reference in `AgentInstanceFactory`) + refresh on `/agent new`. · **live-model ITs**:
-delegation end-to-end (spawn → child → result), background auto-push-back, and (once wired) child
-permission-inheritance DENY.
+**DONE in Phase-6b (see §15):** permission-inheritance wiring + `subagents.enabled` default ON;
+command-granular allowlist as a `ToolBase`; and the prerequisite P0 fix (the contract guard was
+bypassing native permission). **Deferred to Phase-6c:** Native Gateway for channels (`GatewayBootstrap`)
++ native channel adapters (DingTalk/Feishu/WeCom/GitHub/GitLab); Telegram/Discord/Slack stay custom
+`Channel`s. · `expose_to_user` → Channel bridge (`agent.channel(...)` + `chat.sendToSubagent(...)`) so the
+operator can converse with an exposed subagent directly. · `enablePlanMode()` HITL. · surface
+peer-subagent declarations to switched-to peers (a registry back-reference in `AgentInstanceFactory`) +
+refresh on `/agent new`. · **live-model ITs**: delegation end-to-end (spawn → child → result), background
+auto-push-back, and child permission-inheritance DENY.
+
+## 15. Phase 6b execution log (branch `av2/20260716-subagent-perms`)
+
+**Base:** `av2/20260716-foundation-main` (whole reactor GREEN on 2.0 after Phase 6a). **Not merged.**
+Scope: the two permission/security completions — (1) subagent permission inheritance (close the 2.0.0
+gap → flip subagents default ON), (2) command-granular allowlist (deferred M-1). Both hinge on a P0
+finding surfaced while wiring them.
+
+### P0 (prerequisite, security): the contract guard was bypassing native permission — FIXED
+
+**Finding (javap + a real-engine test).** The native `PermissionEngine` is only consulted when the ReAct
+acting phase resolves a tool to a `ToolBase`: `ReActAgent$CallExecution` does
+`tool = toolkit.getTool(name); if (tool instanceof ToolBase) …checkPermission(tool,…) else return
+PermissionVerdict(ALLOW)` — a **non-`ToolBase` tool is auto-ALLOWed**. pig's `ToolContractGuard.install`
+wraps *every* registered tool in `GuardedAgentTool`, which implemented only `AgentTool` (not `ToolBase`),
+and `Toolkit.getTool` returns the stored wrapper unchanged. So in production **every guarded tool bypassed
+the permission engine** — pig's entire Phase-4 native permission enforcement (plan-denies-mutating,
+ask-confirms, channel/autonomous fail-closed) was inert on the real (guarded) toolkit; the existing
+Phase-4 tests only exercised the engine/factory in isolation or on raw (unguarded) toolkits, so it went
+uncaught. Proven by `GuardedToolPermissionTest` (a guarded tool + a real `PermissionEngine` DENY rule):
+RED before the fix (guard not a `ToolBase` → `ClassCastException`/`isInstanceOf` fail), GREEN after.
+
+**Fix.** `GuardedAgentTool extends ToolBase` (snapshotting name/description/parameters/readOnly/… from the
+delegate) and **delegates the built-in permission hooks** — `checkPermissions`/`matchRule`/
+`generateSuggestions` forward to the wrapped tool when it is a `ToolBase`, else fall back to the default.
+A guarded tool is therefore still a `ToolBase`, so name-based deny/ask/allow rules **and** a tool's own
+`checkPermissions` (the command allowlist below) both apply again. Installed before MCP attach, so guarded
+tools are never MCP tools (mcp flags default false). This restores intended Phase-4 behavior in production
+and is the enabler for both 6b features.
+
+### 1. Subagent permission inheritance (the seam + how parent DENY binds the child)
+
+**Seam (javap-grounded): `HarnessAgent.Builder.subagentFactory(String name, Function<String,Agent>)`.**
+`HarnessAgentBuilderSupport.buildSubagentEntries` builds the entries list as *built-in general-purpose →
+declared subagents → custom `subagentFactory` entries*, and `DefaultAgentManager`'s ctor folds them into
+its `agentFactories` map with `Map.put` (**last-put wins**); `createAgent(id, ctx)` resolves the spawn
+against that map and returns the factory's `Agent` **unwrapped** (no native re-permissioning). So a
+pig-registered custom factory named `general-purpose` (or a peer id) **overrides** the native factory for
+that id. `SubagentDeclaration.inheritParentPermissions` stays inert (no harness class reads it) — pig does
+not rely on it.
+
+**Mechanism.** When `subagents` is enabled, `PigAgent.Builder.build()` registers a custom
+`subagentFactory` for `general-purpose` and for every declared peer subagent. Each factory builds — *per
+spawn* — a **leaf** child `HarnessAgent` (`disableSubagents()`/`disableDynamicSubagents()` → the native
+3-level cap is moot, a child cannot spawn) carrying the parent's model, a fresh isolated `Toolkit.copy()`
+(narrowed to the declaration's tool subset for peers) + ephemeral `InMemoryAgentStateStore`, and the
+derived child permission context. `DefaultAgentManager.createAgent` then hands the model a child that runs
+under that context. Because the child's tools are the parent's guarded `ToolBase`s (P0 fix), its
+`PermissionEngine` actually gates them.
+
+**Derivation — `SubagentPermissions.deriveChildContext(parent)` (fail-closed).** A spawned child has no
+confirmer, so: base mode `EXPLORE`→`EXPLORE` (plan-mode parent → read-only child), `BYPASS`→`BYPASS`
+(explicit trust; DENY still binds), everything else (`DEFAULT`/`ACCEPT_EDITS`/`DONT_ASK`)→`DONT_ASK`
+(unruled tools ask→deny); **parent DENY rules copied verbatim** (the headline guarantee); **inherited ASK
+rules downgraded to DENY**; ALLOW rules + working-dirs preserved (never widens authority). A `null` parent
+→ minimal `DONT_ASK` no-rules context.
+
+**Proof (genuine spawn path).** `SubagentDelegationTest.spawnedChildInheritsParentDenyRule_andCannotRunDeniedTool`
+(rewritten from the old gap test): a parent with a `DENY secretTool` rule spawns a real `general-purpose`
+child that *attempts* `secretTool`; the assertion flips to **`secret.invoked == 0`** — the child cannot
+execute the parent-denied tool. `SubagentPermissionsTest` (8 cases) unit-covers the derivation, incl.
+child inherits parent EXPLORE/plan read-only and channel/autonomous (`DONT_ASK`) → child fail-closed.
+
+**Default flip → ON, and why it's now safe.** With the escape closed (parent DENY provably binds the
+child) and the P0 guard fix (enforcement actually runs), `PigAgentConfig.SubagentsConfig.enabled` defaults
+**`true`**. The toggle remains. Only the **interactive** tracks (default + `/agent` peers) get subagents;
+the channel + autonomous factories do not pass `subagentsEnabled` (subagent tools absent there), and any
+child they *could* spawn is still bound by its fail-closed derived context. `enabled: false` restores the
+byte-for-byte pre-6a schema.
+
+### 2. Command-granular allowlist (M-1) — a `ToolBase` `checkPermissions`
+
+**Native precedence is `deny > ask > allow > tool-check`** (verified in `PermissionEngine.checkPermission`:
+deny rules, then **ask rules short-circuit**, then the tool's `checkPermissions`, then allow rules → mode
+default). A per-tool ASK rule therefore *shadows* any command-level ALLOW. Fix: (a) `PermissionContextFactory`
+**no longer emits an ASK rule for `executeCommand`** (it still emits DENY under plan and ALLOW under bypass)
+— so the tool check governs; (b) a new `CommandPermissionTool extends ToolBase` wraps the reflective
+`executeCommand` (schema + execution unchanged; the exec-sandbox `CommandGuard` still runs *after* the
+permission decision) and overrides `checkPermissions` to return **ALLOW** when the command's normalized
+first token (`CommandKeys.of`) is in the live `permissions.allowlist.commands`, else **PASSTHROUGH**
+(→ mode default: interactive ASK / non-interactive fail-closed DENY). Wired in `AgentBootstrap` just before
+`ToolContractGuard.install`, so the (now `ToolBase`) guard delegates the check. The interim "startup WARN if
+`allowlist.commands` non-empty" is removed (commands are honored now). This also finally makes the
+autonomous `commandAllowlist` (folded into `allowlist.commands`) effective. `matchRule` matches a
+command-scoped rule by normalized key. Normalization is **not bypassable**: path-prefix/quoting/`;`-glued
+first tokens (`/usr/bin/git`, `"git"`, `git;rm`) simply don't equal a plain allowlisted command → no
+spurious ALLOW (and a command that legitimately starts with an allowlisted token is still subject to the
+exec-sandbox denylist — defense in depth). Proof: `CommandPermissionToolTest` (incl. an end-to-end test
+through the production `CommandPermissionTool → GuardedAgentTool` chain + a real `PermissionEngine`),
+`CommandKeysTest` (+trick keys), `PermissionContextFactoryTest.executeCommandHasNoAskRule…`.
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn test` — whole reactor GREEN, all 17 modules (BUILD SUCCESS). Total **1034 tests, 0 failures, 0 errors,
+5 skipped** (1014 Phase-6a baseline **+20**: `GuardedToolPermissionTest` 2, `CommandPermissionToolTest` 7,
+`SubagentPermissionsTest` 8, `CommandKeysTest` +2, `PermissionContextFactoryTest` +1; the reused
+`SubagentDelegationTest` gap test was rewritten in place). `mvn -q -pl pig-agent-cli -am compile` green.
+Security tests are genuine — real `PermissionEngine` + a real subagent spawn path, not mocked.
+
+### Files
+
+`pig-agent-tools`: `contract/GuardedAgentTool` (→ `ToolBase`), `permission/CommandPermissionTool` (new),
+`permission/CommandKeys` (`COMMAND_TOOL_NAME`), `permission/PermissionContextFactory` (skip exec ASK rule).
+`pig-agent-core`: `agent/SubagentPermissions` (new), `agent/PigAgent` (custom subagent factories + leaf
+child build). `pig-agent-config`: `PigAgentConfig.SubagentsConfig.enabled` default `true`. `pig-agent-cli`:
+`AgentBootstrap` (wrap executeCommand in `CommandPermissionTool`; drop interim WARN).
