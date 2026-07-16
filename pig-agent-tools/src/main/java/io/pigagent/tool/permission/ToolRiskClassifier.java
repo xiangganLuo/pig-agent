@@ -15,11 +15,12 @@ public final class ToolRiskClassifier {
             // 只读
             Map.entry("readFile", ToolRisk.READ_ONLY),
             Map.entry("listDirectory", ToolRisk.READ_ONLY),
-            Map.entry("webSearch", ToolRisk.READ_ONLY),
             Map.entry("listMcpServers", ToolRisk.READ_ONLY),
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
             Map.entry("loadSkill", ToolRisk.READ_ONLY),
+            // checklist（pig-agent-plugin-builtin）——showChecklist 只读；创建/勾选是写（M-3）
+            Map.entry("showChecklist", ToolRisk.READ_ONLY),
             // 延迟工具发现（deferred-tools）——只读：仅搜索/揭示元数据，不改任何状态
             Map.entry("tool_search", ToolRisk.READ_ONLY),
             // 内置计算插件（pig-agent-plugin-builtin）——纯计算工具，无 shell/网络/写盘
@@ -38,9 +39,12 @@ public final class ToolRiskClassifier {
             Map.entry("randomString", ToolRisk.READ_ONLY),
             // 写
             Map.entry("writeFile", ToolRisk.WRITE),
+            Map.entry("createChecklist", ToolRisk.WRITE),
+            Map.entry("completeItem", ToolRisk.WRITE),
             // 执行
             Map.entry("executeCommand", ToolRisk.EXEC),
-            // 网络
+            // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）
+            Map.entry("webSearch", ToolRisk.NETWORK),
             Map.entry("fetchUrl", ToolRisk.NETWORK),
             // MCP 自助管理
             Map.entry("addMcpServer", ToolRisk.MCP_ADMIN),

@@ -47,6 +47,30 @@ public final class McpManager {
     private java.util.function.Function<String, String> toolGroupNamer;
     /** attach 时创建过的 tool-group 名（供上层枚举 MCP 工具→分组），受 {@code this} 锁保护。 */
     private final Set<String> managedGroups = new java.util.LinkedHashSet<>();
+    /**
+     * 可选（M-2）：运行时工具集变化（{@code /mcp add|remove|enable|disable|edit}）后的回调。CLI 用它在
+     * 新增 MCP 工具后重建交互/渠道 agent 的原生权限上下文（{@code PermissionContextState} 在 build 时
+     * 按 toolkit 工具名快照，不重建则新工具无逐工具规则、仅靠 base mode 兜底）。{@link #initialize} 的
+     * 启动期 attach <b>不</b>触发（回调在 initialize 之后才由 CLI 注入）。
+     */
+    private Runnable toolsChangedCallback;
+
+    /** 注入运行时工具集变化回调（M-2，见字段说明）。传 null 清除。 */
+    public void setToolsChangedCallback(Runnable callback) {
+        this.toolsChangedCallback = callback;
+    }
+
+    private void fireToolsChanged() {
+        Runnable cb = this.toolsChangedCallback;
+        if (cb == null) {
+            return;
+        }
+        try {
+            cb.run();
+        } catch (RuntimeException e) {
+            log.warn("tools-changed 回调失败: {}", e.getMessage());
+        }
+    }
 
     /**
      * 启用 MCP 工具分组（deferred-tools）：注入「服务器名 → 分组名」函数。MUST 在 {@link #initialize} 前调用。
@@ -116,6 +140,7 @@ public final class McpManager {
         try {
             attach(spec);
             store.save(spec);
+            fireToolsChanged();
             return spec;
         } finally {
             synchronized (this) {
@@ -153,6 +178,7 @@ public final class McpManager {
             safeClose(toClose);
         }
         store.deleteByName(name);
+        fireToolsChanged();
     }
 
     /**
@@ -209,6 +235,7 @@ public final class McpManager {
             attach(spec);
         }
         store.save(spec.withEnabled(true));
+        fireToolsChanged();
     }
 
     /** 停用并注销工具；持久化 enabled=false（保留配置）。 */
@@ -225,6 +252,7 @@ public final class McpManager {
             safeClose(toClose);
         }
         spec.ifPresent(s -> store.save(s.withEnabled(false)));
+        fireToolsChanged();
     }
 
     /** 连通测试：构造临时 client、连接、数工具、关闭。对坏服务器永不抛出。 */

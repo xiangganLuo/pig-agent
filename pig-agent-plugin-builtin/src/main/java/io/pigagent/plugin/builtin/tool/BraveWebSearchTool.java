@@ -54,8 +54,7 @@ public final class BraveWebSearchTool implements ToolAvailability {
                 : Availability.AVAILABLE;
     }
 
-    @Tool(readOnly = true,
-            description = "Search the web using Brave Search. Returns top results with titles, URLs, and snippets.")
+    @Tool(description = "Search the web using Brave Search. Returns top results with titles, URLs, and snippets.")
     public String webSearch(
             @ToolParam(name = "query", description = "Search query") String query,
             @ToolParam(name = "count", description = "Number of results (1-10, default 5)") String count

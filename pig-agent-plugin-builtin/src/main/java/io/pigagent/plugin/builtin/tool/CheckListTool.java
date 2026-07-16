@@ -28,7 +28,7 @@ public final class CheckListTool {
         return "Marked item %d as complete.".formatted(index);
     }
 
-    @Tool(description = "Show the current state of a checklist")
+    @Tool(readOnly = true, description = "Show the current state of a checklist")
     public String showChecklist(@ToolParam(name = "name", description = "Checklist name") String name) {
         List<Item> list = checklists.get(name);
         if (list == null) return "Checklist not found: " + name;

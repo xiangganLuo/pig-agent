@@ -15,6 +15,12 @@ class ToolRiskClassifierTest {
         assertThat(ToolRiskClassifier.classify("writeFile", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("executeCommand", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify("fetchUrl", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        // H-1: webSearch reaches the public Brave API without the SSRF guard → NETWORK (was READ_ONLY).
+        assertThat(ToolRiskClassifier.classify("webSearch", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        // M-3: checklist create/complete mutate state (WRITE); showChecklist is READ_ONLY.
+        assertThat(ToolRiskClassifier.classify("createChecklist", Map.of())).isEqualTo(ToolRisk.WRITE);
+        assertThat(ToolRiskClassifier.classify("completeItem", Map.of())).isEqualTo(ToolRisk.WRITE);
+        assertThat(ToolRiskClassifier.classify("showChecklist", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
         assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
     }
 
