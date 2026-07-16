@@ -42,6 +42,25 @@ v2 是 breaking 大迁移、跑在独立 v2 线（不进 main 直到验证完）
 - 落点：pig-owned 为主（`TaskScheduler` 触发 + 渠道出站 + `ChannelRegistry`/`ChannelType` 枚举 + 策略），框架耦合低。
 - landing：先在 **v1 `main`** 作为独立 `/ls` spec 交付（ship 刚需 + 保持稳定线），port 到 v2 成本低（非 v2 重写的部分）。设计模式导向（枚举登记 + 策略 + 触发器抽象）。
 
+## 官方资料校验（2026-07-16，两份官方文档）
+
+### 官方迁移指南（change-log）—— 校验 javap 地图
+- 确认了 `.memory`→`.stateStore`、provider import→`io.agentscope.extensions.model.*`、`stream`→`streamEvents`(`AgentEvent` 28 类)、原生 `PermissionEngine`/`AgentStateStore`/`.maxRetries`/`.fallbackModel`/`interrupt()`。
+- **地图未标、但 pig 未使用（已 grep 确认零命中，无风险）**：`io.agentscope.core.plan.*`/`PlanNotebook`、`io.agentscope.core.pipeline.*`、TTS、`SkillBox`、`PendingToolRecoveryHook`、`StructuredOutputReminder`、`StatePersistence`/`AgentMetaState` 均为**无桥接删除**。
+- **要盯的运行时新增**：**A.6 `Msg` 按 role 严格校验**（USER 只 Text/Data/Image/Audio/Video，SYSTEM 只 Text）——影响所有构造 Msg 处（ephemeral/记忆/压缩），必要时用 `UserMessage/AssistantMessage/SystemMessage/ToolResultMessage`；**A.7 Agent 完全无状态**（`getState`→`getAgentState`，`getCurrentSessionId/UserId`→`RuntimeContext`）。
+- **原生 memory/compaction 独立模型**：`MemoryConfig.builder().model("openai:gpt-4-mini")` + `CompactionConfig.builder().model(...)` ——比 pig `CompressionService`（用当前模型）更优（可指定便宜模型做压缩/记忆）。**强候选替换 A5 上下文增强 + A4 记忆抽取的底层机制**（Phase 3 定夺，port UX/换机制）。
+- **B.6 `LongTermMemory` 官方"v2 重写中，勿新增依赖"** —— A4 恰建其上：v1 保持，v2 迁原生。
+- **原生 shell/file 工具未废弃**（`ShellCommandTool`+`CommandValidator`/`ReadFileTool`/`WriteFileTool`）——与 pig 的 `ShellTools`+`CommandGuard`(exec-sandbox)/`FileSystemTools` 重叠；pig 的更丰富（denylist/warn 三级/env-scrub/SSRF/凭据黑名单），保留为差异化。
+
+### 官方渠道内核（harness/channel）—— "在此之上盖房子"
+- **原生 Gateway 渠道内核**：`Gateway`（会话管理 + 每会话并发控制 + **agentId 多 agent 路由**）、`GatewayBootstrap`、`SendOptions(userId/sessionId/agentId)`、`ChatUiChannel`、`Channel.dispatch|dispatchStream`；**原生生产适配器：钉钉/飞书/GitHub/GitLab/企业微信**。
+- **重大重叠**：pig 手搓的 `pig-agent-channel`（Channel/Registry/Bridge）、**飞书/钉钉渠道（feishu-dingtalk-channels spec）**、多 agent 路由（`AgentRegistry`/agentId）、会话管理——**2.0 原生 Gateway 基本都有**。→ **"外包给 2.0"的面比原地图更大**。
+- **原生缺口**：官方"以回复为主，未记载主动推送/push"——**主动外呼/通知正是 pig 要盖的"房子"**（Track B 定位被官方验证）。
+- **对 v2 Phase 4（channel）的修订**：由"改吃 streamEvents + 原生权限模式"升级为 **"采用原生 Gateway + 原生适配器，删掉 pig 手搓的渠道传输/路由/会话，只保留 app 层差异化"**——差异化 = 主动外呼（缺口）+ CC 风格 UX + 数字员工 + 编排 + 中文运维命令 + kernel façade（改为包住 Gateway）。feishu-dingtalk-channels 的手搓实现在 v2 由原生适配器取代（v1 仍用，服役到迁移）。
+
+### 战略选择（Phase 2-4 检查点决策，非当前 blocker）
+- **ReActAgent vs `HarnessAgent`**：2.0 的 `HarnessAgent` 原生提供 plan mode / task list / 工作区集成工具 / memory+compaction 配置——**正是 pig 手搓的 harness**。迁到 `HarnessAgent`（而非当前地图的 `ReActAgent`）可大幅缩小 pig 自研 harness 面，最贴合"harness 外包给 2.0"。代价：HarnessAgent 有自己的约定，需 spike 评估其与 pig 差异化（CC-REPL/kernel façade/数字员工）的兼容。**建议 Phase 2 前做一个 HarnessAgent spike 再定**。
+
 ## 分支拓扑
 - `main` = v1 稳定线（含 6 改进，`a4f82ee`）——Track B 落这里。
 - `av2/20260716-*` = v2 集成/各阶段（基于当前 main）——Track A。
