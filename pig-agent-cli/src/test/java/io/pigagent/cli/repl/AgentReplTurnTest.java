@@ -1,5 +1,6 @@
 package io.pigagent.cli.repl;
 
+import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
@@ -101,5 +102,26 @@ class AgentReplTurnTest {
         repl.renderStream(Flux.just(denied), terminal);
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("writeFile").contains("denied");
+    }
+
+    @Test
+    void renderStream_rendersSourceTaggedChildEventNested() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null);
+
+        // Parent answer (source == null) vs a forwarded subagent event (source = "main/reviewer").
+        AgentEvent parent = new TextBlockDeltaEvent("r1", "b1", "parent says hi\n");
+        AgentEvent childText = new TextBlockDeltaEvent("r2", "b2", "child found an issue")
+                .withSource("main/reviewer");
+        AgentEvent childEnd = new AgentEndEvent("r2", "reviewer", "done").withSource("main/reviewer");
+
+        repl.renderStream(Flux.just(parent, childText, childEnd), terminal);
+
+        String printed = out.toString(StandardCharsets.UTF_8);
+        assertThat(printed).as("parent answer still rendered").contains("parent says hi");
+        assertThat(printed).as("child event rendered nested + source-labeled, distinct from parent")
+                .contains("└").contains("[reviewer]").contains("child found an issue");
     }
 }

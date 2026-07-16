@@ -22,6 +22,7 @@ public final class PigAgentConfig {
     @JsonProperty("permissions") private PermissionConfig permissions = new PermissionConfig();
     @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
+    @JsonProperty("subagents") private SubagentsConfig subagents = new SubagentsConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
@@ -38,6 +39,8 @@ public final class PigAgentConfig {
     public PermissionConfig getPermissions() { return permissions; }
     public SandboxConfig getSandbox() { return sandbox; }
     public ToolsConfig getTools() { return tools; }
+    public SubagentsConfig getSubagents() { return subagents; }
+    public void setSubagents(SubagentsConfig s) { this.subagents = s == null ? new SubagentsConfig() : s; }
     public WebConfig getWeb() { return web; }
     public MemoryConfig getMemory() { return memory; }
     public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
@@ -299,6 +302,34 @@ public final class PigAgentConfig {
         public void setScrubEnv(boolean e) { this.scrubEnv = e; }
         public String getWorkingDir() { return workingDir; }
         public void setWorkingDir(String w) { this.workingDir = w; }
+    }
+
+    /**
+     * 原生子 agent 委派（{@code subagents}，av2 Phase 6a）配置——「编排」北极星能力：当前 agent 可把
+     * 「独立、上下文重、可并行」的子任务委派给一个瞬态子 agent（内置 {@code general-purpose} + 工作区
+     * {@code subagents/<id>.md} 声明），子 agent 跑完把结果回传父 agent。这与 pig 的 <b>peer</b> agent
+     * （{@code /agent use} 切换当前 agent）是两个正交概念，互不冲突：peer=切换活跃 agent，subagent=活跃
+     * agent 委派子任务给子 agent。
+     *
+     * <p>{@code enabled} <b>默认 false</b>（保守）。两条理由，安全为主：
+     * <ol>
+     *   <li><b>权限逃逸（主因）</b>：AgentScope 2.0.0 的 {@code SubagentDeclaration.inheritParentPermissions}
+     *       字段<em>已声明但未接线</em>——harness 里没有任何类读它（javap 证实），实测被 spawn 的子 agent
+     *       会以自身（宽松）权限运行，<b>不继承父 agent 的 DENY 规则 / pig 的权限 mode</b>。即：开启后一个
+     *       子 agent 可能做父 agent 被禁止的事。把「子 agent 继承父权限上下文」接线（自定义
+     *       {@code subagentFactory} 注入父 {@code PermissionContextState}）是 Phase-6b 事项——在此之前默认关闭。</li>
+     *   <li><b>token 成本</b>：开启会给模型 schema 增加 {@code agent_spawn}/{@code agent_send}/{@code agent_list}/
+     *       {@code task_output}/{@code task_cancel}/{@code task_list} 六个工具，每轮多耗少量提示词 token。</li>
+     * </ol>
+     * {@code enabled: true} 显式开启委派（内置 {@code general-purpose} + 工作区 {@code subagents/<id>.md}
+     * + pig peer 映射）——是操作者知情下的选择。{@code enabled: false}（默认）逐字节等于 6a 之前的行为
+     * （schema 里没有任何子 agent 工具）。仅作用于交互式 agent（默认 + {@code /agent} peer）；渠道 / 自主
+     * 数字员工轨道始终关闭（fail-closed 姿态）。
+     */
+    public static final class SubagentsConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
     }
 
     /** 内置工具配置。缺省全空，向后兼容。 */

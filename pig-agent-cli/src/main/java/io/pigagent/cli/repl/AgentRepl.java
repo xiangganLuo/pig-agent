@@ -2,12 +2,15 @@ package io.pigagent.cli.repl;
 
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AgentStartEvent;
 import io.agentscope.core.event.AllToolsDeniedEvent;
 import io.agentscope.core.event.ConfirmResult;
 import io.agentscope.core.event.ExceedMaxItersEvent;
 import io.agentscope.core.event.ModelCallStartEvent;
 import io.agentscope.core.event.RequireUserConfirmEvent;
+import io.agentscope.core.event.SubagentExposedEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.TextBlockEndEvent;
 import io.agentscope.core.event.ThinkingBlockStartEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
@@ -19,6 +22,7 @@ import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.render.StreamingMarkdownPrinter;
+import io.pigagent.cli.render.SubagentEventRenderer;
 import io.pigagent.cli.render.ToolCallFormatter;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.config.ConfigurationManager;
@@ -244,12 +248,15 @@ public final class AgentRepl {
         AtomicReference<Throwable> error = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> confirm = new AtomicReference<>();
         Map<String, StringBuilder> toolResults = new LinkedHashMap<>();
+        // av2 Phase 6a: forwarded subagent (child) text, accumulated per source path ("main/reviewer")
+        // and flushed as a dim nested "└ [reviewer] …" line — distinct from the parent's answer.
+        Map<String, StringBuilder> childText = new LinkedHashMap<>();
         CountDownLatch done = new CountDownLatch(1);
 
         Ansi.println(terminal, "");
 
         Disposable sub = stream.subscribe(
-                event -> onEvent(event, terminal, printer, spinnerOn, toolResults, confirm),
+                event -> onEvent(event, terminal, printer, spinnerOn, toolResults, childText, confirm),
                 err -> {
                     error.set(err);
                     done.countDown();
@@ -257,6 +264,7 @@ public final class AgentRepl {
                 () -> {
                     clearSpinner(terminal, spinnerOn);
                     printer.flush(line -> Ansi.println(terminal, line));
+                    flushAllChildText(terminal, childText);
                     done.countDown();
                 });
 
@@ -292,7 +300,25 @@ public final class AgentRepl {
 
     private void onEvent(AgentEvent event, Terminal terminal, StreamingMarkdownPrinter printer,
                          AtomicBoolean spinnerOn, Map<String, StringBuilder> toolResults,
+                         Map<String, StringBuilder> childText,
                          AtomicReference<RequireUserConfirmEvent> confirm) {
+        // av2 Phase 6a: a non-null source means this event was FORWARDED from a synchronous subagent
+        // (child) — render it nested + dim, distinct from the parent (source == null). Background
+        // (async) tasks are not forwarded; their completion arrives as a <system-reminder> the parent
+        // reasons over, surfacing naturally as parent answer text on the next step.
+        String source = event.getSource();
+        if (source != null && !source.isBlank()) {
+            onChildEvent(event, source, terminal, spinnerOn, childText);
+            return;
+        }
+        if (event instanceof SubagentExposedEvent exposed) {
+            // Phase 6b will bridge expose_to_user to a Channel (chat.sendToSubagent); for now, note it
+            // (never a credential) so the operator sees a subagent was exposed. Graceful no-op otherwise.
+            clearSpinner(terminal, spinnerOn);
+            String who = exposed.getLabel() != null ? exposed.getLabel() : exposed.getAgentId();
+            Ansi.println(terminal, Ansi.dim("[subagent exposed: " + who + "]"));
+            return;
+        }
         if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
             showSpinner(terminal, spinnerOn);
         } else if (event instanceof TextBlockDeltaEvent delta) {
@@ -318,6 +344,46 @@ public final class AgentRepl {
         } else if (event instanceof AgentEndEvent) {
             clearSpinner(terminal, spinnerOn);
         }
+    }
+
+    /**
+     * Render a forwarded subagent (child) event (av2 Phase 6a). Child answer text is accumulated per
+     * source and flushed as one dim {@code └ [child] …} line at the child's text/agent-end; a child's
+     * tool call surfaces immediately as a nested dim line. Kept distinct from the parent's streamed
+     * answer so it's clear which agent produced what.
+     */
+    private void onChildEvent(AgentEvent event, String source, Terminal terminal,
+                              AtomicBoolean spinnerOn, Map<String, StringBuilder> childText) {
+        if (event instanceof TextBlockDeltaEvent delta) {
+            childText.computeIfAbsent(source, k -> new StringBuilder()).append(delta.getDelta());
+        } else if (event instanceof TextBlockEndEvent || event instanceof AgentEndEvent) {
+            flushChildText(terminal, source, childText);
+        } else if (event instanceof ToolResultEndEvent end) {
+            clearSpinner(terminal, spinnerOn);
+            Ansi.println(terminal, SubagentEventRenderer.format(
+                    source, "⏺ " + toolLabel(end.getToolCallName())));
+        } else if (event instanceof AgentStartEvent) {
+            clearSpinner(terminal, spinnerOn);
+        }
+    }
+
+    /** Flush one source's accumulated child text as a single dim nested line, then clear it. */
+    private static void flushChildText(Terminal terminal, String source,
+                                       Map<String, StringBuilder> childText) {
+        StringBuilder acc = childText.remove(source);
+        if (acc != null && !acc.toString().isBlank()) {
+            Ansi.println(terminal, SubagentEventRenderer.format(source, acc.toString()));
+        }
+    }
+
+    /** Flush any remaining child text buffers at stream completion (children that never sent an end). */
+    private static void flushAllChildText(Terminal terminal, Map<String, StringBuilder> childText) {
+        for (Map.Entry<String, StringBuilder> e : childText.entrySet()) {
+            if (e.getValue() != null && !e.getValue().toString().isBlank()) {
+                Ansi.println(terminal, SubagentEventRenderer.format(e.getKey(), e.getValue().toString()));
+            }
+        }
+        childText.clear();
     }
 
     private static String key(String toolCallId) {

@@ -65,6 +65,7 @@ public final class AgentInstanceFactory {
     private final int maxRetries; // <= 0 = keep AgentScope's default (av2 Phase 5a native retry)
     private final Path workspace; // nullable → PigAgent uses a shared temp workspace (av2 5b)
     private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
+    private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory) {
@@ -93,6 +94,16 @@ public final class AgentInstanceFactory {
                 null, null);
     }
 
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries,
+                                Path workspace, ToolResultEvictionConfig toolResultEviction) {
+        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+                workspace, toolResultEviction, false);
+    }
+
     /**
      * @param stateStore shared conversation state store (av2 Phase 3). Passing the same instance to
      *        every agent lets per-{@code (userId,sessionId)} conversation state persist across model
@@ -105,13 +116,19 @@ public final class AgentInstanceFactory {
      * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root;
      *        {@code null} → PigAgent uses a shared temp workspace.
      * @param toolResultEviction native tool-result-eviction config (av2 Phase 5b); {@code null} disables it.
+     * @param subagentsEnabled enable native subagent delegation on each per-agent instance (av2 Phase 6a):
+     *        the built-in {@code general-purpose} + {@code agent_spawn}/… tools + {@code
+     *        <workspace>/subagents/*.md} discovery. Per-agent peers get the built-in + workspace surface
+     *        (no code-declared peer subagents — that would need a registry back-reference; the default
+     *        agent surfaces peer subagents via {@code AgentFactory}). {@code false} = pre-6a behavior.
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries,
-                                Path workspace, ToolResultEvictionConfig toolResultEviction) {
+                                Path workspace, ToolResultEvictionConfig toolResultEviction,
+                                boolean subagentsEnabled) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
@@ -121,6 +138,7 @@ public final class AgentInstanceFactory {
         this.maxRetries = maxRetries;
         this.workspace = workspace;
         this.toolResultEviction = toolResultEviction;
+        this.subagentsEnabled = subagentsEnabled;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -139,6 +157,7 @@ public final class AgentInstanceFactory {
                 .permissionContext(permissionContexts == null ? null : permissionContexts.contextFor(spec, toolkit))
                 .workspace(workspace)
                 .toolResultEviction(toolResultEviction)
+                .subagents(subagentsEnabled)
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

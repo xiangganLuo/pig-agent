@@ -852,3 +852,150 @@ multi-turn persistence + restart on `JsonFileAgentStateStore`, native transient-
 real >80K tool-result eviction round-trip). Lifecycle nit: rebuild-driven paths (model switch / MCP
 change) do not `close()` the superseded `HarnessAgent` — kept out of scope (the `ReActAgent` path never
 closed agents either; the disabled-extras vehicle holds few resources).
+
+## 14. Phase 6a execution log (branch `av2/20260716-subagents`)
+
+**Base:** `av2/20260716-foundation-main` (whole reactor GREEN on 2.0 after Phase 5b; the `PigAgent`
+`HarnessAgent` vehicle currently `disableSubagents()`). **Not merged** (lead merges into the v2 line).
+Scope: adopt **native subagent delegation** on the vehicle — the "多 agent 编排 = 子 agent" north-star —
+while keeping pig's **peer** multi-agent (`AgentRegistry` + `/agent use`) intact and un-conflated.
+
+### The two orthogonal concepts (LOCKED intent — implemented + documented)
+
+pig now has TWO distinct, non-conflated agent concepts:
+
+| | **Peer agent** (KEPT) | **Subagent** (ADDED, native) |
+|---|---|---|
+| What | The *active* agent you switch to | A transient *child* the active agent delegates a subtask to |
+| Driver | `AgentRegistry` / `AgentSpec` / `AgentInstanceFactory` + `/agent use <id>` | Native `agent_spawn`/`agent_send`/`agent_list` + `task_*` tools |
+| Lifetime | Long-lived, switchable | Ephemeral, returns a result and is discarded |
+| Storage | `workspace/agents/<id>.md` (`AgentSpecRepository`) | built-in `general-purpose` + `workspace/subagents/<id>.md` |
+
+`/agent` peer-switching is **untouched** (no `AgentRegistry`/`AgentSpec`/`AgentInstanceFactory` deletion) —
+verified by the unchanged `MultiAgentSwitchTest`/`AgentKernelTest`.
+
+### Enable design (javap-grounded)
+
+`PigAgent.Builder` gained `subagents(boolean)` + `subagentDeclarations(List<SubagentDeclaration>)`. When
+enabled, `build()` **stops** calling `disableSubagents()`/`disableDynamicSubagents()` (and passes any
+code-declared subagents via `hb.subagents(...)`); when disabled (bare-builder default) it keeps both
+disable calls, so behavior is **byte-for-byte pre-6a**. Enabling makes the vehicle register the built-in
+`general-purpose` subagent + the `agent_spawn`/`agent_send`/`agent_list`/`task_output`/`task_cancel`/
+`task_list` tools and discover `<workspace>/subagents/<id>.md`. **Key javap fact:** in
+`HarnessAgent$Builder.build()`, `HarnessAgentBuilderSupport.buildSubagentsMiddleware(...)` /
+`buildSubagentEntries(...)` (which loads `AgentSpecLoader.loadFromDirectory(<workspace>/subagents, …)`)
+are gated **only** on `disableSubagents`, using a `WorkspaceManager` resolved from `.workspace(path)` —
+**independent of `disableWorkspaceContext()`** (which only gates `WorkspaceContextMiddleware`). So pig's
+`disableWorkspaceContext()` (byte-stable system prompt) does NOT suppress workspace-subagent discovery.
+The built-in child is `HarnessAgent.builder().name("general-purpose-subagent").model(<parent model
+instance>)…asLeafSubagent()` — it inherits the **parent's `Model` instance** (offline-testable) and the
+3-level recursion cap is a native invariant (`asLeafSubagent()`).
+
+### AgentSpec → SubagentDeclaration mapping (decision + field table)
+
+**Decision:** keep peers and subagents *separate*, and provide `AgentSpecSubagentMapper` (pure,
+unit-tested) so a pig-declared peer `AgentSpec` can *also* be surfaced as a spawnable
+`SubagentDeclaration` — "both a switchable peer AND delegable as a child" without conflating them.
+`AgentBootstrap` wires it on the **default interactive agent**: peer specs (from `AgentSpecRepository
+.findAll()`, excluding `default` + autonomous) are mapped and passed to the interactive `AgentFactory`.
+Switched-to peers (built by `AgentInstanceFactory`) get the built-in + workspace surface only (a registry
+back-reference for their peer list is deferred — documented). Field mapping (grounded in
+`AgentSpecLoader.parse`, i.e. how native `subagents/<id>.md` is parsed):
+
+| `SubagentDeclaration` | ← `AgentSpec` | notes |
+|---|---|---|
+| `name` | `id()` | the `agent_id` passed to `agent_spawn` |
+| `description` | `name()` + first prompt line | **required** by native; never blank |
+| `inlineAgentsBody` | `sysPrompt()` | the child's persona/system-prompt body |
+| `tools` | `toolNames()` (if a subset) | the child's tool allowlist (empty = inherit all) |
+| `inheritParentPermissions` | `true` (requested) | see the permission caveat below |
+| `permissionMode` | *(not mappable)* | native has no per-agent permission field |
+
+### Permission inheritance — VERIFIED, and it is a 2.0.0 GAP (the headline finding)
+
+The task asked to "verify permission inheritance (parent DENY rules propagate to child)". **Verified —
+and it does NOT hold in AgentScope 2.0.0.** `SubagentDeclaration.inheritParentPermissions` is *declared
+but inert*: a whole-jar `javap` scan shows **no harness class reads `isInheritParentPermissions()`** (only
+`SubagentDeclaration`/its Builder reference it). The offline test
+`SubagentDelegationTest.spawnedChildDoesNotInheritParentDenyRule_native2_0_0Gap` proves the consequence
+empirically: a parent with a `PermissionContextState` DENY rule for `secretTool` spawns a
+`general-purpose` child that then **executes `secretTool` (state=SUCCESS)** — the parent's DENY does not
+reach the child. i.e. enabling subagents today is a **permission-escape**: a spawned child runs under its
+own (permissive) default context, bypassing the parent's DENY rules and pig's permission mode. The child
+*does* build with the parent's `Model` instance (verified), just not its permission context. **This is why
+`subagents.enabled` defaults OFF** (see config below). pig's mapper still *requests*
+`inheritParentPermissions(true)` so it is ready when the runtime honors it. Wiring real inheritance (a
+custom `subagentFactory` that injects the parent's `PermissionContextState` into the child build) is the
+top **Phase-6b** item.
+
+### CC-REPL forwarding of subagent streaming
+
+Synchronous local children forward their events onto the parent's `streamEvents` stream tagged with a
+`source` path (`AgentEvent.getSource()` → e.g. `"main/reviewer"`; `null` at the parent). `AgentRepl.onEvent`
+now routes any `source != null` event to `onChildEvent`, which renders it via a new pure
+`io.pigagent.cli.render.SubagentEventRenderer` as a **dim, nested, source-labeled** line
+(`  └ [reviewer] …`) — distinct from the parent's answer — reusing `ToolCallFormatter`'s credential
+redaction + truncation (child output can never leak secrets or flood the REPL). Child answer text is
+accumulated per source and flushed on the child's `TextBlockEndEvent`/`AgentEndEvent` (and any remainder at
+stream completion). `SubagentExposedEvent` is handled minimally (a `[subagent exposed: <label>]` note; the
+full expose-to-user-via-Channel bridge is Phase-6b). Background (`timeout_seconds=0`) tasks are **not**
+forwarded — their completion arrives as a `<system-reminder>` the parent reasons over, surfacing naturally
+as parent answer text (no special event handling needed). **CC-REPL preserved**: `MarkdownAnsiRenderer`/
+`StreamingMarkdownPrinter`/`ToolCallFormatter`/`StatusLine`/`InlineSelector`/slash-completion untouched;
+mid-turn Ctrl-C interrupt path untouched.
+
+### Config default + rationale
+
+New block `subagents` (`PigAgentConfig.SubagentsConfig`), single flag `enabled`, **default `false`
+(conservative)**. Two reasons, safety-first: **(1) permission-escape (dominant):** 2.0.0 does not propagate
+the parent's permission context to spawned children (above), so enabling grants children authority the
+parent lacks — an explicit opt-in until Phase-6b wires inheritance. **(2) token cost:** enabling adds the
+six-tool `agent_spawn` toolset to the model schema every turn. `enabled: false` (default) = today's
+behavior exactly (no subagent tools in the schema). `enabled: true` turns on the built-in `general-purpose`
++ workspace `subagents/*.md` + pig peer-subagent mapping, on the **interactive** tracks only (default +
+`/agent` peers); channel + autonomous tracks stay OFF (fail-closed posture). (The north-star favors ON, but
+the permission gap makes OFF the responsible default for this permission-conscious codebase; flip to `true`
+once Phase-6b inheritance lands.)
+
+### javap signatures used (agentscope-harness-2.0.0)
+
+`HarnessAgent$Builder`: `subagent(SubagentDeclaration)`, `subagents(List<SubagentDeclaration>)`,
+`subagentFactory(String, Function<String,Agent>)`, `disableSubagents()`, `disableDynamicSubagents()`,
+`buildSubagentEntries(Path[, SandboxBackedFilesystem])`, `asLeafSubagent()` (pkg-private). ·
+`io.agentscope.harness.agent.subagent.SubagentDeclaration` (+ `Builder`): `name/description/
+workspace(Path)/workspaceMode(WorkspaceMode{ISOLATED,SHARED})/inlineAgentsBody(String)/model(String)/
+maxIters/steps/temperature/topP/variant/mode(Mode{PRIMARY,SUBAGENT,ALL})/hidden/persistSession/
+inheritParentPermissions(boolean)/exposeToUser(Boolean)/tools(List)/skills(List)/url/headers`;
+getters incl. `isInheritParentPermissions()`. · `AgentSpecLoader.loadFromDirectory(Path,Path)` /
+`parse(String,String,Path)` (front-matter → declaration; body → `inlineAgentsBody`; `description`
+required). · built-in subagent tool `@Tool` names: `agent_spawn`(params `agent_id`,`task`,`label`,
+`timeout_seconds`,`expose_to_user`)/`agent_send`/`agent_list` (`AgentSpawnTool`),
+`task_output`/`task_cancel`/`task_list` (`TaskTool`); built-in agent id `general-purpose`. ·
+`io.agentscope.core.event.SubagentExposedEvent`: `getSubagentId()/getAgentId()/getSessionId()/getLabel()`;
+`AgentEvent.getSource()` + `withSource(String)` (fluent). · **`inheritParentPermissions` is read by NO
+harness class** (whole-jar `javap` scan) — the inert-field finding above.
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn test` (skipITs) — whole reactor GREEN, all 17 modules (BUILD SUCCESS). Total **1014 tests, 0
+failures, 0 errors, 5 skipped** (999 Phase-5b baseline **+15**: `SubagentDelegationTest` 4 +
+`AgentSpecSubagentMapperTest` 6 + `SubagentEventRendererTest` 4 + `AgentReplTurnTest` +1; `pig-agent-core`
+212→222, `pig-agent-cli` 81→86). `mvn -q -pl pig-agent-cli -am compile` green. No existing
+test changed behavior (subagents default OFF → the reactor is byte-for-byte the pre-6a build unless
+`subagents.enabled=true`). The new offline tests prove: subagent tools present when enabled / absent when
+disabled; a spawned `general-purpose` child runs on a fake model and its result returns to the parent; the
+2.0.0 permission-inheritance gap (regression-guarded); and the CC-REPL renders a `source`-tagged child event
+nested + labeled, distinct from the parent.
+
+### Remaining Phase-6b items
+
+**Permission-inheritance wiring (top priority — security):** a custom `subagentFactory` (or a spawn-time
+middleware) that injects the parent's `PermissionContextState` into every spawned child, then flip
+`subagents.enabled` default ON. · Native Gateway for channels (`GatewayBootstrap`) + native channel
+adapters (DingTalk/Feishu/WeCom/GitHub/GitLab); Telegram/Discord/Slack stay custom `Channel`s. ·
+`expose_to_user` → Channel bridge (`agent.channel(...)` + `chat.sendToSubagent(...)`) so the operator can
+converse with an exposed subagent directly. · `enablePlanMode()` HITL. · command-granular allowlist as a
+`ToolBase` `checkPermissions`/`matchRule`. · surface peer-subagent declarations to switched-to peers (a
+registry back-reference in `AgentInstanceFactory`) + refresh on `/agent new`. · **live-model ITs**:
+delegation end-to-end (spawn → child → result), background auto-push-back, and (once wired) child
+permission-inheritance DENY.

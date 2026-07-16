@@ -16,6 +16,7 @@ import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
+import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.core.memory.ConversationMemory;
 import io.pigagent.core.memory.EphemeralMemoryMiddleware;
 import org.slf4j.Logger;
@@ -67,7 +68,9 @@ import java.util.Objects;
  * so state stays consistent. Every batteries-included harness extra pig already owns is disabled at
  * build ({@code disableFilesystemTools}/{@code disableShellTool} — pig's guarded FileSystemTools/
  * ShellTools; {@code disableMemoryTools}/{@code disableMemoryHooks} — pig's ephemeral + A4;
- * {@code disableCompaction} — pig's A5 context-engineering; {@code disableSubagents} — Phase 6;
+ * {@code disableCompaction} — pig's A5 context-engineering; native <b>subagents</b> are enabled on
+ * demand (av2 Phase 6a — {@link Builder#subagents(boolean)}; disabled by default so a bare builder is
+ * byte-for-byte the old behavior);
  * {@code disableWorkspaceContext}/{@code disableAtPathExpansion}/{@code disableDynamicSkills}/
  * {@code disableToolsConfig} — pig owns the system prompt + toolkit; {@code disableSessionPersistence}
  * — pig's {@code AgentStateStore} stays the single persistence mechanism). Only tool-result eviction
@@ -271,6 +274,8 @@ public final class PigAgent {
         private Model fallbackModel; // nullable
         private Path workspace; // nullable → a shared temp workspace (eviction spool root; tests)
         private ToolResultEvictionConfig toolResultEviction; // null = eviction disabled
+        private boolean subagentsEnabled; // false = native subagents disabled (today's behavior)
+        private List<SubagentDeclaration> subagentDeclarations; // null/empty = built-in + workspace only
 
         private Builder() {}
 
@@ -383,6 +388,35 @@ public final class PigAgent {
             return this;
         }
 
+        /**
+         * Enable native subagent delegation on the {@link HarnessAgent} vehicle (av2 Phase 6a). When
+         * {@code true} the vehicle registers the built-in {@code general-purpose} subagent + the
+         * {@code agent_spawn}/{@code agent_send}/{@code agent_list}/{@code task_output}/{@code task_cancel}/
+         * {@code task_list} orchestration tools and discovers project subagents from
+         * {@code <workspace>/subagents/<id>.md} (independent of {@code disableWorkspaceContext}, which
+         * only gates persona/context injection). When {@code false} (the default) the vehicle keeps
+         * calling {@code disableSubagents()}/{@code disableDynamicSubagents()} — <em>exactly</em> the
+         * pre-6a behavior (no subagent tools in the schema). Subagent delegation is orthogonal to pig's
+         * <em>peer</em> agents ({@code AgentRegistry} + {@code /agent use}): peers switch the active
+         * agent; subagents are transient children the active agent delegates a subtask to.
+         */
+        public Builder subagents(boolean enabled) {
+            this.subagentsEnabled = enabled;
+            return this;
+        }
+
+        /**
+         * Code-declared subagents to surface on the vehicle in addition to the built-in
+         * {@code general-purpose} and any {@code <workspace>/subagents/*.md} (av2 Phase 6a). Only applied
+         * when {@link #subagents(boolean)} is {@code true}. pig maps its declared peer {@code AgentSpec}s
+         * to these via {@code AgentSpecSubagentMapper}, so a pig-declared agent can be <em>both</em> a
+         * switchable peer and a delegable subagent. {@code null}/empty = built-in + workspace only.
+         */
+        public Builder subagentDeclarations(List<SubagentDeclaration> subagentDeclarations) {
+            this.subagentDeclarations = subagentDeclarations;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -420,8 +454,6 @@ public final class PigAgent {
                     .disableMemoryTools()       // pig's ephemeral memory + A4 extraction
                     .disableMemoryHooks()
                     .disableCompaction()        // pig's A5 context-engineering compaction
-                    .disableSubagents()         // Phase 6 adapts multi-agent
-                    .disableDynamicSubagents()
                     .disableWorkspaceContext()  // pig assembles its own byte-stable system prompt
                     .disableAtPathExpansion()
                     .disableDynamicSkills()     // pig's SkillsTool + built-in skills
@@ -448,6 +480,24 @@ public final class PigAgent {
                 hb.toolResultEviction(toolResultEviction);
             } else {
                 hb.disableToolResultEviction();
+            }
+
+            // av2 Phase 6a: native subagent delegation. Enabled → the vehicle registers the built-in
+            // general-purpose subagent + agent_spawn/send/list + task_* tools and discovers
+            // <workspace>/subagents/*.md; any code-declared subagents (pig peer specs) are added too.
+            // Disabled (default) → keep the pre-6a disable calls so the schema is byte-for-byte the old
+            // one. The 3-level recursion cap (leaf children) IS a native invariant. NOTE: parent→child
+            // permission inheritance is NOT: 2.0.0's SubagentDeclaration.inheritParentPermissions is
+            // declared but inert (no harness class reads it), so a spawned child runs under its own
+            // permissive context — a permission-escape. That is why config `subagents.enabled` defaults
+            // OFF; wiring child-permission inheritance is a Phase-6b item (see agentscope-v2-migration).
+            if (subagentsEnabled) {
+                if (subagentDeclarations != null && !subagentDeclarations.isEmpty()) {
+                    hb.subagents(subagentDeclarations);
+                }
+            } else {
+                hb.disableSubagents();
+                hb.disableDynamicSubagents();
             }
 
             HarnessAgent harness = hb.build();

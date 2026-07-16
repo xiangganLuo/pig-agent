@@ -7,6 +7,7 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
+import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentFactory;
@@ -16,6 +17,7 @@ import io.pigagent.core.agent.AgentInstanceFactory;
 import io.pigagent.core.agent.AgentRegistry;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
+import io.pigagent.core.agent.AgentSpecSubagentMapper;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
@@ -426,11 +428,37 @@ public final class AgentBootstrap {
         interactiveMiddlewares.add(new LoggingMiddleware());
         interactiveMiddlewares.add(new ToolCallLoggingMiddleware());
         interactiveMiddlewares.addAll(pluginResult.middlewares);
+
+        // av2 Phase 6a: native subagent delegation ("orchestration" north-star). Config-gated, default
+        // OFF (conservative — see PigAgentConfig.SubagentsConfig: 2.0.0 does NOT propagate the parent's
+        // permission context to spawned children, a permission-escape, so enabling is an explicit opt-in
+        // pending the Phase-6b inheritance wiring). When enabled → the interactive agents register the
+        // built-in general-purpose subagent + agent_spawn/…/task_* tools and discover
+        // workspace/subagents/*.md. Peers (AgentRegistry + /agent use) stay a SEPARATE, orthogonal
+        // concept: switching the active agent. We ALSO surface pig's declared peer specs as spawnable
+        // subagents on the DEFAULT agent (AgentSpecSubagentMapper), so a pig-declared agent is both a
+        // switchable peer AND delegable as a child — without conflating the two. Read the repo up front
+        // so the default agent's peer-subagent list is available at build time; switched-to peers (built
+        // by AgentInstanceFactory) get the built-in + workspace surface only (a registry back-reference
+        // for their peer list is deferred — documented). Channel/autonomous tracks keep subagents OFF
+        // (fail-closed posture). enabled=false (default) → today's behavior exactly (no subagent tools).
+        boolean subagentsEnabled = config.getSubagents().isEnabled();
+        AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
+        List<AgentSpec> declaredSpecs = agentRepository.findAll();
+        List<SubagentDeclaration> peerSubagents = subagentsEnabled
+                ? AgentSpecSubagentMapper.toDeclarations(declaredSpecs, "default")
+                : null;
+        if (subagentsEnabled) {
+            log.info("Native subagent delegation enabled (general-purpose + workspace subagents/ + {} peer subagent(s))",
+                    peerSubagents == null ? 0 : peerSubagents.size());
+        }
+
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveMiddlewares, memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
-                stateStore, interactivePermCtx, workspaceRoot, evictionConfig);
+                stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
+                subagentsEnabled, peerSubagents);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -457,9 +485,8 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries, workspaceRoot, evictionConfig);
-        AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
-        for (AgentSpec s : agentRepository.findAll()) {
+                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled);
+        for (AgentSpec s : declaredSpecs) {
             if (!"default".equals(s.id())) {
                 try {
                     agentRegistry.register(agentInstanceFactory.create(s));

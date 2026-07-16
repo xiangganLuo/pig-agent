@@ -7,6 +7,7 @@ import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
+import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -47,6 +48,8 @@ public final class AgentFactory {
     private final Supplier<PermissionContextState> permissionContextSupplier;
     private final Path workspace; // nullable → PigAgent uses a shared temp workspace (av2 5b)
     private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
+    private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
+    private final List<SubagentDeclaration> subagentDeclarations; // null/empty → built-in + workspace only
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, LongTermMemory longTermMemory) {
@@ -83,6 +86,24 @@ public final class AgentFactory {
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier,
                         Path workspace, ToolResultEvictionConfig toolResultEviction) {
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+                stateStore, permissionContextSupplier, workspace, toolResultEviction, false, null);
+    }
+
+    /**
+     * @param subagentsEnabled enable native subagent delegation on every built agent (av2 Phase 6a) —
+     *        the built-in {@code general-purpose} + {@code agent_spawn}/… tools + {@code
+     *        <workspace>/subagents/*.md} discovery. {@code false} keeps the pre-6a behavior.
+     * @param subagentDeclarations code-declared subagents (pig peer specs mapped via
+     *        {@code AgentSpecSubagentMapper}) surfaced in addition to built-in + workspace; only applied
+     *        when {@code subagentsEnabled}. {@code null}/empty = built-in + workspace only.
+     */
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        Model fallbackModel, int maxIters, AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier,
+                        Path workspace, ToolResultEvictionConfig toolResultEviction,
+                        boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -95,6 +116,8 @@ public final class AgentFactory {
         this.permissionContextSupplier = permissionContextSupplier;
         this.workspace = workspace;
         this.toolResultEviction = toolResultEviction;
+        this.subagentsEnabled = subagentsEnabled;
+        this.subagentDeclarations = subagentDeclarations;
     }
 
     /**
@@ -118,6 +141,8 @@ public final class AgentFactory {
                 .permissionContext(permissionContextSupplier == null ? null : permissionContextSupplier.get())
                 .workspace(workspace)
                 .toolResultEviction(toolResultEviction)
+                .subagents(subagentsEnabled)
+                .subagentDeclarations(subagentDeclarations)
                 .build();
     }
 }
