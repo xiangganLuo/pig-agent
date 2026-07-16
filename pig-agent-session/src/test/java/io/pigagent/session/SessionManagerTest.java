@@ -8,6 +8,7 @@ import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.session.JsonSession;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentModelSwitcher;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import org.junit.jupiter.api.BeforeEach;

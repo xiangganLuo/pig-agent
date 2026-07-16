@@ -9,8 +9,8 @@ import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
+import io.pigagent.core.agent.AgentModelSwitcher;
 import io.pigagent.provider.registry.ProtocolRegistry;
-import io.pigagent.session.AgentModelSwitcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

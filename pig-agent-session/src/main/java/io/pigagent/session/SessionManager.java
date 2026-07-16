@@ -2,6 +2,7 @@ package io.pigagent.session;
 
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentModelSwitcher;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 
 import java.io.IOException;
