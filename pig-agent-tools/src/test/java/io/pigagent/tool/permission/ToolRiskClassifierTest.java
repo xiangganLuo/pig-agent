@@ -15,6 +15,7 @@ class ToolRiskClassifierTest {
         assertThat(ToolRiskClassifier.classify("writeFile", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("executeCommand", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify("fetchUrl", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        assertThat(ToolRiskClassifier.classify("notifyUser", Map.of())).isEqualTo(ToolRisk.NETWORK);
         assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
     }
 

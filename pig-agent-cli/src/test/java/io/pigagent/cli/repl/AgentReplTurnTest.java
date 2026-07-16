@@ -66,7 +66,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, kernel, null, null, null, null, compression, null, null,
-                sessions, null, new AtomicReference<>(), null);
+                sessions, null, new AtomicReference<>(), null, null);
 
         repl.runTurn("hi", terminal);
 
@@ -83,7 +83,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>(), null);
+                null, new AtomicReference<>(), null, null);
 
         Event tool = event(EventType.TOOL_RESULT, "exit=0");
         when(tool.getMessage().getName()).thenReturn("executeCommand");

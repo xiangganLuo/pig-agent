@@ -4,6 +4,9 @@ import io.pigagent.channel.Channel;
 import io.pigagent.channel.http.HttpChannelServer;
 import io.pigagent.channel.http.InboundHttp;
 import io.pigagent.channel.http.OutboundHttp;
+import io.pigagent.channel.outreach.NotificationRenderer;
+import io.pigagent.channel.outreach.OutboundChannel;
+import io.pigagent.core.outreach.Notification;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,7 +31,7 @@ import java.util.function.Consumer;
  * the turn), so the ack is delayed until the reply has been sent; a production adapter should ack fast
  * (200) and run the agent + webhook reply on a background thread to respect platform event timeouts.
  */
-public final class StrategyHttpChannel implements Channel {
+public final class StrategyHttpChannel implements Channel, OutboundChannel {
 
     private static final Logger log = LoggerFactory.getLogger(StrategyHttpChannel.class);
 
@@ -104,6 +107,24 @@ public final class StrategyHttpChannel implements Channel {
     public void sendMessage(String message) {
         // Outbound travels the platform's webhook (out-of-band), not the inbound ack body.
         strategy.send(message);
+    }
+
+    /**
+     * Proactive outreach ({@link OutboundChannel}): render the notification to text and send it over
+     * the platform's webhook. Best-effort — {@link ChannelStrategy#send} is fire-and-forget (it logs a
+     * webhook failure internally and never throws), so this returns {@code true} once dispatched. Real
+     * delivery confirmation would need the strategy send to report a status (out of scope; see design).
+     * The {@code recipient} is unused here because a robot webhook has a single fixed destination.
+     */
+    @Override
+    public boolean send(String recipient, Notification notification) {
+        try {
+            strategy.send(NotificationRenderer.render(notification));
+            return true;
+        } catch (Exception e) {
+            log.warn("{} outbound send failed: {}", strategy.channelId(), e.getClass().getSimpleName());
+            return false;
+        }
     }
 
     @Override

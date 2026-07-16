@@ -6,6 +6,7 @@ import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.repl.command.AgentCommand;
 import io.pigagent.cli.repl.command.McpCommand;
+import io.pigagent.cli.repl.command.NotifyCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
@@ -62,6 +63,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new PermissionCommand(ctx));
         cmd.addSubcommand(new MemoryCommand(ctx));
         cmd.addSubcommand(new CompressCommand(ctx));
+        cmd.addSubcommand(new NotifyCommand(ctx));
         cmd.addSubcommand(new StatusCommand(ctx));
         cmd.addSubcommand(new ClearCommand(ctx));
         cmd.addSubcommand(new QuitCommand(ctx));
@@ -101,6 +103,7 @@ public final class ReplCommands {
             entry(t, "/permission <action>", "Tool permissions (status|mode|allow|revoke|reset|list)");
             entry(t, "/memory <on|off>", "Toggle/show global + session memory loading");
             entry(t, "/compress <action>", "Context compression (now|status|off|on)");
+            entry(t, "/notify <action>", "Proactive outreach (status|test)");
             entry(t, "/status", "Show agent status summary");
             entry(t, "/clear", "Clear the screen");
             entry(t, "/quit", "Exit");

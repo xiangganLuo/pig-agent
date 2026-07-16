@@ -13,6 +13,7 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.core.outreach.NotificationService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
@@ -71,12 +72,14 @@ public final class AgentRepl {
     private final Path workDir;
     private final AtomicReference<LineReader> readerRef;
     private final ToolAvailabilityReport availabilityReport;
+    private final NotificationService notificationService;
 
     public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
-                     AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport) {
+                     AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport,
+                     NotificationService notificationService) {
         this.agentHolder = agentHolder;
         this.agentKernel = agentKernel;
         this.reportsDir = reportsDir;
@@ -90,6 +93,7 @@ public final class AgentRepl {
         this.workDir = workDir;
         this.readerRef = readerRef;
         this.availabilityReport = availabilityReport;
+        this.notificationService = notificationService;
     }
 
     public void run() throws IOException {
@@ -102,7 +106,7 @@ public final class AgentRepl {
             ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
                     configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
-                    availabilityReport);
+                    availabilityReport, notificationService);
 
             DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
