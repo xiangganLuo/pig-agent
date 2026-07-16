@@ -15,7 +15,6 @@ public final class ToolRiskClassifier {
             // 只读
             Map.entry("readFile", ToolRisk.READ_ONLY),
             Map.entry("listDirectory", ToolRisk.READ_ONLY),
-            Map.entry("webSearch", ToolRisk.READ_ONLY),
             Map.entry("listMcpServers", ToolRisk.READ_ONLY),
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
@@ -36,12 +35,19 @@ public final class ToolRiskClassifier {
             Map.entry("jsonValidate", ToolRisk.READ_ONLY),
             Map.entry("randomNumber", ToolRisk.READ_ONLY),
             Map.entry("randomString", ToolRisk.READ_ONLY),
+            // 清单展示——只读
+            Map.entry("showChecklist", ToolRisk.READ_ONLY),
             // 写
             Map.entry("writeFile", ToolRisk.WRITE),
+            // 清单创建/勾选——写（非 EXEC；auto 免确认、plan 拒绝）
+            Map.entry("createChecklist", ToolRisk.WRITE),
+            Map.entry("markComplete", ToolRisk.WRITE),
             // 执行
             Map.entry("executeCommand", ToolRisk.EXEC),
             // 网络
             Map.entry("fetchUrl", ToolRisk.NETWORK),
+            // webSearch 归网络出口（与 fetchUrl 一致）：plan/EXPLORE 拒绝，防经搜索查询外泄上下文（Brave 走公网、不经 SSRF 守卫）
+            Map.entry("webSearch", ToolRisk.NETWORK),
             // 主动外呼：经渠道给用户发通知（proactive-outreach）
             Map.entry("notifyUser", ToolRisk.NETWORK),
             // MCP 自助管理
