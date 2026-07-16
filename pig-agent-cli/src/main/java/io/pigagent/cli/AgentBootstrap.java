@@ -5,6 +5,8 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.JsonFileAgentStateStore;
+import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
@@ -78,6 +80,8 @@ import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
+import io.pigagent.tool.permission.CommandKeys;
+import io.pigagent.tool.permission.CommandPermissionTool;
 import io.pigagent.tool.permission.PermissionContextFactory;
 import io.pigagent.tool.sandbox.SandboxPolicy;
 import io.pigagent.tool.shell.ShellTools;
@@ -331,6 +335,20 @@ public final class AgentBootstrap {
             mcpManager.setToolGroupNamer(name -> "mcp:" + name);
         }
 
+        // Command-granular allowlist (M-1, av2 Phase-6b): wrap the reflective executeCommand tool in a
+        // CommandPermissionTool (a ToolBase) whose checkPermissions ALLOWs a command whose first token is
+        // in the live permissions.allowlist.commands (else defers to the mode default). Done BEFORE the
+        // contract guard so the guard (also a ToolBase now) wraps it and delegates the command check.
+        // The exec-sandbox CommandGuard inside executeCommand still runs after the permission decision.
+        AgentTool execTool = toolkit.getTool(CommandKeys.COMMAND_TOOL_NAME);
+        if (execTool instanceof ToolBase execBase && !(execTool instanceof CommandPermissionTool)) {
+            java.util.function.Supplier<Set<String>> allowedCommands = () -> new java.util.HashSet<>(
+                    configManager.getConfig().getPermissions().getAllowlist().getCommands());
+            toolkit.registration().agentTool(new CommandPermissionTool(execBase, allowedCommands)).apply();
+            log.info("Command-granular allowlist wired for {} (honors permissions.allowlist.commands)",
+                    CommandKeys.COMMAND_TOOL_NAME);
+        }
+
         // Dispatch-layer contract guard (tool-json-contract): wrap every built-in tool so any
         // exception a tool lets escape becomes a canonical {"error":...} result instead of aborting
         // the turn. Installed after the built-in tools + McpTool (+ tool_search) but BEFORE MCP
@@ -379,16 +397,6 @@ public final class AgentBootstrap {
         if (evictionConfig != null) {
             log.info("Tool-result eviction enabled (threshold {} chars, dir {})",
                     evictionConfig.getMaxResultChars(), evictionConfig.getEvictionPath());
-        }
-
-        // M-1 (interim): command-granular allowlist isn't mapped to native per-tool rules yet
-        // (PermissionContextFactory reads allowlist.tools only). Warn so an operator relying on
-        // allowlist.commands knows those entries still require re-confirmation (fail-closed, safe).
-        int allowCmdCount = config.getPermissions().getAllowlist().getCommands().size();
-        if (allowCmdCount > 0) {
-            log.warn("permissions.allowlist.commands has {} entr{}, but command-granular allowlisting "
-                    + "is not yet wired to native permission (Phase-5); those commands are still confirmed.",
-                    allowCmdCount, allowCmdCount == 1 ? "y" : "ies");
         }
 
         // Native permission context (av2 Phase 4) — the 2.0 replacement for ToolPermissionHook. Built

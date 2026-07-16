@@ -5,6 +5,13 @@ import java.util.Map;
 /** EXEC 工具逐命令粒度用的规范化命令键：取 {@code command} 参数的首 token。 */
 public final class CommandKeys {
 
+    /**
+     * The name of the shell-execution tool ({@code executeCommand}) whose per-command allowlist is
+     * honored via {@link CommandPermissionTool}. Single source of truth so the permission mapper and
+     * the wiring layer agree on which tool carries the command-granular check.
+     */
+    public static final String COMMAND_TOOL_NAME = "executeCommand";
+
     private CommandKeys() {
     }
 

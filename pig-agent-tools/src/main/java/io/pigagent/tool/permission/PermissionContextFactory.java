@@ -25,11 +25,13 @@ import java.util.Locale;
  * READ_ONLY→ALLOW；plan 下可变工具→DENY（只读不可越权）；bypass→全 ALLOW；MCP_ADMIN→ALLOW
  * （委托内层 D-SEC 门，不重复确认）。tool 级 allowlist 命中→ALLOW。
  *
- * <p><b>已知边界（Phase-4 补全）</b>：命令粒度 allowlist（{@code allowlist.commands} 首 token）
- * 不做静态规则映射——原生规则优先级 deny&gt;ask&gt;allow，工具级 ASK 规则会遮蔽命令级 ALLOW 规则，
- * 且反射式 {@code executeCommand} 的 {@code matchRule} 语义不可控。命令粒度放行留待 Phase-4 的 HITL
- * 处理器（{@code RequireUserConfirmEvent}/{@code ConfirmResult.suggestedRules} + {@link AllowlistWriter}
- * /{@link CommandKeys}）；当前保守 fail-closed（allowlist 命令在 ask 下仍会确认），方向安全。
+ * <p><b>命令粒度 allowlist（M-1，Phase-6b 已接线）</b>：原生规则优先级 deny&gt;ask&gt;allow&gt;工具自检——
+ * 逐工具 ASK 规则会在工具 {@code checkPermissions} 之前短路，遮蔽命令级 ALLOW。因此本工厂<b>不给
+ * {@code executeCommand} 生成 ASK 规则</b>（见 {@link #addRule}）：改由 {@link CommandPermissionTool} 的
+ * {@code checkPermissions} 逐命令判定——{@code allowlist.commands}（{@link CommandKeys} 首 token 规范化）
+ * 命中→ALLOW，否则 PASSTHROUGH 落到模式兜底（交互 ASK / 非交互 fail-closed DENY）。plan 下仍显式 DENY
+ * （只读语义高于 allowlist），bypass 下 ALLOW，均保留规则。这也让自主数字员工的 {@code commandAllowlist}
+ * （折进 {@code allowlist.commands}）真正生效。
  */
 public final class PermissionContextFactory {
 
@@ -77,6 +79,14 @@ public final class PermissionContextFactory {
         ToolRisk risk = ToolRiskClassifier.classify(name, cfg.getToolOverrides());
         boolean allowlisted = cfg.getAllowlist().getTools().contains(name);
         PermissionDecision decision = PermissionPolicy.decide(pigMode, risk, allowlisted);
+        // M-1: executeCommand carries a command-granular built-in check (CommandPermissionTool). When the
+        // mode decision is ASK, emit NO rule — an ASK rule (or its non-interactive DENY) would short-circuit
+        // before the tool check and shadow a command-level ALLOW. Falling through lets CommandPermissionTool
+        // ALLOW an allowlisted command, else the mode default governs (interactive ASK / fail-closed DENY).
+        // DENY (plan) and ALLOW (bypass) rules are still emitted (plan denies even allowlisted commands).
+        if (CommandKeys.COMMAND_TOOL_NAME.equals(name) && decision == PermissionDecision.ASK) {
+            return;
+        }
         PermissionBehavior behavior = toBehavior(decision, interactive);
         PermissionRule rule = new PermissionRule(name, null, behavior, source);
         switch (behavior) {

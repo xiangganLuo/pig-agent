@@ -140,6 +140,24 @@ class PermissionContextFactoryTest {
                 .isEqualTo(PermissionBehavior.DENY);
     }
 
+    // ---- M-1: executeCommand gets NO ask rule so the command-granular allowlist can govern ----
+
+    @Test
+    void executeCommandHasNoAskRule_soCommandAllowlistCanGovern() {
+        // ask/auto interactive: an ASK rule would short-circuit before CommandPermissionTool.checkPermissions
+        // (native deny>ask>allow>tool-check), shadowing a command-level ALLOW. So the factory emits none.
+        assertThat(PermissionContextFactory.build(cfg(), PermissionMode.ASK, TOOLS, true)
+                .getAskRules()).doesNotContainKey("executeCommand");
+        assertThat(PermissionContextFactory.build(cfg(), PermissionMode.AUTO, TOOLS, true)
+                .getAskRules()).doesNotContainKey("executeCommand");
+        // non-interactive would-be-ASK also emits no rule (mode default DONT_ASK fail-closes it).
+        assertThat(PermissionContextFactory.build(cfg(), PermissionMode.ASK, TOOLS, false)
+                .getDenyRules()).doesNotContainKey("executeCommand");
+        // But plan still DENies exec explicitly (only-read semantics beat any allowlist).
+        assertThat(PermissionContextFactory.build(cfg(), PermissionMode.PLAN, TOOLS, true)
+                .getDenyRules()).containsKey("executeCommand");
+    }
+
     // ---- non-interactive (channel / autonomous): ASK fails closed ----
 
     @Test

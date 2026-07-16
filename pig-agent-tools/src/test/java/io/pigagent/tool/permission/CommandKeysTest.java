@@ -41,4 +41,18 @@ class CommandKeysTest {
         input.put("command", null);
         assertThat(CommandKeys.of(input)).isNull();
     }
+
+    @Test
+    void commandToolNameConstantIsExecuteCommand() {
+        assertThat(CommandKeys.COMMAND_TOOL_NAME).isEqualTo("executeCommand");
+    }
+
+    @Test
+    void tricksDoNotNormalizeToAPlainCommand() {
+        // Path-prefix / quoting / operator-gluing yield a first token that is NOT the bare command, so
+        // an allowlist of "git" can never be satisfied by these — the check falls through (safe).
+        assertThat(CommandKeys.of(Map.of("command", "/usr/bin/git push"))).isEqualTo("/usr/bin/git");
+        assertThat(CommandKeys.of(Map.of("command", "\"git\" push"))).isEqualTo("\"git\"");
+        assertThat(CommandKeys.of(Map.of("command", "git;rm -rf /"))).isEqualTo("git;rm");
+    }
 }
