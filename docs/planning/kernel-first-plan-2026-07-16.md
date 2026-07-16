@@ -58,8 +58,12 @@ v2 是 breaking 大迁移、跑在独立 v2 线（不进 main 直到验证完）
 - **原生缺口**：官方"以回复为主，未记载主动推送/push"——**主动外呼/通知正是 pig 要盖的"房子"**（Track B 定位被官方验证）。
 - **对 v2 Phase 4（channel）的修订**：由"改吃 streamEvents + 原生权限模式"升级为 **"采用原生 Gateway + 原生适配器，删掉 pig 手搓的渠道传输/路由/会话，只保留 app 层差异化"**——差异化 = 主动外呼（缺口）+ CC 风格 UX + 数字员工 + 编排 + 中文运维命令 + kernel façade（改为包住 Gateway）。feishu-dingtalk-channels 的手搓实现在 v2 由原生适配器取代（v1 仍用，服役到迁移）。
 
-### 战略选择（Phase 2-4 检查点决策，非当前 blocker）
-- **ReActAgent vs `HarnessAgent`**：2.0 的 `HarnessAgent` 原生提供 plan mode / task list / 工作区集成工具 / memory+compaction 配置——**正是 pig 手搓的 harness**。迁到 `HarnessAgent`（而非当前地图的 `ReActAgent`）可大幅缩小 pig 自研 harness 面，最贴合"harness 外包给 2.0"。代价：HarnessAgent 有自己的约定，需 spike 评估其与 pig 差异化（CC-REPL/kernel façade/数字员工）的兼容。**建议 Phase 2 前做一个 HarnessAgent spike 再定**。
+### 战略决策：采用 `HarnessAgent`（spike 已完成，2026-07-16 ✅）
+spike 分支 `av2/20260716-harness-spike`，结论文档 `docs/planning/harness-agent-spike.md`（3/3 绿 PoC + 5 条 javap 事实）。**决定：采用 `HarnessAgent`，经 `HarnessAgent.Builder.fromAgent(ReActAgent)` 增量迁移**（不是分叉）。
+- **为何低风险**：`HarnessAgent implements Agent` 且 `getDelegate()` 委托给 `ReActAgent`（薄包装，核心全保留）；`streamEvents(Msg):Flux<AgentEvent>` 与 pig 已迁移的 core 一致；共享 `.toolkit/.middleware/.model/.maxRetries/.fallbackModel/.stateStore/.permissionContext` seam；`PermissionMode{DEFAULT,ACCEPT_EDITS,EXPLORE,BYPASS,DONT_ASK}` 1:1 映射 pig plan/ask/auto/bypass；**每个原生扩展都可 `disableXxx()`（disableFilesystemTools/disableShellTool/disableMemoryTools/disableCompaction/disableSubagents…）**——pig 保留自己的 toolkit+守卫，逐个开原生件；`agentscope-harness` 已是 core 编译依赖。
+- **Phase 影响**：Phase 2（权限）**与该决策无关**（同样工作，先在 ReActAgent 上做、再 `fromAgent` 包）；**Phase 3（session state）大幅删减**——直接采用原生 session 持久化 + 原生 compaction/memory，替代原计划手写的 `SessionManager`-on-`AgentStateStore`（最大单项节省）；Phase 4 事件面不变，`AgentBootstrap` 用 `fromAgent` 构一个 `HarnessAgent` + pig toolkit/middleware + `disableXxx()`，kernel façade 照旧驱动。
+- **多agent 细节（重要）**：原生 `subagents/<id>.md`/`SubagentDeclaration` 覆盖 model/tools/prompt/workspace，但**无 per-agent 权限字段**（权限=`PermissionMode`+`tools.json`），且子agent 是**子**不是**可切换的对等 agent**（对等=`GatewayBootstrap` 多agent）。→ **ADAPT，不要在同一趟里删掉 `AgentRegistry`/`/agent`**；数字员工用原生子agent（后台+反向通知）承载、保留晨报 UX。
+- **待真模型 IT**：权限 HITL 往返、compaction/memory 的真实 LLM 调用（Phase 2/3 的 *IT）。
 
 ## 分支拓扑
 - `main` = v1 稳定线（含 6 改进，`a4f82ee`）——Track B 落这里。
