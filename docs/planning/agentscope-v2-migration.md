@@ -1,6 +1,14 @@
 # AgentScope Java 1.0.12 → 2.0 Migration Map
 
-> **Status: Phase 0-redux + Phase 1 (independent leaves) COMPLETE on CURRENT `main`.** Branch
+> **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) COMPLETE.**
+> Phase 2 lives on branch `av2/20260716-tools-permission` (off `av2/20260716-foundation-main`):
+> Step 0 relocated `AgentModelSwitcher` to core (unblocking model/onboarding), Step 1 got
+> `tools`/`mcp`/`plugin`/`plugin-builtin`/`skills-builtin` compiling+green on 2.0 (legacy-hook
+> bridge, POM-only), Step 2 replaced `ToolPermissionHook`+`PermissionDeniedTool` with the native
+> `PermissionEngine`/`PermissionContextState`. See **§9 Phase 2 execution log** for the mode/risk→rule
+> mapping table, the javap-confirmed API surprises, the security self-review, and Phase-4 open items.
+>
+> Branch
 > `av2/20260716-foundation-main` (off current `main`, which carries the 6 deerflow improvements —
 > loop-detection/A1, memory-extraction/A4, context-engineering/A5, deferred-tools, sandbox-warn-tier,
 > composite-skill). This re-applies the proven Phase-0 template (branch `av2/20260715-foundation`,
@@ -99,13 +107,13 @@ where they differ.
 | 1 | **pig-agent-config** | ✅ DONE | No AgentScope coupling at all → compiles + 36 tests green on 2.0 with **zero changes** (inherits parent POM only). | Low — done |
 | 1 | **pig-agent-workspace** | ✅ DONE | No AgentScope coupling → compiles on 2.0 with **zero changes** (1 class). | Low — done |
 | 1 | **pig-agent-task** | ✅ DONE | **Zero** `io.agentscope.*` imports (the map's "uses `Msg` incidentally" was stale) → compiles + tests green on 2.0 with **zero changes**. | Low — done |
-| 1 | **pig-agent-onboarding** | ⛔ BLOCKED | `OnboardingWizard` has **no** direct AgentScope usage (only `io.pigagent.model.{ModelManager,StoredModel}`), so it is 2.0-clean in itself — but it depends on **pig-agent-model → pig-agent-session (Phase 3)**, so `-am` can't build it. Unblocks the instant the session boundary (below) is resolved. | Blocked by session |
-| 1→2 | **pig-agent-model** (`ModelManager`) | ⛔ BLOCKED | `ModelManager` itself is 2.0-clean: `Msg/MsgRole/TextBlock/Model` are 2.0-core classes, and the `test` probe already uses `PigAgent.call(Msg)` (which Phase-0 migrated to `call(List,ctx)` internally) — **no probe change needed**. Its explicit `agentscope` 1.x dep is now redundant. **BUT** it depends on **pig-agent-session** solely for the `AgentModelSwitcher` interface, and session needs the Phase-3 L rewrite (see below), so `mvn -pl pig-agent-model -am compile` fails inside session. **STOPPED at this boundary per scope.** `StoredModel`/`JsonModelStore` are pure JSON (S, unaffected). | Blocked by session |
-| 2 | **pig-agent-tools** (framework) | **L** | **Permission re-architecture** (see §4): `ToolPermissionHook`/`PermissionDeniedTool` → native `PermissionEngine`+`PermissionContextState` (delete). `PreActingEvent` hook still compiles as a bridge, so a *compile* pass is M; native cleanup is L. `Toolkit`/`registration()`/`copy()`/`removeTool`/`@Tool` all preserved → availability gate + `ToolContractGuard`/`GuardedAgentTool` port with minor changes. `McpTool` unchanged. | **High** (security-sensitive; needs security review) |
-| 3 | **pig-agent-mcp** (`McpManager`) | M | `Toolkit.registerMcpClient(McpClientWrapper)`/`removeMcpClient` preserved — verify `McpClientWrapper` construction API (stdio/SSE/streamable-http). `JsonMcpStore` pure JSON. | Med (verify MCP client wrapper API) |
-| 3 | **pig-agent-plugin** | S | Plugin SPI is pig-owned; depends on the tools framework contracts (`ToolContext`). Recompile once tools lands. | Low |
-| 3 | **pig-agent-plugin-builtin** | M | `@Tool` tools + `Toolkit`; `SsrfGuard` uses `PreActingEvent`? (verify). Recompile after tools; port any hook to middleware/permission. | Low–Med |
-| 3 | **pig-agent-skills-builtin** | S | Classpath `SKILL.md` resources + `SkillProvider` SPI (pig-owned). Optionally adopt native `AgentSkillRepository`/`.skillRepository(...)` later. | Low |
+| 1 | **pig-agent-onboarding** | ✅ DONE (Phase 2 Step 0) | 2.0-clean in itself; unblocked by relocating `AgentModelSwitcher` to `pig-agent-core`. Compiles on 2.0 (no unit tests). | Low — done |
+| 1→2 | **pig-agent-model** (`ModelManager`) | ✅ DONE (Phase 2 Step 0) | Unblocked by moving the `AgentModelSwitcher` seam to core (breaks the `model→session` edge); dropped its redundant 1.x `agentscope` + `pig-agent-session` deps. 21 tests green (1 skipped POSIX-perms on Windows). | Low — done |
+| 2 | **pig-agent-tools** (framework) | ✅ DONE | **Permission re-architecture landed** (see §4/§9): `ToolPermissionHook`/`PermissionDeniedTool`/`PermissionResolver` **deleted** → native `PermissionEngine` via new `PermissionContextFactory` (mode+risk→rules). Guards (`ToolContractGuard`/`GuardedAgentTool`/availability/SSRF/credential-file) unchanged. Read-only `@Tool` methods flagged `readOnly=true`. 309 tests green. | **High (done)** — security self-review in §9 |
+| 3 | **pig-agent-mcp** (`McpManager`) | ✅ DONE | `McpClientBuilder.create()/.stdioTransport()/.sseTransport()/.streamableHttpTransport()/.buildSync()` **byte-identical** in 2.0 (javap) — **no code change**, POM → `agentscope-core`. 14 tests green (1 skipped). | Low — done |
+| 3 | **pig-agent-plugin** | ✅ DONE | POM → `agentscope-core`; plugin SPI still uses the legacy `io.agentscope.core.hook.Hook` bridge (deprecation warnings, present via `LegacyHookDispatcher`). 18 tests green. | Low — done |
+| 3 | **pig-agent-plugin-builtin** | ✅ DONE | POM → `agentscope-core`; read-only compute + `webSearch` `@Tool` flagged `readOnly=true`. `SsrfGuard`/`SmartWebFetchTool` unchanged (no hook). 132 tests green. | Low — done |
+| 3 | **pig-agent-skills-builtin** | ✅ DONE | Classpath `SKILL.md` + `SkillProvider` SPI, pig-owned; no agentscope dep. 12 tests green. | Low — done |
 | 4 | **pig-agent-session** (`SessionManager`) | **L** — **PROVEN BOUNDARY** | **Biggest rewrite, and it sits UPSTREAM of model/onboarding.** Empirically confirmed to fail on 2.0 (`mvn -pl pig-agent-model -am compile`): `SessionManager` holds an `io.agentscope.core.session.Session agentSession` field (fields 30/42/53 — the class is **removed** in 2.0, currently only resolving because session still declares the 1.x all-in-one) and calls the **old 2-arg** `agentHolder.get().saveTo(agentSession, id)` (lines 153/174/218) + `loadIfExists(agentSession, id)` (line 103) — which no longer match the Phase-0-migrated `PigAgent.saveTo(String)`/`loadIfExists(String)`. Rewrite: `io.agentscope.core.session.Session` + `JsonSession` → `AgentStateStore` (`JsonFileAgentStateStore`) keyed by `(userId,sessionId)`; wire a per-session `RuntimeContext` into `PigAgent.call/stream` (Phase-0 uses the default session); adapt to the new `PigAgent.saveTo/loadIfExists(sessionId)`; keep pig's `Session` metadata record + two-tier temp memory + compression lineage. **NB — quick unblock option for model/onboarding without the full rewrite:** the only thing model needs from session is the tiny `AgentModelSwitcher` interface (1 method, zero AgentScope coupling); relocating it to `pig-agent-core` (an SPI seam) breaks the `model → session` edge so model+onboarding could go 2.0-green ahead of the session rewrite. Deferred here because it edits the Phase-3 module and the scope was "stop at the boundary". | **High** (state/persistence semantics; data-format change for existing session dirs) |
 | 5 | **pig-agent-channel** | M | `ChannelAgentBridge` routes turns via the agent (`call`/`stream`) + a channel-mode permission track. Move to `streamEvents`/native permission-mode; channel keeps its own state store partition. | Med |
 | 6 | **pig-agent-cli** (`AgentRepl` + renderers) | **L** | Consumes `kernel.chat` → now `Flux<AgentEvent>`: rewrite `renderStream` to aggregate typed events (`TextBlockDeltaEvent.getDelta()`, `ThinkingBlock*`, `ToolCall*`, `ToolResult*`, `AgentEndEvent`, HITL `RequireUserConfirmEvent`) instead of `Event`/`EventType`. `AgentBootstrap` re-wires state store, permission context, middleware, retry (native). **Preserve** CC-REPL renderers, StatusLine, InlineSelector, slash completion. | Med–High (event-model rewrite; most user-visible) |
@@ -237,3 +245,111 @@ depMgmt for not-yet-migrated modules; `pig-agent-core` → `agentscope-core` + `
 **2.0 API surprises:** none beyond the old Phase-0 findings. Environment note: the active Maven local
 repo is `D:/env/apache-maven-3.9.10/repository` (per global `settings.xml`), not `~/.m2` — all 7 2.0
 artifacts were already cached there.
+
+## 9. Phase 2 execution log (branch `av2/20260716-tools-permission`)
+
+**Base:** `av2/20260716-foundation-main`. Three steps, each committed separately; **not merged** (lead
+merges into the v2 line).
+
+### Step 0 — Phase-1 unblock (relocate `AgentModelSwitcher`)
+
+The tiny AgentScope-free `AgentModelSwitcher` interface (1 method) moved from `pig-agent-session`
+(`io.pigagent.session`) to `pig-agent-core` (`io.pigagent.core.agent`). `pig-agent-model` dropped its
+`pig-agent-session` **and** redundant 1.x `agentscope` deps; `SessionManager`/`SessionManagerTest`/
+`ModelManager` import from core now. This breaks the `model → session` edge so model/onboarding build
+without touching the Phase-3 session rewrite. **Acceptance:** `mvn -pl pig-agent-model,pig-agent-onboarding
+-am test` GREEN (core 234, model 21/1-skipped, onboarding compiles).
+
+### Step 1 — tools + downstream compile+test GREEN on 2.0 (legacy-bridge, POM-only)
+
+POMs for `tools`/`mcp`/`plugin`/`plugin-builtin` moved from the 1.x all-in-one `agentscope` to
+`agentscope-core` (removing the dual-jar classpath). **Zero source changes** — the deprecated legacy
+hook surface (`io.agentscope.core.hook.*` incl. `PreActingEvent`, via `LegacyHookDispatcher`) still
+compiles, so `ToolPermissionHook`/`PermissionDeniedTool`/`LoopDetectedTool` build as a bridge for this
+step. **Acceptance:** all five + model/onboarding `-am test` GREEN.
+
+### Step 2 — native permission re-architecture
+
+**Deleted:** `ToolPermissionHook`, `PermissionDeniedTool` (+ its `ToolProvider` + SPI service line),
+`PermissionResolver`, and their tests (`ToolPermissionHookTest`, `PermissionResolverTest`).
+**Added:** `io.pigagent.tool.permission.PermissionContextFactory` — maps pig's model onto a native
+`PermissionContextState`. **Kept (pure decision core, unchanged):** `ToolRiskClassifier`/`ToolRisk`,
+`PermissionPolicy` + pig `PermissionDecision` enum (feed the mapper), `CommandKeys`/`AllowlistWriter`/
+`PermissionConfirmer` (retained for the Phase-4 HITL round-trip).
+
+**Native classes used (javap-confirmed, `agentscope-core-2.0.0`):**
+`io.agentscope.core.permission.{PermissionEngine(PermissionContextState), PermissionContextState.builder()
+.mode/.addAllowRule/.addDenyRule/.addAskRule/.build, PermissionRule(toolName,ruleContent,behavior,source),
+PermissionMode{DEFAULT,ACCEPT_EDITS,EXPLORE,BYPASS,DONT_ASK}, PermissionBehavior{ALLOW,DENY,ASK,PASSTHROUGH},
+PermissionDecision.getBehavior()}` · `PermissionEngine.checkPermission(ToolBase,Map)→Mono<PermissionDecision>`
+· `io.agentscope.core.message.ToolResultState.DENIED` · agent wiring (for Phase-4, verified present):
+`ReActAgent.Builder.permissionContext(PermissionContextState)`, `ReActAgent.setPermissionMode(RuntimeContext|
+(userId,sessionId), PermissionMode)`, `getPermissionEngine()`/`getPermissionContext()` ·
+`ToolBase.generateSuggestions(Map)→List<PermissionRule>` (native allowlist-suggestion equivalent of
+`AllowlistWriter`), `ToolBase.matchRule(ruleContent,input)`.
+
+**Mode + risk → native rule mapping (implemented by `PermissionContextFactory`):**
+
+Base native mode: `plan→EXPLORE`, `ask→DEFAULT`, `auto→ACCEPT_EDITS`, `bypass→BYPASS`; **non-interactive
+(no confirmer) → `DONT_ASK` base** (except `bypass`). Per-tool rule behavior (from the unchanged
+`PermissionPolicy` table; `interactive=false` downgrades ASK→DENY):
+
+| risk \ pig mode | plan (EXPLORE) | ask (DEFAULT) | auto (ACCEPT_EDITS) | bypass (BYPASS) |
+|---|---|---|---|---|
+| READ_ONLY | ALLOW | ALLOW | ALLOW | ALLOW |
+| WRITE | DENY | ASK→(chan)DENY | ALLOW | ALLOW |
+| NETWORK | DENY | ASK→(chan)DENY | ALLOW | ALLOW |
+| EXEC | DENY | ASK→(chan)DENY | ASK→(chan)DENY | ALLOW |
+| MCP_ADMIN | DENY | ALLOW (→D-SEC) | ALLOW (→D-SEC) | ALLOW |
+| tool in `allowlist.tools` | DENY (plan wins) | ALLOW | ALLOW | ALLOW |
+
+Rules are `ruleContent=null` (match all calls of that tool), keyed by tool name; native precedence is
+deny > ask/built-in > allow > mode-fallback.
+
+**javap-confirmed API surprises:**
+1. **`McpClientBuilder` unchanged** — the skill prose's `.stdio()/.streamableHttp()/.sse()` factory
+   methods do NOT exist; the real 2.0 API is `create(name)` + `.stdioTransport(...)`/`.sseTransport(url)`/
+   `.streamableHttpTransport(url)`/`.buildSync()` — byte-identical to pig's `McpManager.connect`. No change.
+2. **`ToolBase.checkPermissions(Map, PermissionContextState)`** — the skill prose said `(Map,
+   ToolExecutionContext)`; javap shows `PermissionContextState`. (Not used by pig's reflection tools.)
+3. **EXPLORE enforces read-only as a built-in check keyed on `tool.isReadOnly()`, ABOVE allow rules**
+   (empirically: an explicit allow rule for a non-readonly tool does NOT override EXPLORE). So for `plan`
+   to permit reads, read-only `@Tool` methods MUST declare `readOnly=true` — pig's did not. Fixed:
+   `readFile`/`listDirectory`/`listSkills`/`loadSkill`/`tool_search`/`listMcpServers`/`testMcpServer`
+   (tools) + all read-only compute tools + `webSearch` (plugin-builtin). This also enables native
+   `readOnlyHint` auto-allow (matching pig's "READ_ONLY always ALLOW"), so it is not a weakening.
+
+**Security self-review (invariants preserved):**
+- **plan truly read-only:** every mutating tool gets a tier-1 DENY rule in plan (unbeatable), incl.
+  allowlisted (plan wins over allowlist — tested). Reads permitted via `readOnly=true` + EXPLORE + allow
+  rule. ✓
+- **channel/autonomous fail-closed:** `interactive=false` → base `DONT_ASK` **and** per-tool ASK→DENY, so
+  any tool that would prompt is denied when there is no confirmer (tested channel ask/auto). ✓
+- **MCP_ADMIN via D-SEC (no double-prompt):** `addMcpServer`/`removeMcpServer`→ALLOW rule in ask/auto
+  (delegated to the unchanged `McpTool` D-SEC door), DENY in plan. ✓
+- **DENY + dangerous-path hold under BYPASS:** pig `bypass` generates no deny rules (allow-all, matching
+  prior pig behavior); native `ToolDangerousPathConstants` still apply even under BYPASS — a *hardening*
+  vs old pig bypass (pure allow-all), never a weakening. ✓
+- **No READ_ONLY tool wrongly promoted:** every tool flagged `readOnly=true` was already "always ALLOW"
+  under pig's READ_ONLY policy, so native auto-allow changes nothing at runtime. ✓
+
+**Honest limitations / Phase-4 open items:**
+- **No enforcement is wired yet.** `PermissionContextFactory` produces the context; installing it via
+  `ReActAgent.Builder.permissionContext(...)` + runtime `setPermissionMode(...)` + the HITL confirmer flow
+  (`RequireUserConfirmEvent`/`ConfirmResult.suggestedRules` ↔ `AllowlistWriter`/`readerRef`) is Phase-4
+  (cli `AgentBootstrap`/`AgentWiring`, which still reference the deleted classes and are not on 2.0). A
+  **live-model permission IT** ("model receives DENIED and continues", plan denies a write end-to-end) is
+  required there — cannot be exercised offline.
+- **Command-granular allowlist (`allowlist.commands`) deferred.** Native precedence deny>ask>allow makes a
+  tool-level ASK rule shadow a command-level ALLOW rule, and reflection `executeCommand`'s `matchRule` is
+  not controllable; current behavior is fail-closed (an allowlisted command still asks). Restoring it needs
+  `executeCommand` as a `ToolBase` overriding `checkPermissions`/`matchRule` (Phase-4).
+- **Plan Mode as a HarnessAgent feature** (`enablePlanMode()`, `plan_enter/write/exit` + HITL exit gate) is
+  Phase-4 (agent is built in cli). Phase 2 maps pig `plan`→`EXPLORE` at the permission layer only.
+- **`loop-detection`** stays on the legacy hook bridge + its own `LoopDetectedTool` sentinel (a guard
+  orthogonal to permission; unchanged this phase).
+
+**Acceptance (single-threaded surefire, 2.0):** `pig-agent-tools` **309** / `pig-agent-mcp` **14** (1 skip)
+/ `pig-agent-plugin` **18** / `pig-agent-plugin-builtin` **132** / `pig-agent-skills-builtin` **12** /
+`pig-agent-model` **21** (1 skip) / `pig-agent-onboarding` (no unit tests) — **506 tests, 0 failures,
+0 errors, 5 skipped.**
