@@ -1,7 +1,17 @@
 # AgentScope Java 1.0.12 → 2.0 Migration Map
 
 > **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
-> (session/state rewrite) + Phase 4 (frontends: cli + web + channel) COMPLETE.**
+> (session/state rewrite) + Phase 4 (frontends: cli + web + channel) + Phase 5a (delete self-built
+> decorators → native retry/interrupt, hooks → native middleware, drop the 1.x `agentscope` dep) COMPLETE.**
+> Phase 5a lives on branch `av2/20260716-cleanup` (off `av2/20260716-foundation-main`): it deletes
+> `RetryingModel`/`RetryPolicy`/`TransientErrorClassifier` + `InterruptibleModel` (→ native
+> `ReActAgent.Builder.maxRetries`/`.fallbackModel` + `ReActAgent.interrupt`), migrates the last three
+> deprecated hooks (`EphemeralMemoryContextHook`, `LoopDetectionHook`, `LoggingHook`/`ToolCallLoggingHook`)
+> + the plugin SPI to native `MiddlewareBase`, and removes the legacy 1.x `io.agentscope:agentscope`
+> depMgmt + `agentscope.version` property from the parent POM. **No pig code imports
+> `io.agentscope.core.hook.*` anymore; the reactor builds on pure 2.0 artifacts.** See **§12 Phase 5a
+> execution log** for the javap-grounded retry/interrupt decisions, the prefix-cache/loop preservation
+> proofs, and the remaining Phase-5b/6 open items.
 > Phase 4 lives on branch `av2/20260716-frontends` (off `av2/20260716-foundation-main`): the **whole
 > reactor compiles + unit-tests GREEN on 2.0**. It wires native permission
 > (`PermissionContextFactory.build(...)` → `ReActAgent.Builder.permissionContext(...)` via
@@ -576,3 +586,127 @@ HarnessAgent wrap; native compaction/memory/subagent/plan-mode adoption; hook→
 pre-existing `AgentRegistry` default-instance vs `AgentHolder` staleness on holder-only rebuilds (model
 switch + M-2) — the interactive kernel path reads the registry instance; reconcile so a holder rebuild
 updates the active instance too.
+
+## 12. Phase 5a execution log (branch `av2/20260716-cleanup`)
+
+**Base:** `av2/20260716-foundation-main` (whole reactor already GREEN on 2.0 after Phase 4). **Not
+merged** (lead merges into the v2 line). Three steps, each committed separately and kept
+reactor-green.
+
+### Step 1 — delete `RetryingModel` + `InterruptibleModel` → native (commit `refactor(av2): Phase 5a step 1`)
+
+**Native retry — DECISION: delete pig's classifier too.** `javap` on `agentscope-core-2.0.0` proves the
+native model-layer retry already distinguishes transient vs permanent, so `RetryingModel`,
+`RetryPolicy` **and** `TransientErrorClassifier` are all deleted (not just the decorator):
+- `ExecutionConfig.RETRYABLE_ERRORS` (a `Predicate<Throwable>`) matches `HttpTransportException` /
+  `ModelHttpException` with `isRetryableHttpStatus()` (**429 or 5xx**), `TimeoutException`, and
+  `IOException` → retryable; everything else (4xx/auth) → not retryable. This is a **superset** of
+  pig's old classifier (which also treated 4xx as permanent + 5xx/timeout/IO as transient) — it adds
+  429 rate-limit handling.
+- `ReActAgent.Builder.maxRetries(int)` feeds `ModelConfig.maxRetries` → `ExecutionConfig.maxAttempts` →
+  `ModelUtils.applyTimeoutAndRetry` = `Retry.backoff(maxAttempts-1, initialBackoff).maxBackoff(...)
+  .jitter(...).filter(RETRYABLE_ERRORS)`. `DEFAULT_MAX_RETRIES = 3`. Retry is applied **inside the
+  model extension impls** (e.g. `OpenAIChatModel` calls `applyTimeoutAndRetry`), i.e. on a fresh
+  `model.stream` HTTP call inside one agent invocation — never by re-subscribing the single-flight
+  agent (the exact property pig's decorator hand-rolled).
+- Wiring: `PigAgent.Builder.maxRetries(int)` + `fallbackModel(Model)` → `reactBuilder.maxRetries/
+  .fallbackModel`. `AgentBootstrap` maps config `model.retry`: `enabled` → `maxRetries = max(1,
+  max-retries)`; `disabled` → `maxRetries = 1` (one attempt, no retries). Applied to the interactive,
+  per-agent, channel, and autonomous build paths.
+- **Documented trade-offs (native has no equivalent):** the inline user-facing `[retry k/N]` notice is
+  gone (native has no per-retry callback); pig's client-side "per-attempt timeout" and "pre-emission
+  guard" are gone (native uses a plain `Retry.backoff` on the model stream + a model-layer timeout —
+  transient errors on well-behaved SDKs surface at/near connection, before deltas). Because retry now
+  lives in the model impls, it can't be exercised with a fake `Model` offline; `NativeRetryWiringTest`
+  asserts the config reaches the native `ModelConfig` (`getModelConfig().maxRetries()/.fallbackModel()`),
+  and the real transient-vs-permanent behavior is a live-model IT.
+
+**Native interrupt — KEEP `InterruptController`/`TurnHandle`, delete the decorator.**
+`InterruptibleModel` is deleted; `AgentKernel.chat` now (a) registers a `TurnHandle` whose interrupt
+action calls native `ReActAgent.interrupt(RuntimeContext)` (via `PigAgent.interrupt(sessionId)`) for a
+clean cooperative abort — no half-finished result persisted — and (b) wraps the event stream in
+`takeUntilOther(handle.onInterrupt() → TurnInterruptedException)` so the frontend regains control
+immediately even if the model stalls. `AgentFactory`/`AgentInstanceFactory` no longer decorate the
+model; the controller lives only in the kernel. **Trade-off:** native interrupt is *cooperative*
+(checked at reasoning-step boundaries via `AgentState.interruptControl()`), so a genuinely stuck model
+call is only reclaimed at the model-layer HTTP timeout (bounded, minutes) rather than immediately as the
+old decorator did — acceptable, and the frontend is never blocked. `AgentKernelInterruptTest` was
+re-expressed on the native path (+ a `GracefulShutdownManager.resetForTesting()` teardown, since
+interrupting the artificial never-completing test model leaves a native request registered).
+
+**Tests:** deleted the pure-decorator units (`RetryingModelTest`, `RetryPolicyTest`,
+`TransientErrorClassifierTest`, `PerAttemptTimeoutTest`, `InterruptibleModelSpikeTest`,
+`InterruptRetryCompositionTest`, `ModelRetryWiringTest` — 7 files, the retry/interrupt decorator
+coverage); added `NativeRetryWiringTest` (4). `InterruptControllerTest` unchanged (kept `begin()`).
+
+### Step 2 — hooks → native middleware (commit `refactor(av2): Phase 5a step 2`)
+
+All pig hooks moved off the deprecated `io.agentscope.core.hook.*` bridge to native `MiddlewareBase`.
+**`git grep` confirms no pig source imports `io.agentscope.core.hook.*` (only javadoc `{@code}` text
+naming the old classes remains).**
+
+- **`EphemeralMemoryContextHook` → `EphemeralMemoryMiddleware`.** Prefix-cache semantics preserved
+  **exactly**: injection is on `onReasoning`, appending the retrieved memory as a trailing USER message
+  to a **new** `ReasoningInput` handed to `next` — the incoming list (`AgentState.getContext()` at
+  runtime) is never mutated, so nothing is persisted; `onSystemPrompt` is identity, so the system
+  prompt stays byte-stable across turns. The **record half** is preserved via an `onAgent` post-phase
+  (`next.apply(input).concatWith(record)`) that records the finished conversation
+  (`RuntimeContext.getAgentState().getContext()`) to the session tier — the 2.0 equivalent of the 1.x
+  `PostCallEvent`. `CachingLongTermMemory` wrap kept (N per-turn reads → 1). **Proof:** the existing
+  end-to-end `MemoryUserSideInjectionTest` (6 tests, drives the whole agent via a `CapturingModel`)
+  passes unchanged via the middleware path — memory user-side not in the system prompt, system prompt
+  byte-stable as memory changes, injection non-accumulating, `record` to the session tier, `/memory
+  off` no-op. `EphemeralMemoryMiddlewareTest` (4) also green.
+- **`LoopDetectionHook` → `LoopDetectionMiddleware`.** Semantics preserved: sliding-window signature +
+  warn@3 / stop@5 (the pure `LoopDetector` is unchanged). **STOP maps to the sentinel-rewrite, not a
+  synthetic DENIED result** — `onActing` rewrites the offending `ToolUseBlock` to the read-only
+  `loopDetected` sentinel in a **new** `ActingInput` handed to `next`, reusing the proven acting
+  machinery (the sentinel tool runs, the model gets "stop and answer" as a normal tool result). This
+  is deliberately chosen over constructing DENIED events by hand: it reuses the framework's tool-result
+  wiring and avoids fragile synthetic events. WARN records a nudge; `onReasoning` does per-turn reset
+  (USER-message count) + injects the nudge ephemerally. **Ordering matters:** the loop middleware is
+  placed **before** the memory middleware (which `PigAgent.build` appends last) so its `onReasoning`
+  counts the raw conversation before memory injection — mirroring the old hook priority (10 < 50).
+  Ported `LoopDetectionHookTest` → `LoopDetectionMiddlewareTest` (5 tests; dropped the now-N/A
+  `priority()` assertion — middleware order is list position).
+- **`LoggingHook`/`ToolCallLoggingHook` → `LoggingMiddleware`/`ToolCallLoggingMiddleware`** (DEBUG
+  observers on `onReasoning`/`onActing`, gated on `isDebugEnabled()`).
+- **Plugin SPI:** `PluginContext.addHook(Hook)`/`addHooks(...)` → `addMiddleware(MiddlewareBase)`/
+  `addMiddlewares(...)`; `CollectingPluginContext.hooks()` → `middlewares()`; `PluginRegistry.Result
+  .hooks` → `middlewares`. No shipped plugin contributed a hook, so this is a type change only (tests
+  updated).
+- **Core seam:** `PigAgent.Builder.hooks(List<Hook>)` → `middlewares(List<MiddlewareBase>)` →
+  `reactBuilder.middlewares(...)`; `AgentFactory` `hooks`→`middlewares`; `AgentInstanceFactory
+  .HooksProvider` → `MiddlewareProvider`. `AgentBootstrap` builds the native middleware lists.
+
+### Step 3 — drop the 1.x `agentscope` dep (fully-2.0 milestone) (commit `chore(av2): Phase 5a step 3`)
+
+The parent POM's legacy `io.agentscope:agentscope` **depMgmt entry** + the `agentscope.version`
+property were removed (the 2.0 `agentscope2.version`/artifacts stay). No module ever *declared* the 1.x
+all-in-one — the depMgmt only pinned its version — so this is a clean removal. `git grep` confirms no
+`${agentscope.version}` usage and no `<artifactId>agentscope</artifactId>` declaration remains.
+`mvn dependency:tree -pl pig-agent-cli -am -Dincludes=io.agentscope:agentscope` (reactor resolution)
+shows the 1.x jar **absent** from the classpath. (A bare `-pl pig-agent-cli` tree can still show a stale
+1.x jar — that resolves an *installed* pre-migration `pig-agent-core` from the local repo, which the
+reactor build never uses; the current source `pig-agent-core` POM declares only `agentscope-core` +
+`agentscope-harness`.)
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn clean test -DskipITs` — **whole reactor GREEN, all 17 modules** (BUILD SUCCESS). `pig-agent-core`
+209 → **208** (net: −29 deleted decorator/retry/interrupt units +4 `NativeRetryWiringTest`; −6 loop
+hook test +5 loop middleware test; −1 dropped `priority()` case). Removed tests are exactly the
+subjects that were deleted (retry/interrupt decorators, loop hook adapter). No
+`io.agentscope.core.hook.*` imports remain; the 1.x `agentscope` dep + `agentscope.version` property are
+gone.
+
+### Remaining Phase-5b / 6 open items
+
+`HarnessAgent` wrap (`HarnessAgent.Builder.fromAgent(ReActAgent)`); native compaction
+(`CompactionConfig`) / memory (`MemoryConfig`, with a dedicated cheap model) / subagent / plan-mode
+adoption; native Gateway for channels; command-granular allowlist as a `ToolBase`
+`checkPermissions`/`matchRule`; **live-model ITs** (permission DENY end-to-end, multi-turn persistence,
+and the native transient-vs-permanent retry behavior that unit tests can no longer exercise offline).
+Optional cleanup: the now-unused vendor-SDK depMgmt entries + `*.version` properties in the parent POM
+(kept this pass — they no longer affect the classpath since the model extensions bundle the SDKs
+transitively), and re-`install` to refresh the stale local-repo `pig-agent-core` jar.

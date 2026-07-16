@@ -67,12 +67,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Core dependencies -->
-        <!-- agentscope.version: legacy 1.x single artifact, still referenced by modules not yet
-             migrated to 2.0 (session/mcp/tools/…). Kept so the reactor stays parseable during the
-             phased av2 migration. -->
-        <agentscope.version>1.0.12</agentscope.version>
         <!-- agentscope2.version: AgentScope 2.0 split artifacts (core + harness + model extensions).
-             pig-agent-core and pig-agent-providers are migrated to these first (Phase 0). -->
+             The whole reactor is on pure 2.0 artifacts (av2 Phase 5a); the legacy 1.x all-in-one
+             `io.agentscope:agentscope` dependency + its `agentscope.version` property were removed. -->
         <agentscope2.version>2.0.0</agentscope2.version>
         <jline.version>3.28.0</jline.version>
         <picocli.version>4.7.6</picocli.version>
@@ -109,13 +106,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- AgentScope Java 1.x (all-in-one) — legacy, for not-yet-migrated modules. -->
-            <dependency>
-                <groupId>io.agentscope</groupId>
-                <artifactId>agentscope</artifactId>
-                <version>${agentscope.version}</version>
-            </dependency>
-
             <!-- AgentScope Java 2.0 — split artifacts. Core + harness + per-provider model extensions.
                  The model extensions bundle their vendor SDK transitively, so the explicit SDK
                  declarations below are redundant for the migrated modules (kept only for legacy 1.x). -->
