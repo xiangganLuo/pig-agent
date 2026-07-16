@@ -22,7 +22,7 @@
     <dependencies>
         <dependency>
             <groupId>io.agentscope</groupId>
-            <artifactId>agentscope</artifactId>
+            <artifactId>agentscope-core</artifactId>
         </dependency>
         <dependency>
             <groupId>io.pigagent</groupId>

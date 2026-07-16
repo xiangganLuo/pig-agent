@@ -27,7 +27,7 @@
         <!-- Explicit for @Tool / Toolkit (also transitive via the SPI) -->
         <dependency>
             <groupId>io.agentscope</groupId>
-            <artifactId>agentscope</artifactId>
+            <artifactId>agentscope-core</artifactId>
         </dependency>
         <!-- JSON pretty-print / validate (battle-tested; version managed by the parent POM) -->
         <dependency>
