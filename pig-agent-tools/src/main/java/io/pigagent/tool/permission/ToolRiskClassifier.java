@@ -42,6 +42,8 @@ public final class ToolRiskClassifier {
             Map.entry("executeCommand", ToolRisk.EXEC),
             // 网络
             Map.entry("fetchUrl", ToolRisk.NETWORK),
+            // 主动外呼：经渠道给用户发通知（proactive-outreach）
+            Map.entry("notifyUser", ToolRisk.NETWORK),
             // MCP 自助管理
             Map.entry("addMcpServer", ToolRisk.MCP_ADMIN),
             Map.entry("removeMcpServer", ToolRisk.MCP_ADMIN));

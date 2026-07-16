@@ -44,7 +44,7 @@ class AgentReplInterruptTest {
                 .streams(new ByteArrayInputStream(new byte[0]), out)
                 .build();
         AgentRepl repl = new AgentRepl(null, kernel, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>(), null);
+                null, new AtomicReference<>(), null, null);
 
         // A turn that starts (reasoning) then hangs — simulates an in-flight model call.
         Event reasoning = mock(Event.class);
