@@ -20,6 +20,8 @@ import io.pigagent.provider.gemini.GeminiProtocol;
 import io.pigagent.provider.ollama.OllamaProtocol;
 import io.pigagent.provider.openai.OpenAiProtocol;
 import io.pigagent.provider.registry.ProtocolRegistry;
+import io.pigagent.tool.contract.GuardedAgentTool;
+import io.pigagent.tool.contract.ToolContractGuard;
 import io.pigagent.tool.permission.PermissionContextFactory;
 import org.junit.jupiter.api.Test;
 
@@ -51,10 +53,14 @@ class PermissionEnforcementIT {
         }
     }
 
-    private record Rig(SpyMutatingTool spy, AgentHolder holder) {
+    private record Rig(SpyMutatingTool spy, AgentHolder holder, Toolkit toolkit) {
     }
 
     private Rig buildAgent(String mode) {
+        return buildAgent(mode, false);
+    }
+
+    private Rig buildAgent(String mode, boolean guarded) {
         Path realModels = Path.of(System.getProperty("user.home"), ".pig-agent", "workspace", "models.json");
         assertThat(realModels).as("需要已配置的默认模型 models.json").exists();
 
@@ -71,6 +77,14 @@ class PermissionEnforcementIT {
         SpyMutatingTool spy = new SpyMutatingTool();
         Toolkit toolkit = new Toolkit();
         toolkit.registration().tool(spy).apply();
+        if (guarded) {
+            // Exercise the PRODUCTION dispatch path: AgentBootstrap wraps every built-in tool in a
+            // GuardedAgentTool. This is the P0 regression guard — the native PermissionEngine only
+            // gates a tool that resolves to a ToolBase (the acting phase auto-ALLOWs a non-ToolBase
+            // tool), so if GuardedAgentTool ever stops being a ToolBase, permission enforcement is
+            // silently bypassed. A raw-tool test would NOT catch that; this one must.
+            ToolContractGuard.install(toolkit);
+        }
 
         PigAgentConfig.PermissionConfig cfg = new PigAgentConfig.PermissionConfig();
         cfg.setMode(mode);
@@ -82,7 +96,7 @@ class PermissionEnforcementIT {
         PigAgent agent = PigAgent.builder()
                 .name("perm-it").sysPrompt(sysPrompt).model(model)
                 .toolkit(toolkit).permissionContext(permCtx).build();
-        return new Rig(spy, new AgentHolder(agent));
+        return new Rig(spy, new AgentHolder(agent), toolkit);
     }
 
     private String ask(AgentHolder holder, String text) {
@@ -108,5 +122,35 @@ class PermissionEnforcementIT {
         ask(rig.holder(), "请调用 dangerousWrite 工具，note 传 BYPASS_TEST。");
         System.out.println("[PERM-IT] bypass spyExecuted=" + rig.spy().executed.get());
         assertThat(rig.spy().executed.get()).as("bypass 模式应放行可变工具").isTrue();
+    }
+
+    /**
+     * P0 回归护栏（最关键）：可变工具经 {@link GuardedAgentTool} 包裹（=生产 dispatch 路径），plan/EXPLORE
+     * 下仍必须被原生 {@code PermissionEngine} 否决。P0 曾因 {@code GuardedAgentTool} 只实现 {@code AgentTool}
+     * （非 {@code ToolBase}）→ ReAct acting 阶段对非 ToolBase 工具自动 ALLOW，权限在生产环境静默失效。
+     * 若 {@code GuardedAgentTool extends ToolBase} 被回退，本用例会翻红（原始工具用例不会）。
+     */
+    @Test
+    void planModeVetoesGuardedMutatingTool() {
+        Rig rig = buildAgent("plan", true);
+        // Sanity: the tool the model will call is actually the guard, not the raw reflective tool —
+        // so a regression to `implements AgentTool` genuinely flips this test's outcome.
+        assertThat(rig.toolkit().getTool("dangerousWrite"))
+                .as("spy 工具必须已被 GuardedAgentTool 包裹（生产 dispatch 路径）")
+                .isInstanceOf(GuardedAgentTool.class);
+        ask(rig.holder(), "请调用 dangerousWrite 工具，note 传 PLAN_GUARDED_TEST。");
+        System.out.println("[PERM-IT] plan(guarded) spyExecuted=" + rig.spy().executed.get());
+        assertThat(rig.spy().executed.get())
+                .as("plan 模式必须否决被 GuardedAgentTool 包裹的可变工具（P0 回归护栏）").isFalse();
+    }
+
+    /** 对称检查：guard 未过度拦截——bypass 下经 guard 的可变工具仍被执行（证明 guard 正确委派 callAsync）。 */
+    @Test
+    void bypassModeAllowsGuardedMutatingTool() {
+        Rig rig = buildAgent("bypass", true);
+        assertThat(rig.toolkit().getTool("dangerousWrite")).isInstanceOf(GuardedAgentTool.class);
+        ask(rig.holder(), "请调用 dangerousWrite 工具，note 传 BYPASS_GUARDED_TEST。");
+        System.out.println("[PERM-IT] bypass(guarded) spyExecuted=" + rig.spy().executed.get());
+        assertThat(rig.spy().executed.get()).as("bypass 模式应放行经 guard 的可变工具").isTrue();
     }
 }

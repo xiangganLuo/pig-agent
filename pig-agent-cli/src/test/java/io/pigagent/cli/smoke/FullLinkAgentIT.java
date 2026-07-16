@@ -151,9 +151,22 @@ class FullLinkAgentIT {
 
     @Test
     void skillsModule_agentListsSeededSkill() throws Exception {
-        Files.createDirectories(skillsDir.resolve("demo-skill"));
+        // A skill is a directory bundle (composite-skill): WorkspaceSkillSource only lists a
+        // sub-directory that contains a SKILL.md — an empty directory is (correctly) not a skill.
+        // Seed a real SKILL.md so this exercises workspace skill discovery end-to-end through the
+        // agent, instead of asserting on an empty dir the source rightly ignores.
+        Path demo = Files.createDirectories(skillsDir.resolve("demo-skill"));
+        Files.writeString(demo.resolve("SKILL.md"), """
+                ---
+                name: demo-skill
+                description: A demo skill seeded by the full-link IT.
+                ---
+                # Demo Skill
+
+                Used to verify workspace skill discovery through the real agent.
+                """);
         String out = ask("请用你的技能工具列出当前可用的技能。");
-        assertThat(out).as("应能列出已种入的技能目录 demo-skill").contains("demo-skill");
+        assertThat(out).as("应能列出已种入的技能 demo-skill").contains("demo-skill");
     }
 
     @Test
