@@ -1,13 +1,14 @@
 package io.pigagent.core.interrupt;
 
 /**
- * Signals that a model call was cancelled because its turn was interrupted (via
- * {@code AgentKernel.interruptCurrent()} or a per-attempt timeout that maps to an interrupt).
+ * Signals that a turn's event stream was terminated because the turn was interrupted (via
+ * {@code AgentKernel.interruptCurrent()}).
  *
- * <p>Deliberately NOT a transient error: {@code TransientErrorClassifier} does not treat it as
- * retryable, so an interrupt ends the turn instead of triggering a re-attempt. Because the model
- * stream errors (rather than completing), the {@code ReActAgent} invocation errors and no
- * {@code AGENT_RESULT} is written to the conversation history — the half-finished output is dropped.
+ * <p><b>av2 Phase 5a.</b> The kernel uses this to end the frontend-facing event stream immediately
+ * ({@code takeUntilOther}) when a turn is interrupted, in addition to driving native
+ * {@code ReActAgent.interrupt(...)} for a clean cooperative abort. Because the stream errors (rather
+ * than completing) the frontend distinguishes an interrupt from normal completion and no
+ * half-finished output is treated as a result.
  */
 public final class TurnInterruptedException extends RuntimeException {
 

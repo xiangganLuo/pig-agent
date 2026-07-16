@@ -19,9 +19,17 @@ public final class InterruptController {
     private final AtomicReference<TurnHandle> current = new AtomicReference<>();
     private final AtomicLong sequence = new AtomicLong();
 
-    /** Register a fresh turn as the current one and return its handle. */
+    /** Register a fresh turn (signal-only, no native interrupt action) and return its handle. */
     public TurnHandle begin() {
-        TurnHandle handle = new TurnHandle(sequence.incrementAndGet());
+        return begin(null);
+    }
+
+    /**
+     * Register a fresh turn as the current one and return its handle. The {@code interruptAction}
+     * (nullable) is the native interrupt call run when this turn is interrupted (av2 Phase 5a).
+     */
+    public TurnHandle begin(Runnable interruptAction) {
+        TurnHandle handle = new TurnHandle(sequence.incrementAndGet(), interruptAction);
         current.set(handle);
         return handle;
     }

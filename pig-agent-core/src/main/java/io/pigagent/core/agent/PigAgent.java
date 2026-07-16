@@ -163,6 +163,18 @@ public final class PigAgent {
     }
 
     /**
+     * Interrupt the in-flight turn on the given session's state slot (av2 Phase 5a). Native
+     * replacement for the deleted {@code InterruptibleModel} decorator: triggers the session's
+     * {@code InterruptControl} so the ReAct loop aborts at the next cooperative check and writes no
+     * half-finished result. A {@code null}/blank {@code sessionId} targets the default slot. The
+     * kernel's {@code InterruptController}/{@code TurnHandle} owns the "which turn is in flight"
+     * abstraction and additionally terminates the frontend-facing event stream immediately.
+     */
+    public void interrupt(String sessionId) {
+        reactAgent.interrupt(contextFor(sessionId));
+    }
+
+    /**
      * Switch the native permission mode for a session's state slot at runtime (av2 Phase 4). Backs
      * pig's {@code /permission mode}: the base {@link PermissionMode} of the {@code (userId="pig",
      * sessionId)} slot is flipped in place (a {@code null}/blank {@code sessionId} targets the default
@@ -195,6 +207,8 @@ public final class PigAgent {
         private AgentStateStore stateStore;
         private PermissionContextState permissionContext;
         private int maxIters; // 0 = do not set (keep AgentScope's default)
+        private int maxRetries; // <= 0 = do not set (keep AgentScope's ExecutionConfig default)
+        private Model fallbackModel; // nullable
 
         private Builder() {}
 
@@ -255,6 +269,27 @@ public final class PigAgent {
             return this;
         }
 
+        /**
+         * Native model-call retry (av2 Phase 5a) — replaces the deleted {@code RetryingModel}
+         * decorator. Only applied when {@code > 0}; maps to {@code ReActAgent.Builder.maxRetries(int)}
+         * (the underlying {@code ExecutionConfig} whose retry filter already distinguishes transient
+         * 429/5xx/timeout/IO from permanent 4xx/auth). Pass {@code 1} to effectively disable retry
+         * (a single attempt); {@code <= 0} leaves AgentScope's default.
+         */
+        public Builder maxRetries(int maxRetries) {
+            this.maxRetries = maxRetries;
+            return this;
+        }
+
+        /**
+         * Native fallback model tried after the primary model exhausts retries (av2 Phase 5a) — maps
+         * to {@code ReActAgent.Builder.fallbackModel(Model)}. {@code null} leaves no fallback.
+         */
+        public Builder fallbackModel(Model fallbackModel) {
+            this.fallbackModel = fallbackModel;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -269,6 +304,12 @@ public final class PigAgent {
 
             if (maxIters > 0) {
                 reactBuilder.maxIters(maxIters);
+            }
+            if (maxRetries > 0) {
+                reactBuilder.maxRetries(maxRetries);
+            }
+            if (fallbackModel != null) {
+                reactBuilder.fallbackModel(fallbackModel);
             }
             if (permissionContext != null) {
                 reactBuilder.permissionContext(permissionContext);

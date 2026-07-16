@@ -11,13 +11,14 @@ import io.pigagent.core.agent.runner.AgentReport;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.interrupt.InterruptController;
 import io.pigagent.core.interrupt.TurnHandle;
+import io.pigagent.core.interrupt.TurnInterruptedException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The single façade the kernel exposes to frontends (CLI now, Web later). Frontends depend on
@@ -124,12 +125,19 @@ public final class AgentKernel {
             return Flux.error(new IllegalStateException("No agent available: " + agentId));
         }
         emit(KernelEvent.Type.CHAT_STARTED, instance.id(), "");
-        // Register a cancellable turn for the lifetime of this stream: begin on subscribe (so an
-        // unsubscribed Flux leaks nothing), clear on any termination (complete/error/cancel).
-        AtomicReference<TurnHandle> handle = new AtomicReference<>();
-        return instance.agent().stream(msg, sessionId)
-                .doOnSubscribe(s -> handle.set(interrupts.begin()))
-                .doFinally(sig -> interrupts.end(handle.get()));
+        // Register a cancellable turn for the lifetime of this stream (av2 Phase 5a). On interrupt the
+        // handle (a) runs native ReActAgent.interrupt for a clean cooperative abort — no half-finished
+        // result persisted — and (b) terminates this event stream immediately via takeUntilOther, so a
+        // stuck/never-completing model still returns control to the frontend. Flux.defer creates the
+        // handle per-subscription (an unsubscribed Flux leaks nothing); doFinally clears it on any
+        // termination (complete/error/cancel).
+        return Flux.defer(() -> {
+            TurnHandle handle = interrupts.begin(() -> instance.agent().interrupt(sessionId));
+            return instance.agent().stream(msg, sessionId)
+                    .takeUntilOther(handle.onInterrupt()
+                            .then(Mono.error(new TurnInterruptedException(handle.turnId()))))
+                    .doFinally(sig -> interrupts.end(handle));
+        });
     }
 
     /** Trigger one autonomous run of an agent now; emits RUN_STARTED/RUN_FINISHED/REPORT. */

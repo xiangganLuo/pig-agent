@@ -60,16 +60,24 @@ public final class AgentInstanceFactory {
     private final LongTermMemory longTermMemory;
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
     private final PermissionContextProvider permissionContexts; // nullable → no native context
+    private final int maxRetries; // <= 0 = keep AgentScope's default (av2 Phase 5a native retry)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory) {
-        this(models, toolkits, hooks, longTermMemory, null, null);
+        this(models, toolkits, hooks, longTermMemory, null, null, 0);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore) {
-        this(models, toolkits, hooks, longTermMemory, stateStore, null);
+        this(models, toolkits, hooks, longTermMemory, stateStore, null, 0);
+    }
+
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts) {
+        this(models, toolkits, hooks, longTermMemory, stateStore, permissionContexts, 0);
     }
 
     /**
@@ -79,17 +87,21 @@ public final class AgentInstanceFactory {
      *        gets its own in-memory store.
      * @param permissionContexts per-agent native permission context provider (av2 Phase 4); {@code null}
      *        = no native permission context (AgentScope default).
+     * @param maxRetries native model-call retry count applied to each agent (av2 Phase 5a); {@code <= 0}
+     *        keeps AgentScope's default, {@code 1} effectively disables retry.
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
-                                PermissionContextProvider permissionContexts) {
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.hooks = Objects.requireNonNull(hooks, "hooks");
         this.longTermMemory = longTermMemory; // may be null (no long-term memory)
         this.stateStore = stateStore;
         this.permissionContexts = permissionContexts;
+        this.maxRetries = maxRetries;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -103,6 +115,7 @@ public final class AgentInstanceFactory {
                 .hooks(hooks.hooksFor(spec))
                 .longTermMemory(longTermMemory)
                 .maxIters(spec.maxIters())
+                .maxRetries(maxRetries)
                 .stateStore(stateStore)
                 .permissionContext(permissionContexts == null ? null : permissionContexts.contextFor(spec, toolkit))
                 .build();

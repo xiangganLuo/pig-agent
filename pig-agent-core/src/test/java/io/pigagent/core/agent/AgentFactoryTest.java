@@ -12,9 +12,11 @@ class AgentFactoryTest {
 
     @Test
     void create_withMaxIters_appliesLimitToAgent() {
-        // Arrange — the shared-config factory carrying an explicit iteration cap
+        // Arrange — the shared-config factory carrying an explicit iteration cap (av2 Phase 5a:
+        // full ctor = name, sysPrompt, toolkit, hooks, longTermMemory, maxRetries, fallbackModel,
+        // maxIters, stateStore, permissionContextSupplier).
         AgentFactory factory = new AgentFactory(
-                "A", "sp", null, List.of(), null, null, null, 33);
+                "A", "sp", null, List.of(), null, 0, null, 33, null, null);
 
         // Act
         PigAgent agent = factory.create(mock(Model.class));

@@ -16,8 +16,9 @@ import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.interrupt.InterruptController;
-import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.interrupt.TurnInterruptedException;
+import io.agentscope.core.shutdown.GracefulShutdownManager;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import reactor.core.Disposable;
@@ -37,6 +38,18 @@ import static org.mockito.Mockito.mock;
  * fires the interrupt for the in-flight turn, and is a no-op when idle.
  */
 class AgentKernelInterruptTest {
+
+    /**
+     * av2 Phase 5a: native interrupt is cooperative (checked at reasoning boundaries), so
+     * interrupting the artificial never-completing model below leaves the native call registered with
+     * the global {@link GracefulShutdownManager} (in production a model-layer HTTP timeout bounds this).
+     * Reset the singleton between tests so the fork JVM shuts down cleanly instead of waiting on the
+     * lingering request.
+     */
+    @AfterEach
+    void resetShutdownManager() {
+        GracefulShutdownManager.getInstance().resetForTesting();
+    }
 
     /** A model whose stream never completes on its own, so the turn stays in flight until interrupt. */
     private static Model neverModel() {
@@ -78,10 +91,11 @@ class AgentKernelInterruptTest {
 
     @Test
     void interruptCurrent_duringChat_cancelsTurn_thenClears(@TempDir Path dir) throws Exception {
-        // Arrange — a real agent whose model is interruptible and shares the kernel's controller.
+        // Arrange — a real agent (av2 Phase 5a: no model decorator; interrupt is native + the kernel
+        // terminates the stream via takeUntilOther). The model never completes on its own.
         InterruptController controller = new InterruptController();
         PigAgent agent = PigAgent.builder().name("t").sysPrompt("s")
-                .model(new InterruptibleModel(neverModel(), controller)).build();
+                .model(neverModel()).build();
         AgentInstance def = new AgentInstance("default", AgentSpec.create("default", "Default"), agent);
         AgentRegistry registry = new AgentRegistry(new AgentHolder(agent));
         registry.register(def);
@@ -131,7 +145,7 @@ class AgentKernelInterruptTest {
             }
         };
         PigAgent agent = PigAgent.builder().name("t").sysPrompt("s")
-                .model(new InterruptibleModel(quick, controller)).build();
+                .model(quick).build();
         AgentInstance def = new AgentInstance("default", AgentSpec.create("default", "Default"), agent);
         AgentRegistry registry = new AgentRegistry(new AgentHolder(agent));
         registry.register(def);

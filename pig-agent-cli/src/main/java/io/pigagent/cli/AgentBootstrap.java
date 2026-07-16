@@ -23,7 +23,6 @@ import io.pigagent.core.compression.BudgetRatios;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.compression.EngineeringOptions;
 import io.pigagent.core.interrupt.InterruptController;
-import io.pigagent.core.interrupt.InterruptibleModel;
 import io.pigagent.core.hook.LoggingHook;
 import io.pigagent.core.hook.ToolCallLoggingHook;
 import io.pigagent.core.loop.LoopDetectionHook;
@@ -39,9 +38,6 @@ import io.pigagent.core.memory.extraction.MarkdownFactStore;
 import io.pigagent.core.memory.extraction.MemoryExtractionPipeline;
 import io.pigagent.core.memory.extraction.MemoryExtractor;
 import io.pigagent.core.memory.extraction.MemoryNoiseFilter;
-import io.pigagent.core.retry.RetryPolicy;
-import io.pigagent.core.retry.RetryingModel;
-import io.pigagent.core.retry.TransientErrorClassifier;
 import io.pigagent.mcp.JsonMcpStore;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.JsonModelStore;
@@ -388,37 +384,19 @@ public final class AgentBootstrap {
                 configManager.getConfig().getPermissions().resolveMode(),
                 toolkit.getToolNames(), true);
 
+        // av2 Phase 5a: native model-call retry. The self-built RetryingModel/RetryPolicy/
+        // TransientErrorClassifier are gone — AgentScope's ExecutionConfig retry already filters
+        // transient (429/5xx/timeout/IO) from permanent (4xx/auth) errors with exponential backoff,
+        // applied at the model layer (inside a single agent invocation). We map pig's config
+        // model.retry to ReActAgent.Builder.maxRetries: enabled → the configured count; disabled → 1
+        // (a single attempt, no retries). Native has no per-retry callback, so the inline "[retry k/N]"
+        // notice and the (unsafe-by-default) client-side per-attempt timeout are not carried over.
         PigAgentConfig.RetryConfig rc = config.getModel().getRetry();
-        TransientErrorClassifier retryClassifier = new TransientErrorClassifier();
-        RetryPolicy interactiveRetry = new RetryPolicy(
-                rc.isEnabled(), rc.getMaxRetries(),
-                java.time.Duration.ofSeconds(rc.getPerAttemptTimeoutSeconds()),
-                java.time.Duration.ofMillis(rc.getFirstBackoffMs()),
-                java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
-                retryClassifier,
-                (attempt, max, cause, backoff) -> {
-                    String msg = String.format("[retry %d/%d] %s, backing off %dms…",
-                            attempt, max, retryCauseSummary(cause), backoff.toMillis());
-                    LineReader r = readerRef.get();
-                    if (r != null) { // REPL present: surface inline on the interactive terminal
-                        r.getTerminal().writer().println(Ansi.warn(msg));
-                        r.getTerminal().writer().flush();
-                    } else {
-                        log.warn(msg);
-                    }
-                });
-        RetryPolicy channelRetry = new RetryPolicy(
-                rc.isEnabled(), rc.getMaxRetries(),
-                java.time.Duration.ofSeconds(rc.getPerAttemptTimeoutSeconds()),
-                java.time.Duration.ofMillis(rc.getFirstBackoffMs()),
-                java.time.Duration.ofMillis(rc.getMaxBackoffMs()),
-                retryClassifier,
-                (attempt, max, cause, backoff) -> log.warn("[channel retry {}/{}] {}",
-                        attempt, max, retryCauseSummary(cause)));
+        int maxRetries = rc.isEnabled() ? Math.max(1, rc.getMaxRetries()) : 1;
 
-        // One shared interrupt controller: the kernel registers/clears the current turn's handle and
-        // the model decorators (built below) read it, so AgentKernel.interruptCurrent() cancels the
-        // in-flight model call. Interactive, channel, per-agent and autonomous models all share it.
+        // One shared interrupt controller, owned by the kernel (av2 Phase 5a). The kernel registers a
+        // per-turn handle whose interrupt action calls native ReActAgent.interrupt; the model is no
+        // longer decorated. Autonomous/channel tracks don't share it (their turns aren't kernel-driven).
         InterruptController interruptController = new InterruptController();
 
         // Interactive agent hooks: the fixed pig hooks + any hooks contributed by plugins
@@ -435,7 +413,7 @@ public final class AgentBootstrap {
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveHooks, memory,
-                interactiveRetry, interruptController, config.getAgent().getMaxIters(),
+                maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
@@ -447,11 +425,9 @@ public final class AgentBootstrap {
         agentRegistry.register(new AgentInstance("default", defaultSpec, agentHolder.get()));
 
         AgentInstanceFactory agentInstanceFactory = new AgentInstanceFactory(
-                spec -> {
-                    Model baseModel = new InterruptibleModel(modelManager.modelFor(spec.modelId()),
-                            interruptController);
-                    return interactiveRetry == null ? baseModel : new RetryingModel(baseModel, interactiveRetry);
-                },
+                // av2 Phase 5a: the model is passed through untouched — retry + interrupt are native
+                // (maxRetries below; ReActAgent.interrupt driven by the kernel). No Model decorators.
+                spec -> modelManager.modelFor(spec.modelId()),
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
                 // av2 Phase 4: permission is native (context provider below), no longer a per-agent hook.
                 spec -> List.of(new LoggingHook(), new ToolCallLoggingHook()),
@@ -463,7 +439,8 @@ public final class AgentBootstrap {
                         configManager.getConfig().getPermissions(),
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
-                        tk.getToolNames(), true));
+                        tk.getToolNames(), true),
+                maxRetries);
         AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
         for (AgentSpec s : agentRepository.findAll()) {
             if (!"default".equals(s.id())) {
@@ -475,13 +452,11 @@ public final class AgentBootstrap {
             }
         }
 
-        // NB: the autonomous (digital-employee) model is deliberately NOT wrapped with
-        // InterruptibleModel. Scheduled cron runs bypass the kernel, and the single-slot interrupt
-        // controller is scoped to the interactive turn; sharing it across the autonomous track could
-        // cross-talk with a concurrent interactive interrupt. Autonomous interrupt is out of scope
-        // for interruptible-run (its timeout stays best-effort).
+        // NB: the autonomous (digital-employee) track is deliberately NOT wired to the kernel's
+        // interrupt controller (which is scoped to the interactive turn); its timeout stays
+        // best-effort. Retry is native (maxRetries on the builder) — no Model decorator (av2 5a).
         AgentRunner.AgentBuilder autonomousBuilder = (spec, recorder) -> {
-            Model runModel = new RetryingModel(modelManager.modelFor(spec.modelId()), interactiveRetry);
+            Model runModel = modelManager.modelFor(spec.modelId());
             Toolkit runToolkit = AgentWiring.toolkitFor(toolkit, spec.toolNames());
             // av2 Phase 4: unattended → interactive=false, so ASK fail-closes to DENY (DONT_ASK base).
             // The recorder is populated post-hoc by AgentRunner (scanning DENIED tool-results), since
@@ -498,6 +473,7 @@ public final class AgentBootstrap {
                     .toolkit(runToolkit)
                     .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
                     .maxIters(spec.maxIters())
+                    .maxRetries(maxRetries)
                     .permissionContext(autoCtx)
                     .build();
         };
@@ -530,7 +506,7 @@ public final class AgentBootstrap {
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(newLoopDetectionHook(configManager),
                         new LoggingHook(), new ToolCallLoggingHook()), memory,
-                channelRetry, null, config.getAgent().getMaxIters(),
+                maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
@@ -663,18 +639,5 @@ public final class AgentBootstrap {
         al.setTools(base.getAllowlist().getTools());
         cfg.setAllowlist(al);
         return cfg;
-    }
-
-    /** One-line, length-bounded summary of a retry cause for the visible retry notice. */
-    static String retryCauseSummary(Throwable cause) {
-        if (cause == null) {
-            return "transient error";
-        }
-        String msg = cause.getMessage();
-        if (msg == null || msg.isBlank()) {
-            return cause.getClass().getSimpleName();
-        }
-        String oneLine = msg.replaceAll("\\s+", " ").strip();
-        return oneLine.length() > 80 ? oneLine.substring(0, 80) + "…" : oneLine;
     }
 }
