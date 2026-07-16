@@ -3,6 +3,7 @@ package io.pigagent.core.agent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 
@@ -42,15 +43,33 @@ public final class AgentInstanceFactory {
         List<Hook> hooksFor(AgentSpec spec);
     }
 
+    /**
+     * Builds this agent's native permission context (av2 Phase 4) — the 2.0 replacement for the
+     * per-agent {@code ToolPermissionHook}. It receives the spec (for its {@code permissionMode}
+     * override) and the already-built {@link Toolkit} (for the tool names to write rules for). The
+     * concrete impl lives in the wiring layer (over pig's {@code PermissionContextFactory}).
+     */
+    @FunctionalInterface
+    public interface PermissionContextProvider {
+        PermissionContextState contextFor(AgentSpec spec, Toolkit toolkit);
+    }
+
     private final ModelResolver models;
     private final ToolkitProvider toolkits;
     private final HooksProvider hooks;
     private final LongTermMemory longTermMemory;
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
+    private final PermissionContextProvider permissionContexts; // nullable → no native context
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory) {
-        this(models, toolkits, hooks, longTermMemory, null);
+        this(models, toolkits, hooks, longTermMemory, null, null);
+    }
+
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore) {
+        this(models, toolkits, hooks, longTermMemory, stateStore, null);
     }
 
     /**
@@ -58,28 +77,34 @@ public final class AgentInstanceFactory {
      *        every agent lets per-{@code (userId,sessionId)} conversation state persist across model
      *        switches and (with a {@code JsonFileAgentStateStore}) restarts. {@code null} = each agent
      *        gets its own in-memory store.
+     * @param permissionContexts per-agent native permission context provider (av2 Phase 4); {@code null}
+     *        = no native permission context (AgentScope default).
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory,
-                                AgentStateStore stateStore) {
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.hooks = Objects.requireNonNull(hooks, "hooks");
         this.longTermMemory = longTermMemory; // may be null (no long-term memory)
         this.stateStore = stateStore;
+        this.permissionContexts = permissionContexts;
     }
 
     public AgentInstance create(AgentSpec spec) {
         Objects.requireNonNull(spec, "spec");
+        Toolkit toolkit = toolkits.toolkitFor(spec);
         PigAgent agent = PigAgent.builder()
                 .name(spec.name())
                 .sysPrompt(spec.sysPrompt())
                 .model(models.resolve(spec))
-                .toolkit(toolkits.toolkitFor(spec))
+                .toolkit(toolkit)
                 .hooks(hooks.hooksFor(spec))
                 .longTermMemory(longTermMemory)
                 .maxIters(spec.maxIters())
                 .stateStore(stateStore)
+                .permissionContext(permissionContexts == null ? null : permissionContexts.contextFor(spec, toolkit))
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

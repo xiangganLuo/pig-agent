@@ -3,6 +3,8 @@ package io.pigagent.core.agent.runner;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.message.ToolResultState;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.PigAgent;
 
@@ -116,12 +118,38 @@ public final class AgentRunner {
                 reply = agent.call(mandate);
             }
             String text = reply == null || reply.getTextContent() == null ? "" : reply.getTextContent();
+            // av2 Phase 4: with native permission the denial has no build-time callback — recover the
+            // denied actions post-hoc from the conversation (DENIED tool-results the ReAct loop fed
+            // back), so the report's「等你决定」section still itemizes them. Best-effort, never fatal.
+            recordDenials(agent, recorder);
             return new AgentReport(spec.id(), spec.name(), AgentReport.Outcome.SUCCESS,
                     text, recorder.denied(), "");
         } catch (Exception e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             return new AgentReport(spec.id(), spec.name(), AgentReport.Outcome.FAILURE,
                     "", recorder.denied(), cause.getMessage() == null ? cause.toString() : cause.getMessage());
+        }
+    }
+
+    /**
+     * Scan the finished conversation for tool results the native permission engine marked
+     * {@link ToolResultState#DENIED} and feed each into the {@link DeniedActionRecorder}. This is the
+     * av2 replacement for the deleted {@code ToolPermissionHook}'s per-denial callback — native denial
+     * has no build-time seam, but the ReAct loop records a DENIED {@link ToolResultBlock} for every
+     * vetoed call, so a post-run scan reconstructs the same「等你决定」list. Fault-tolerant by design.
+     */
+    private void recordDenials(PigAgent agent, DeniedActionRecorder recorder) {
+        try {
+            for (Msg m : agent.getMemory().getMessages()) {
+                for (ToolResultBlock r : m.getContentBlocks(ToolResultBlock.class)) {
+                    if (r.getState() == ToolResultState.DENIED) {
+                        recorder.record(r.getName() == null ? "tool" : r.getName(),
+                                "denied by permission policy");
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Best-effort: a denial-scan failure must never break the report.
         }
     }
 }

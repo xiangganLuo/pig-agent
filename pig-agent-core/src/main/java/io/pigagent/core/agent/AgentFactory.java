@@ -3,6 +3,7 @@ package io.pigagent.core.agent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.core.interrupt.InterruptController;
@@ -11,6 +12,7 @@ import io.pigagent.core.retry.RetryPolicy;
 import io.pigagent.core.retry.RetryingModel;
 
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Builds {@link PigAgent} instances that all share the same configuration (name, system
@@ -36,6 +38,9 @@ public final class AgentFactory {
     private final InterruptController interruptController; // nullable
     private final int maxIters; // 0 = keep AgentScope's default (see PigAgent.Builder.maxIters)
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
+    // Re-evaluated on every create() (incl. model-switch rebuilds) so the rebuilt agent picks up the
+    // current permission mode; nullable → no native permission context (AgentScope default). av2 P4.
+    private final Supplier<PermissionContextState> permissionContextSupplier;
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory) {
@@ -64,6 +69,20 @@ public final class AgentFactory {
                         List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
                         InterruptController interruptController, int maxIters,
                         AgentStateStore stateStore) {
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, interruptController,
+                maxIters, stateStore, null);
+    }
+
+    /**
+     * @param permissionContextSupplier supplies a freshly-built native permission context on each
+     *        {@link #create(Model)} (including model-switch rebuilds), so a rebuilt agent reflects the
+     *        current permission mode. {@code null} = no native permission context.
+     */
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
+                        InterruptController interruptController, int maxIters,
+                        AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -73,6 +92,7 @@ public final class AgentFactory {
         this.interruptController = interruptController;
         this.maxIters = maxIters;
         this.stateStore = stateStore;
+        this.permissionContextSupplier = permissionContextSupplier;
     }
 
     /**
@@ -93,6 +113,7 @@ public final class AgentFactory {
                 .longTermMemory(longTermMemory)
                 .maxIters(maxIters)
                 .stateStore(stateStore)
+                .permissionContext(permissionContextSupplier == null ? null : permissionContextSupplier.get())
                 .build();
     }
 

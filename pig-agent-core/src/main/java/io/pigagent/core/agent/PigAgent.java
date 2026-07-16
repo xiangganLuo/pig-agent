@@ -8,6 +8,8 @@ import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.permission.PermissionMode;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
@@ -161,6 +163,20 @@ public final class PigAgent {
     }
 
     /**
+     * Switch the native permission mode for a session's state slot at runtime (av2 Phase 4). Backs
+     * pig's {@code /permission mode}: the base {@link PermissionMode} of the {@code (userId="pig",
+     * sessionId)} slot is flipped in place (a {@code null}/blank {@code sessionId} targets the default
+     * slot). Existing per-tool rules (built at agent-build time from the mode-at-build) are preserved;
+     * the native built-in checks (EXPLORE read-only, BYPASS allow-all, DONT_ASK ask→deny) do the
+     * heavy lifting, so switching <em>to</em> plan/bypass is exact and switching to ask/auto is
+     * fail-safe (never more permissive than the built rules already allow). A full re-derivation of
+     * per-tool rules happens when the agent is rebuilt (model switch) or on a fresh session.
+     */
+    public void setPermissionMode(PermissionMode nativeMode, String sessionId) {
+        reactAgent.setPermissionMode(contextFor(sessionId), nativeMode);
+    }
+
+    /**
      * Whether persisted state exists for the given session id. Actual restoration is automatic on
      * the next session-aware {@code call}/{@code stream} (see {@link #stream(Msg, String)}), which
      * carries a session-bound {@link RuntimeContext} the native store resolves.
@@ -177,6 +193,7 @@ public final class PigAgent {
         private List<Hook> hooks;
         private LongTermMemory longTermMemory;
         private AgentStateStore stateStore;
+        private PermissionContextState permissionContext;
         private int maxIters; // 0 = do not set (keep AgentScope's default)
 
         private Builder() {}
@@ -218,6 +235,17 @@ public final class PigAgent {
         }
 
         /**
+         * The native permission context (mode + per-tool rules) installed on the underlying
+         * {@code ReActAgent} — the 2.0 replacement for the deleted {@code ToolPermissionHook}
+         * (av2 Phase 4). Built by pig's {@code PermissionContextFactory} in the wiring layer from the
+         * active mode + toolkit + interactive flag. {@code null} leaves AgentScope's default context.
+         */
+        public Builder permissionContext(PermissionContextState permissionContext) {
+            this.permissionContext = permissionContext;
+            return this;
+        }
+
+        /**
          * Bound the reasoning-tool loop of the underlying {@code ReActAgent}. Only applied when
          * {@code > 0}; {@code <= 0} leaves AgentScope's own default in place. Guards autonomous and
          * interactive agents alike against unbounded tool-call ping-pong.
@@ -241,6 +269,9 @@ public final class PigAgent {
 
             if (maxIters > 0) {
                 reactBuilder.maxIters(maxIters);
+            }
+            if (permissionContext != null) {
+                reactBuilder.permissionContext(permissionContext);
             }
 
             // Long-term memory is injected on the user side, ephemerally, via our own hook — NOT
