@@ -18,29 +18,30 @@
             <groupId>io.pigagent</groupId>
             <artifactId>pig-agent-core</artifactId>
         </dependency>
+
+        <!-- AgentScope 2.0 per-provider model extensions. Each supplies its
+             {OpenAI,Anthropic,Gemini,Ollama,DashScope}ChatModel builder and bundles the vendor SDK
+             transitively, so the explicit com.anthropic / com.openai / com.google.genai /
+             com.alibaba declarations from the 1.x setup are no longer needed here. -->
         <dependency>
             <groupId>io.agentscope</groupId>
-            <artifactId>agentscope</artifactId>
-        </dependency>
-
-        <!-- Provider client SDKs (optional in agentscope; required at compile + runtime
-             for the AnthropicChatModel / OpenAIChatModel / GeminiChatModel / DashScopeChatModel
-             builders used by the providers here). Ollama needs no SDK. -->
-        <dependency>
-            <groupId>com.anthropic</groupId>
-            <artifactId>anthropic-java</artifactId>
+            <artifactId>agentscope-extensions-model-openai</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.openai</groupId>
-            <artifactId>openai-java</artifactId>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-anthropic</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.google.genai</groupId>
-            <artifactId>google-genai</artifactId>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-gemini</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>dashscope-sdk-java</artifactId>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-ollama</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-extensions-model-dashscope</artifactId>
             <!-- The DashScope SDK bundles slf4j-simple, which collides with our Logback backend
                  ("multiple SLF4J providers"). Exclude it so Logback is the sole binding. -->
             <exclusions>

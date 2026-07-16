@@ -1,7 +1,7 @@
 package io.pigagent.provider.gemini;
 
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.GeminiChatModel;
+import io.agentscope.extensions.model.gemini.GeminiChatModel;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 

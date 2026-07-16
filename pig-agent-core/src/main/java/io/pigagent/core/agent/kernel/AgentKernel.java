@@ -1,6 +1,6 @@
 package io.pigagent.core.agent.kernel;
 
-import io.agentscope.core.agent.Event;
+import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.message.Msg;
 import io.pigagent.core.agent.AgentInstance;
 import io.pigagent.core.agent.AgentInstanceFactory;
@@ -107,7 +107,7 @@ public final class AgentKernel {
     }
 
     /** Stream a chat turn on the given agent (or the active one if it is not the active id). */
-    public Flux<Event> chat(String agentId, Msg msg) {
+    public Flux<AgentEvent> chat(String agentId, Msg msg) {
         AgentInstance instance = registry.get(agentId).orElse(registry.active().orElse(null));
         if (instance == null) {
             return Flux.error(new IllegalStateException("No agent available: " + agentId));

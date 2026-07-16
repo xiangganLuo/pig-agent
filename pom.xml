@@ -67,7 +67,13 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Core dependencies -->
+        <!-- agentscope.version: legacy 1.x single artifact, still referenced by modules not yet
+             migrated to 2.0 (session/mcp/tools/…). Kept so the reactor stays parseable during the
+             phased av2 migration. -->
         <agentscope.version>1.0.12</agentscope.version>
+        <!-- agentscope2.version: AgentScope 2.0 split artifacts (core + harness + model extensions).
+             pig-agent-core and pig-agent-providers are migrated to these first (Phase 0). -->
+        <agentscope2.version>2.0.0</agentscope2.version>
         <jline.version>3.28.0</jline.version>
         <picocli.version>4.7.6</picocli.version>
         <snakeyaml.version>2.3</snakeyaml.version>
@@ -103,11 +109,50 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- AgentScope Java (all-in-one) -->
+            <!-- AgentScope Java 1.x (all-in-one) — legacy, for not-yet-migrated modules. -->
             <dependency>
                 <groupId>io.agentscope</groupId>
                 <artifactId>agentscope</artifactId>
                 <version>${agentscope.version}</version>
+            </dependency>
+
+            <!-- AgentScope Java 2.0 — split artifacts. Core + harness + per-provider model extensions.
+                 The model extensions bundle their vendor SDK transitively, so the explicit SDK
+                 declarations below are redundant for the migrated modules (kept only for legacy 1.x). -->
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-core</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-harness</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-openai</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-anthropic</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-gemini</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-ollama</artifactId>
+                <version>${agentscope2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-dashscope</artifactId>
+                <version>${agentscope2.version}</version>
             </dependency>
 
             <!-- LLM provider client SDKs (agentscope declares these optional, so we add

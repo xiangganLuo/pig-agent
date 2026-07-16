@@ -1,7 +1,7 @@
 package io.pigagent.core.retry;
 
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -73,12 +73,14 @@ class ModelRetryWiringTest {
         FakeModel model = new FakeModel(2, "502 upstream_error");
         PigAgent agent = factory(5).create(model);
 
-        List<Event> events = agent.stream(userMsg()).collectList().block();
+        List<AgentEvent> events = agent.stream(userMsg()).collectList().block();
 
         assertThat(model.calls.get()).isGreaterThanOrEqualTo(3); // retried under the agent
+        // AgentScope 2.0 streams typed AgentEvents; the assistant text arrives as TextBlockDelta
+        // fragments (aggregate by delta rather than reading a single AGENT_RESULT message).
         String text = events == null ? "" : events.stream()
-                .filter(e -> e.getType() == EventType.AGENT_RESULT)
-                .map(e -> e.getMessage().getTextContent())
+                .filter(e -> e instanceof TextBlockDeltaEvent)
+                .map(e -> ((TextBlockDeltaEvent) e).getDelta())
                 .reduce("", (a, b) -> a + b);
         assertThat(text).contains("hello from fake");
     }

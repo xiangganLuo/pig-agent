@@ -1,6 +1,6 @@
 package io.pigagent.core.agent.kernel;
 
-import io.agentscope.core.agent.Event;
+import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
@@ -137,7 +137,7 @@ class AgentKernelInterruptTest {
         registry.register(def);
         AgentKernel kernel = new AgentKernel(registry, new AgentSpecRepository(dir), factory(), null, controller);
 
-        List<Event> events = kernel.chat("default", userMsg()).collectList().block();
+        List<AgentEvent> events = kernel.chat("default", userMsg()).collectList().block();
 
         assertThat(events).isNotNull();
         // The turn is cleared in the stream's doFinally, which runs after the terminal signal has

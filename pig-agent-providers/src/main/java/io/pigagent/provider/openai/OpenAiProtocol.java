@@ -1,7 +1,7 @@
 package io.pigagent.provider.openai;
 
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.OpenAIChatModel;
+import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 

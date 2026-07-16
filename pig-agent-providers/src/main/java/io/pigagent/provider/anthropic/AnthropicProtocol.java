@@ -1,7 +1,7 @@
 package io.pigagent.provider.anthropic;
 
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.AnthropicChatModel;
+import io.agentscope.extensions.model.anthropic.AnthropicChatModel;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 

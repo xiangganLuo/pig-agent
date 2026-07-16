@@ -19,9 +19,15 @@
     </properties>
 
     <dependencies>
+        <!-- AgentScope 2.0: core (agent/model/message/middleware/permission/state) + harness
+             (HarnessAgent, workspace memory, compaction). Migrated from the 1.x all-in-one. -->
         <dependency>
             <groupId>io.agentscope</groupId>
-            <artifactId>agentscope</artifactId>
+            <artifactId>agentscope-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-harness</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

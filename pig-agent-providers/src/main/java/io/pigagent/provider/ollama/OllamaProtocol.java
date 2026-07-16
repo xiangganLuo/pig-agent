@@ -1,7 +1,7 @@
 package io.pigagent.provider.ollama;
 
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.OllamaChatModel;
+import io.agentscope.extensions.model.ollama.OllamaChatModel;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 

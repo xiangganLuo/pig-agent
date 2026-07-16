@@ -1,7 +1,7 @@
 package io.pigagent.provider.dashscope;
 
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.DashScopeChatModel;
+import io.agentscope.extensions.model.dashscope.DashScopeChatModel;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 
