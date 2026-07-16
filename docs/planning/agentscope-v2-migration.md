@@ -2,7 +2,16 @@
 
 > **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
 > (session/state rewrite) + Phase 4 (frontends: cli + web + channel) + Phase 5a (delete self-built
-> decorators → native retry/interrupt, hooks → native middleware, drop the 1.x `agentscope` dep) COMPLETE.**
+> decorators → native retry/interrupt, hooks → native middleware, drop the 1.x `agentscope` dep)
+> + Phase 5b (adopt the `HarnessAgent` vehicle + native tool-result eviction) COMPLETE.**
+> Phase 5b lives on branch `av2/20260716-harness-adopt` (off `av2/20260716-foundation-main`): every
+> `PigAgent` now wraps a `HarnessAgent` built directly via `HarnessAgent.builder()` (carrying pig's
+> exact `Toolkit`/middlewares/`stateStore`/`permissionContext`/`maxRetries`/`fallbackModel`/`maxIters`),
+> with the native filesystem/shell/memory/compaction/subagent/workspace-context/session-log features
+> **disabled** (pig keeps its differentiated ephemeral prefix-cache memory + A4 extraction + A5
+> context-engineering compaction + guarded tools + `AgentStateStore`) and native **tool-result
+> eviction** turned ON — the one capability pig lacked. `PigAgent`'s method surface is unchanged
+> (cli/web/channel/kernel untouched). See **§13 Phase 5b execution log**.
 > Phase 5a lives on branch `av2/20260716-cleanup` (off `av2/20260716-foundation-main`): it deletes
 > `RetryingModel`/`RetryPolicy`/`TransientErrorClassifier` + `InterruptibleModel` (→ native
 > `ReActAgent.Builder.maxRetries`/`.fallbackModel` + `ReActAgent.interrupt`), migrates the last three
@@ -710,3 +719,136 @@ and the native transient-vs-permanent retry behavior that unit tests can no long
 Optional cleanup: the now-unused vendor-SDK depMgmt entries + `*.version` properties in the parent POM
 (kept this pass — they no longer affect the classpath since the model extensions bundle the SDKs
 transitively), and re-`install` to refresh the stale local-repo `pig-agent-core` jar.
+
+## 13. Phase 5b execution log (branch `av2/20260716-harness-adopt`)
+
+**Base:** `av2/20260716-foundation-main` (whole reactor GREEN on pure 2.0 after Phase 5a). **Not
+merged** (lead merges into the v2 line). Scope: adopt the `HarnessAgent` **vehicle** for every
+`PigAgent` and turn on native **tool-result eviction** (the one capability pig lacked), while KEEPING
+pig's differentiated compaction + memory (do NOT adopt native compaction/memory).
+
+### The wrap design — direct `HarnessAgent.builder()`, NOT `fromAgent` (javap-grounded)
+
+`PigAgent.Builder.build()` now produces a `HarnessAgent` via `HarnessAgent.builder()…build()` and stores
+both the `HarnessAgent` (the vehicle) and `harness.getDelegate()` (the underlying `ReActAgent`). Turn
+methods (`call`/`stream`/`streamEvents`, `setPermissionMode`) run through the **vehicle** so its native
+eviction applies; conversation-state ops (`getAgentState`/`saveAgentState`, `interrupt(RuntimeContext)`,
+`ConversationMemory`, and the maxIters/retry unit-test seam `getReactAgent()`) run through the **delegate**
+— the exact instance the vehicle uses, so state stays consistent. `PigAgent`'s public surface is
+unchanged, so cli/web/channel/kernel are untouched.
+
+**Why `builder()` directly instead of `fromAgent(ReActAgent)` (both were sanctioned):** `javap -c` on
+`agentscope-harness-2.0.0` proves the decisive facts:
+- `HarnessAgent$Builder.build()` does `toolkit.copy()` at offset 0 — **exactly** as `ReActAgent$Builder
+  .build()` does (also `toolkit.copy()` at offset 0). So a direct `HarnessAgent.builder().toolkit(shared)`
+  yields **one** copy of the shared toolkit, byte-for-byte the same toolkit-sharing semantics the
+  Phase-5a `ReActAgent` interactive agent already had (MCP hot-add/reveal already ride the M-2
+  rebuild-on-MCP-change, which re-copies the current shared toolkit).
+- `fromAgent(ReActAgent)` would instead build a throwaway `ReActAgent` (copy #1 of the shared toolkit),
+  then `getToolkit().copy()` (copy #2), then `build()` copies again (copy #3) — triple-copy + a throwaway
+  agent — **and** it routes middlewares through `filterCopyableMiddlewares(...)`, which could silently
+  drop pig's middlewares. Direct builder avoids both. All `HarnessAgent$Builder` setters
+  (`name/sysPrompt/model/toolkit/middlewares/stateStore/permissionContext/maxRetries/fallbackModel/
+  maxIters`) delegate to an inner `ReActAgent$Builder`, so pig's config reaches the delegate unchanged
+  (`toolkit(null)` is tolerated → the setter creates an empty `Toolkit`). Verified by
+  `HarnessAgentWrapTest`: the delegate's `getToolkit().getToolNames()` carries pig's custom tool and
+  `getMiddlewares()` contains pig's `EphemeralMemoryMiddleware`; `getReactAgent() == getHarnessAgent()
+  .getDelegate()`.
+
+### Which natives are disabled, and why (the KEEP-differentiation decision)
+
+The north star outsources *undifferentiated plumbing* (session/permission/retry/interrupt/events — done
+in Phases 2–5a) but KEEPS pig's differentiators. So at build we disable every batteries-included harness
+extra pig already owns and turn ON only eviction. javap-confirmed builder toggles + rationale:
+
+| `disableXxx()` | Why pig keeps its own |
+|---|---|
+| `disableFilesystemTools()` | pig's guarded `FileSystemTools` (credential-file blacklist) |
+| `disableShellTool()` | pig's `ShellTools` + command sandbox (denylist/output-cap/env-scrub) |
+| `disableMemoryTools()` + `disableMemoryHooks()` | pig's **ephemeral prefix-cache memory** (`EphemeralMemoryMiddleware` + `CompositeLongTermMemory`) + **A4 extraction** — native STATIC memory does NOT do ephemeral prefix-cache injection |
+| `disableCompaction()` | pig's **A5 context-engineering** (`CompressionService`: three-tier budget / recursive-summary / importance / verbatim / consistency) — richer than native trigger+summary |
+| `disableSubagents()` + `disableDynamicSubagents()` | Phase 6 adapts multi-agent onto native subagents |
+| `disableWorkspaceContext()` + `disableAtPathExpansion()` | pig assembles its own system prompt (`AGENT.md + INFO.md + TOOL_GUIDANCE`); native workspace-context injection would break byte-stability (prefix-cache) and native @path expansion would rewrite user messages |
+| `disableDynamicSkills()` + `disableDefaultWorkspaceSkills()` | pig's `SkillsTool` + `SkillProvider` SPI built-ins |
+| `disableToolsConfig()` | pig manages its own `Toolkit` (no `tools.json`) |
+| `disableSessionPersistence()` | pig's `AgentStateStore` (Phase 3) is the **single** persistence mechanism — this disables only the harness *session-log* layer, NOT the core `ReActAgent` per-`(userId,sessionId)` auto-save (which is set via `.stateStore()` → inner, independent of this flag; consumed in `HarnessAgentBuilderSupport`, never touching `inner.stateStore()`). Verified by `HarnessAgentWrapTest.perSessionStatePersistsAndRestoresThroughTheWrap`: a second agent sharing the same `JsonFileAgentStateStore` restores a prior session's conversation through the wrap. |
+
+Builder-default notes (javap): the builder ctor pre-sets `compactionConfig=CompactionConfig.builder()
+.build()` and `memoryConfig=MemoryConfig.defaults()`, but `build()` only installs the memory/compaction
+middlewares when the config's model is non-null (a bare default has a null model) — still, we
+`disableCompaction()`/`disableMemory*()` explicitly. `WorkspaceManager.validate()` only *warns* on a
+missing workspace dir (no throw/create), so a bare-builder `PigAgent` in tests is safe; when no
+workspace is supplied `PigAgent` uses one lazily-created shared temp dir (OS temp, never the repo tree).
+
+### System prompt stays pig's, byte-stable
+
+With `disableWorkspaceContext()`, the `HarnessAgent` passes pig's assembled `sysPrompt` straight to the
+inner `ReActAgent` with no workspace/persona injection. Proven by the unchanged full-agent
+`MemoryUserSideInjectionTest` (6 tests): system prompt == the pig constant across turns as memory
+changes, memory injected on the *user* side, injection ephemeral/non-accumulating.
+
+### Tool-result eviction (the gap pig lacked) — config + proof
+
+New config surface `tools.result-eviction` (`PigAgentConfig.ResultEvictionConfig`): `enabled`
+(**default true**), `threshold` (**default 80000** chars, mapped to `ToolResultEvictionConfig
+.maxResultChars`), `preview-chars` (default 2000), `dir` (default `/large_tool_results`). `AgentBootstrap
+.buildEvictionConfig(...)` builds the native `ToolResultEvictionConfig` (or `null` when disabled) from
+it and threads it — plus the pig workspace root — through `AgentFactory`/`AgentInstanceFactory` →
+`PigAgent.Builder.toolResultEviction(...)`/`.workspace(...)` to every build path (interactive,
+per-agent, channel, autonomous). Model at the core level: **non-null config → eviction ON with it;
+`null` → `disableToolResultEviction()`** (so a bare-builder test defaults OFF, while the *product*
+default is ON because `AgentBootstrap` builds a config from the default-true config). javap: `build()`
+adds the `ToolResultEvictionMiddleware(abstractFilesystem, config)` iff `!disableToolResultEviction &&
+config != null`; the `AbstractFilesystem` is always resolved from `.workspace(path)` regardless of
+`disableFilesystemTools()`, so eviction has a spool target. Proven by `ToolResultEvictionTest` (offline,
+fake model + no-arg tool + `@TempDir` workspace, threshold 500): a 4007-char tool result is spooled to
+`workspace/large_tool_results/…` and the **retained conversation** (`AgentState.getContext()`) is
+rewritten to the read-back placeholder (`"Tool output was too large … use read_file …"` + a short
+preview), with the full blob gone — preventing context bloat on future turns.
+
+### javap signatures used (agentscope-harness-2.0.0)
+
+`io.agentscope.harness.agent.HarnessAgent implements io.agentscope.core.agent.Agent, AutoCloseable`:
+`getDelegate():ReActAgent`, `streamEvents(Msg):Flux<AgentEvent>` / `streamEvents(Msg,RuntimeContext)`,
+`call(List<Msg>,RuntimeContext):Mono<Msg>`, `setPermissionMode(RuntimeContext,PermissionMode)`,
+`getToolkit()`, `getModel()`, `getStateStore()`, `interrupt()`/`interrupt(Msg)`, `close()`,
+`enterPlanMode/exitPlanMode/isPlanModeActive`, `gateway()`, `getSubagentAgentManager()`. ·
+`HarnessAgent$Builder`: `builder()`, `fromAgent(ReActAgent)` (static→Builder), `name/description/
+sysPrompt/model/toolkit/maxIters/middleware(s)/stateStore/defaultSessionId/permissionContext/maxRetries/
+fallbackModel/stopOnReject`, `workspace(Path|String)`, `toolResultEviction(ToolResultEvictionConfig)`,
+`disableToolResultEviction()`, `compaction/disableCompaction`, `memory/disableMemoryTools/
+disableMemoryHooks`, `disableFilesystemTools/disableShellTool`, `disableSubagents/disableDynamicSubagents`,
+`disableWorkspaceContext/disableAtPathExpansion/disableDynamicSkills/disableDefaultWorkspaceSkills/
+disableToolsConfig/disableSessionPersistence`, `enablePlanMode`, `build()`. ·
+`io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig`: `DEFAULT_MAX_RESULT_CHARS=80000`,
+`DEFAULT_PREVIEW_CHARS=2000`, `DEFAULT_EVICTION_PATH="/large_tool_results"`,
+`DEFAULT_EXCLUDED_TOOLS={read_file,write_file,edit_file,grep_files,glob_files}`; `defaults()`,
+`builder().maxResultChars/previewChars/evictionPath/excludedToolNames`.
+
+### Nothing regressed (verified GREEN through the wrap)
+
+CC-REPL streaming (`AgentReplTurnTest`), mid-turn interrupt (`AgentReplInterruptTest`,
+`AgentKernelInterruptTest`), native permission veto (`PermissionVetoPocTest`), per-session state
+(`session` 45 + `HarnessAgentWrapTest` persistence), pig compaction (core compression tests) + ephemeral
+memory (`MemoryUserSideInjectionTest`) + loop-detection (`LoopDetectionMiddlewareTest`) + multi-agent
+(`MultiAgentSwitchTest`, `AgentKernelTest`), web SSE (`ChatHandlerTest`), channel (`ChannelAgentBridgeTest`)
+— all green on the wrap.
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn test` (skipITs) — **whole reactor GREEN, all modules** (BUILD SUCCESS). Total **999 tests, 0
+failures, 0 errors, 5 skipped** (≈995 baseline **+4** from the two new test classes:
+`HarnessAgentWrapTest` 3 + `ToolResultEvictionTest` 1; `pig-agent-core` 208→**212**). `mvn -q -pl
+pig-agent-cli -am compile` green. No other test changed (the wrap preserved every existing behavior).
+
+### Remaining Phase-6 open items
+
+Native subagents multi-agent adapt (`disableSubagents()` today; re-map `AgentRegistry`/`/agent use` onto
+`GatewayBootstrap` peers + `SubagentDeclaration`, moving per-agent permission to `PermissionMode`/
+`tools.json`); native Gateway for channels (Telegram/Discord/Slack stay custom `Channel`s);
+`enablePlanMode()` HITL (Phase-2 only maps pig `plan`→`EXPLORE` at the permission layer); command-granular
+allowlist as a `ToolBase` `checkPermissions`/`matchRule`; **live-model ITs** (permission DENY end-to-end,
+multi-turn persistence + restart on `JsonFileAgentStateStore`, native transient-vs-permanent retry, and a
+real >80K tool-result eviction round-trip). Lifecycle nit: rebuild-driven paths (model switch / MCP
+change) do not `close()` the superseded `HarnessAgent` — kept out of scope (the `ReActAgent` path never
+closed agents either; the disabled-extras vehicle holds few resources).

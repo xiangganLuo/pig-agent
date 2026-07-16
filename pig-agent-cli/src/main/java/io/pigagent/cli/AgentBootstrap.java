@@ -6,6 +6,7 @@ import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentFactory;
@@ -364,6 +365,20 @@ public final class AgentBootstrap {
         // conversation survives model switches + restarts (§10 Phase-3 store seam).
         AgentStateStore stateStore = new JsonFileAgentStateStore(workspace.getRootPath().resolve("state"));
 
+        // av2 Phase 5b: HarnessAgent VEHICLE wiring. Every PigAgent now wraps a HarnessAgent
+        // (getDelegate() == the ReActAgent pig builds) with the native memory/compaction/filesystem/
+        // shell/subagent/session-log features DISABLED (pig keeps its own differentiated ephemeral
+        // memory + A5 compaction + guarded tools + AgentStateStore) and native tool-result EVICTION
+        // turned ON — the one capability pig lacked. Point the vehicle workspace at pig's workspace
+        // root (eviction spool root) and build the eviction config from tools.result-eviction
+        // (default ON, ~80K threshold). enabled=false → null → eviction disabled. See PigAgent.
+        java.nio.file.Path workspaceRoot = workspace.getRootPath();
+        ToolResultEvictionConfig evictionConfig = buildEvictionConfig(config.getTools().getResultEviction());
+        if (evictionConfig != null) {
+            log.info("Tool-result eviction enabled (threshold {} chars, dir {})",
+                    evictionConfig.getMaxResultChars(), evictionConfig.getEvictionPath());
+        }
+
         // M-1 (interim): command-granular allowlist isn't mapped to native per-tool rules yet
         // (PermissionContextFactory reads allowlist.tools only). Warn so an operator relying on
         // allowlist.commands knows those entries still require re-confirmation (fail-closed, safe).
@@ -415,7 +430,7 @@ public final class AgentBootstrap {
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveMiddlewares, memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
-                stateStore, interactivePermCtx);
+                stateStore, interactivePermCtx, workspaceRoot, evictionConfig);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -442,7 +457,7 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries);
+                maxRetries, workspaceRoot, evictionConfig);
         AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
         for (AgentSpec s : agentRepository.findAll()) {
             if (!"default".equals(s.id())) {
@@ -477,6 +492,8 @@ public final class AgentBootstrap {
                     .maxIters(spec.maxIters())
                     .maxRetries(maxRetries)
                     .permissionContext(autoCtx)
+                    .workspace(workspaceRoot)
+                    .toolResultEviction(evictionConfig)
                     .build();
         };
         AgentRunner agentRunner = new AgentRunner(
@@ -509,7 +526,7 @@ public final class AgentBootstrap {
                 List.of(newLoopDetectionMiddleware(configManager),
                         new LoggingMiddleware(), new ToolCallLoggingMiddleware()), memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
-                stateStore, channelPermCtx);
+                stateStore, channelPermCtx, workspaceRoot, evictionConfig);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
@@ -623,6 +640,31 @@ public final class AgentBootstrap {
                     mcpToolGroup.get(schema.getName())));
         }
         return inventory;
+    }
+
+    /**
+     * Build the native {@link ToolResultEvictionConfig} from pig's {@code tools.result-eviction} config
+     * (av2 Phase 5b). Returns {@code null} when disabled (→ PigAgent disables eviction). Non-positive
+     * threshold/preview clamp to the native defaults; a blank dir falls back to the native default path.
+     * Excluded tool names are set to the native defaults (native fs/grep/glob tools pig doesn't use)
+     * so the config is never null-valued there.
+     */
+    static ToolResultEvictionConfig buildEvictionConfig(PigAgentConfig.ResultEvictionConfig c) {
+        if (c == null || !c.isEnabled()) {
+            return null;
+        }
+        int threshold = c.getThreshold() > 0
+                ? c.getThreshold() : ToolResultEvictionConfig.DEFAULT_MAX_RESULT_CHARS;
+        int preview = c.getPreviewChars() > 0
+                ? c.getPreviewChars() : ToolResultEvictionConfig.DEFAULT_PREVIEW_CHARS;
+        String dir = (c.getDir() == null || c.getDir().isBlank())
+                ? ToolResultEvictionConfig.DEFAULT_EVICTION_PATH : c.getDir();
+        return ToolResultEvictionConfig.builder()
+                .maxResultChars(threshold)
+                .previewChars(preview)
+                .evictionPath(dir)
+                .excludedToolNames(ToolResultEvictionConfig.DEFAULT_EXCLUDED_TOOLS)
+                .build();
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own

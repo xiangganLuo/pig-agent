@@ -14,10 +14,17 @@ import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.pigagent.core.memory.ConversationMemory;
 import io.pigagent.core.memory.EphemeralMemoryMiddleware;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -46,18 +53,45 @@ import java.util.Objects;
  *       through AgentScope wiring (see {@link EphemeralMemoryMiddleware}). The forward path for
  *       this hook is a {@code MiddlewareBase#onReasoning} (deferred to Phase 4).</li>
  * </ul>
+ *
+ * <p><b>av2 Phase 5b — HarnessAgent adoption (the vehicle).</b> {@code PigAgent} now wraps a
+ * {@link HarnessAgent} instead of a bare {@code ReActAgent}. The {@code HarnessAgent} is a thin
+ * delegating vehicle around the exact same {@code ReActAgent} pig builds (its
+ * {@link HarnessAgent#getDelegate()} is that {@code ReActAgent}), carrying pig's {@code Toolkit},
+ * middlewares (ephemeral-memory / loop-detection / logging), native {@code stateStore},
+ * {@code permissionContext}, {@code maxRetries}/{@code fallbackModel} and {@code maxIters}
+ * <em>unchanged</em>. Turn methods ({@code call}/{@code stream}/{@code streamEvents}) run through the
+ * {@code HarnessAgent} so its native <b>tool-result eviction</b> (the one gap pig lacked) applies;
+ * conversation-state operations (per-session {@code getAgentState}/{@code saveAgentState}, interrupt,
+ * {@link ConversationMemory}) run through {@code getDelegate()} — the exact instance the vehicle uses,
+ * so state stays consistent. Every batteries-included harness extra pig already owns is disabled at
+ * build ({@code disableFilesystemTools}/{@code disableShellTool} — pig's guarded FileSystemTools/
+ * ShellTools; {@code disableMemoryTools}/{@code disableMemoryHooks} — pig's ephemeral + A4;
+ * {@code disableCompaction} — pig's A5 context-engineering; {@code disableSubagents} — Phase 6;
+ * {@code disableWorkspaceContext}/{@code disableAtPathExpansion}/{@code disableDynamicSkills}/
+ * {@code disableToolsConfig} — pig owns the system prompt + toolkit; {@code disableSessionPersistence}
+ * — pig's {@code AgentStateStore} stays the single persistence mechanism). Only tool-result eviction
+ * is turned on. The public method surface is unchanged, so cli/web/channel/kernel are untouched.
  */
 public final class PigAgent {
+
+    private static final Logger log = LoggerFactory.getLogger(PigAgent.class);
 
     /** State-store partition for this single-user terminal app (the pig {@code userId}). */
     private static final String USER_ID = "pig";
 
+    /** Lazily-created shared temp workspace used only when no workspace is supplied (tests). */
+    private static volatile Path fallbackWorkspace;
+
+    private final HarnessAgent harness;
     private final ReActAgent reactAgent;
     private final String agentName;
     private final Model model;
     private final AgentStateStore stateStore;
 
-    private PigAgent(ReActAgent reactAgent, String agentName, Model model, AgentStateStore stateStore) {
+    private PigAgent(HarnessAgent harness, ReActAgent reactAgent, String agentName,
+                     Model model, AgentStateStore stateStore) {
+        this.harness = Objects.requireNonNull(harness, "harness");
         this.reactAgent = Objects.requireNonNull(reactAgent, "reactAgent");
         this.agentName = Objects.requireNonNull(agentName, "agentName");
         this.model = Objects.requireNonNull(model, "model");
@@ -69,11 +103,11 @@ public final class PigAgent {
     }
 
     public Msg call(Msg userMsg) {
-        return reactAgent.call(List.of(userMsg), RuntimeContext.empty()).block();
+        return harness.call(List.of(userMsg), RuntimeContext.empty()).block();
     }
 
     public Flux<AgentEvent> stream(Msg userMsg) {
-        return reactAgent.streamEvents(userMsg);
+        return harness.streamEvents(userMsg);
     }
 
     /**
@@ -84,12 +118,12 @@ public final class PigAgent {
      * working unchanged.
      */
     public Msg call(Msg userMsg, String sessionId) {
-        return reactAgent.call(List.of(userMsg), contextFor(sessionId)).block();
+        return harness.call(List.of(userMsg), contextFor(sessionId)).block();
     }
 
     /** Session-aware streaming counterpart of {@link #call(Msg, String)}. */
     public Flux<AgentEvent> stream(Msg userMsg, String sessionId) {
-        return reactAgent.streamEvents(userMsg, contextFor(sessionId));
+        return harness.streamEvents(userMsg, contextFor(sessionId));
     }
 
     /** The per-call runtime context for a pig session id (default session when null/blank). */
@@ -108,8 +142,20 @@ public final class PigAgent {
         return model;
     }
 
+    /**
+     * The underlying {@code ReActAgent} — the {@link HarnessAgent}'s delegate (the exact instance the
+     * vehicle runs turns on). This is the seam {@code CompressionService} / {@code AgentRunner} /
+     * {@link ConversationMemory} operate on (conversation state), and what the maxIters/retry unit
+     * tests inspect. Operating on it is consistent with running turns via the {@code HarnessAgent},
+     * because the vehicle delegates to this very instance.
+     */
     public ReActAgent getReactAgent() {
         return reactAgent;
+    }
+
+    /** The HarnessAgent vehicle wrapping the {@link #getReactAgent() delegate} (av2 Phase 5b). */
+    public HarnessAgent getHarnessAgent() {
+        return harness;
     }
 
     /**
@@ -185,7 +231,21 @@ public final class PigAgent {
      * per-tool rules happens when the agent is rebuilt (model switch) or on a fresh session.
      */
     public void setPermissionMode(PermissionMode nativeMode, String sessionId) {
-        reactAgent.setPermissionMode(contextFor(sessionId), nativeMode);
+        harness.setPermissionMode(contextFor(sessionId), nativeMode);
+    }
+
+    /**
+     * Release the {@link HarnessAgent} vehicle's resources (it is {@code AutoCloseable}). Safe to call
+     * more than once; failures are logged and swallowed. Rebuild-driven lifecycle (model switch / MCP
+     * change) does not auto-close superseded agents today — kept out of scope, as the {@code ReActAgent}
+     * path never did either; callers/tests that build throwaway agents may call this.
+     */
+    public void close() {
+        try {
+            harness.close();
+        } catch (Exception e) {
+            log.debug("HarnessAgent close failed (ignored): {}", e.getMessage());
+        }
     }
 
     /**
@@ -209,6 +269,8 @@ public final class PigAgent {
         private int maxIters; // 0 = do not set (keep AgentScope's default)
         private int maxRetries; // <= 0 = do not set (keep AgentScope's ExecutionConfig default)
         private Model fallbackModel; // nullable
+        private Path workspace; // nullable → a shared temp workspace (eviction spool root; tests)
+        private ToolResultEvictionConfig toolResultEviction; // null = eviction disabled
 
         private Builder() {}
 
@@ -297,30 +359,35 @@ public final class PigAgent {
             return this;
         }
 
+        /**
+         * The workspace root the {@link HarnessAgent} vehicle uses — chiefly the on-disk root the
+         * native tool-result-eviction spools large results into. In production this is pig's workspace
+         * root; when {@code null} (unit tests) a shared temp directory is used so no repo/build-tree
+         * pollution occurs. Native workspace tools/context are disabled regardless, so nothing here
+         * touches pig's {@code AGENT.md}/toolkit or the (byte-stable) system prompt.
+         */
+        public Builder workspace(Path workspace) {
+            this.workspace = workspace;
+            return this;
+        }
+
+        /**
+         * Native tool-result eviction config (av2 Phase 5b) — the one capability pig lacked. When
+         * non-null, results larger than {@code config.getMaxResultChars()} spool to disk under the
+         * workspace with a read-back placeholder in the context. {@code null} disables eviction. The
+         * product default (ON, ~80K) is decided by the wiring layer ({@code AgentBootstrap} builds a
+         * config from {@code tools.result-eviction}); a bare builder (tests) defaults to disabled.
+         */
+        public Builder toolResultEviction(ToolResultEvictionConfig toolResultEviction) {
+            this.toolResultEviction = toolResultEviction;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
             AgentStateStore effectiveStore =
                     stateStore != null ? stateStore : new InMemoryAgentStateStore();
-
-            ReActAgent.Builder reactBuilder = ReActAgent.builder()
-                    .name(name)
-                    .sysPrompt(sysPrompt)
-                    .model(model)
-                    .stateStore(effectiveStore);
-
-            if (maxIters > 0) {
-                reactBuilder.maxIters(maxIters);
-            }
-            if (maxRetries > 0) {
-                reactBuilder.maxRetries(maxRetries);
-            }
-            if (fallbackModel != null) {
-                reactBuilder.fallbackModel(fallbackModel);
-            }
-            if (permissionContext != null) {
-                reactBuilder.permissionContext(permissionContext);
-            }
 
             // Long-term memory is injected on the user side, ephemerally, via our own middleware — NOT
             // through AgentScope's long-term-memory wiring, whose injection is persisted into the
@@ -335,15 +402,80 @@ public final class PigAgent {
                 effectiveMiddlewares.add(new EphemeralMemoryMiddleware(longTermMemory));
             }
 
-            if (toolkit != null) {
-                reactBuilder.toolkit(toolkit);
+            // av2 Phase 5b: build a HarnessAgent VEHICLE around the same ReActAgent config. The
+            // HarnessAgent.Builder setters delegate to an inner ReActAgent.Builder (toolkit/middlewares/
+            // stateStore/permissionContext/maxRetries/fallbackModel/maxIters), so pig's config reaches
+            // the delegate unchanged (delegate == getDelegate()). We disable every batteries-included
+            // extra pig already owns and turn ON only tool-result eviction (the gap pig lacked).
+            HarnessAgent.Builder hb = HarnessAgent.builder()
+                    .name(name)
+                    .sysPrompt(sysPrompt)
+                    .model(model)
+                    .stateStore(effectiveStore)
+                    .toolkit(toolkit) // setter tolerates null (creates an empty Toolkit)
+                    .workspace(workspace != null ? workspace : fallbackWorkspace())
+                    // pig owns these — disable the native equivalents so there is no overlap:
+                    .disableFilesystemTools()   // pig's guarded FileSystemTools
+                    .disableShellTool()         // pig's ShellTools + command sandbox
+                    .disableMemoryTools()       // pig's ephemeral memory + A4 extraction
+                    .disableMemoryHooks()
+                    .disableCompaction()        // pig's A5 context-engineering compaction
+                    .disableSubagents()         // Phase 6 adapts multi-agent
+                    .disableDynamicSubagents()
+                    .disableWorkspaceContext()  // pig assembles its own byte-stable system prompt
+                    .disableAtPathExpansion()
+                    .disableDynamicSkills()     // pig's SkillsTool + built-in skills
+                    .disableDefaultWorkspaceSkills()
+                    .disableToolsConfig()       // pig manages its own Toolkit (no tools.json)
+                    .disableSessionPersistence(); // pig's AgentStateStore is the single mechanism
+
+            if (maxIters > 0) {
+                hb.maxIters(maxIters);
+            }
+            if (maxRetries > 0) {
+                hb.maxRetries(maxRetries);
+            }
+            if (fallbackModel != null) {
+                hb.fallbackModel(fallbackModel);
+            }
+            if (permissionContext != null) {
+                hb.permissionContext(permissionContext);
             }
             if (!effectiveMiddlewares.isEmpty()) {
-                reactBuilder.middlewares(effectiveMiddlewares);
+                hb.middlewares(effectiveMiddlewares);
+            }
+            if (toolResultEviction != null) {
+                hb.toolResultEviction(toolResultEviction);
+            } else {
+                hb.disableToolResultEviction();
             }
 
-            ReActAgent reactAgent = reactBuilder.build();
-            return new PigAgent(reactAgent, name, model, effectiveStore);
+            HarnessAgent harness = hb.build();
+            return new PigAgent(harness, harness.getDelegate(), name, model, effectiveStore);
+        }
+    }
+
+    /**
+     * A process-wide temp workspace used only when no workspace is supplied to the builder (unit
+     * tests). Created lazily so production (which always supplies pig's workspace) never touches it,
+     * and placed under the OS temp dir so it never pollutes the repo/build tree. Failure falls back to
+     * a fixed temp path — the native {@code WorkspaceManager} only warns on a missing dir, so a
+     * non-existent path is tolerated.
+     */
+    private static Path fallbackWorkspace() {
+        Path ws = fallbackWorkspace;
+        if (ws != null) {
+            return ws;
+        }
+        synchronized (PigAgent.class) {
+            if (fallbackWorkspace == null) {
+                try {
+                    fallbackWorkspace = Files.createTempDirectory("pig-agent-ws-");
+                } catch (IOException e) {
+                    fallbackWorkspace = Path.of(System.getProperty("java.io.tmpdir"), "pig-agent-ws");
+                }
+            }
+            return fallbackWorkspace;
         }
     }
 }

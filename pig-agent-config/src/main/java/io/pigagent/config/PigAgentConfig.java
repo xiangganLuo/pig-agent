@@ -305,12 +305,40 @@ public final class PigAgentConfig {
     public static final class ToolsConfig {
         @JsonProperty("web") private WebToolConfig web = new WebToolConfig();
         @JsonProperty("deferred") private DeferredToolsConfig deferred = new DeferredToolsConfig();
+        @JsonProperty("result-eviction") private ResultEvictionConfig resultEviction = new ResultEvictionConfig();
         public WebToolConfig getWeb() { return web; }
         public void setWeb(WebToolConfig w) { this.web = w; }
         public DeferredToolsConfig getDeferred() { return deferred; }
         public void setDeferred(DeferredToolsConfig d) {
             this.deferred = d == null ? new DeferredToolsConfig() : d;
         }
+        public ResultEvictionConfig getResultEviction() { return resultEviction; }
+        public void setResultEviction(ResultEvictionConfig r) {
+            this.resultEviction = r == null ? new ResultEvictionConfig() : r;
+        }
+    }
+
+    /**
+     * 工具结果驱逐（{@code tools.result-eviction}，av2 Phase 5b）配置——pig 原本缺失、由 HarnessAgent 原生
+     * 提供的能力：单条工具结果超过 {@code threshold} 字符时，完整内容落盘到工作区 {@code dir} 目录、上下文里
+     * 只留一个「已保存到 …，用 read_file 读取」占位符（含前若干字符预览），防止大文件读取 / 命令输出把上下文撑爆。
+     * 默认 {@code enabled=true}、{@code threshold=80000}（约 80K 字符，对齐原生
+     * {@code ToolResultEvictionConfig.DEFAULT_MAX_RESULT_CHARS}）。{@code enabled=false} 完全关闭。全部
+     * 可选、默认安全、向后兼容（旧配置无此块 → 默认开、按 80K 门限）。
+     */
+    public static final class ResultEvictionConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        @JsonProperty("threshold") private int threshold = 80000;
+        @JsonProperty("preview-chars") private int previewChars = 2000;
+        @JsonProperty("dir") private String dir = "/large_tool_results";
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getThreshold() { return threshold; }
+        public void setThreshold(int t) { this.threshold = t; }
+        public int getPreviewChars() { return previewChars; }
+        public void setPreviewChars(int p) { this.previewChars = p; }
+        public String getDir() { return dir; }
+        public void setDir(String d) { this.dir = d; }
     }
 
     /**

@@ -6,7 +6,9 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -43,15 +45,25 @@ public final class AgentFactory {
     // Re-evaluated on every create() (incl. model-switch rebuilds) so the rebuilt agent picks up the
     // current permission mode; nullable → no native permission context (AgentScope default). av2 P4.
     private final Supplier<PermissionContextState> permissionContextSupplier;
+    private final Path workspace; // nullable → PigAgent uses a shared temp workspace (av2 5b)
+    private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, LongTermMemory longTermMemory) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, 0, null, 0, null, null);
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, 0, null, 0, null, null, null, null);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, null, 0, null, null);
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, null, 0, null, null, null, null);
+    }
+
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        Model fallbackModel, int maxIters, AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier) {
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+                stateStore, permissionContextSupplier, null, null);
     }
 
     /**
@@ -62,11 +74,15 @@ public final class AgentFactory {
      * @param permissionContextSupplier supplies a freshly-built native permission context on each
      *        {@link #create(Model)} (including model-switch rebuilds), so a rebuilt agent reflects the
      *        current permission mode. {@code null} = no native permission context.
+     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root;
+     *        {@code null} → PigAgent uses a shared temp workspace.
+     * @param toolResultEviction native tool-result-eviction config (av2 Phase 5b); {@code null} disables it.
      */
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
-                        Supplier<PermissionContextState> permissionContextSupplier) {
+                        Supplier<PermissionContextState> permissionContextSupplier,
+                        Path workspace, ToolResultEvictionConfig toolResultEviction) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -77,6 +93,8 @@ public final class AgentFactory {
         this.maxIters = maxIters;
         this.stateStore = stateStore;
         this.permissionContextSupplier = permissionContextSupplier;
+        this.workspace = workspace;
+        this.toolResultEviction = toolResultEviction;
     }
 
     /**
@@ -98,6 +116,8 @@ public final class AgentFactory {
                 .fallbackModel(fallbackModel)
                 .stateStore(stateStore)
                 .permissionContext(permissionContextSupplier == null ? null : permissionContextSupplier.get())
+                .workspace(workspace)
+                .toolResultEviction(toolResultEviction)
                 .build();
     }
 }

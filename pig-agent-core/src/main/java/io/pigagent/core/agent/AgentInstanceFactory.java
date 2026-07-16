@@ -6,7 +6,9 @@ import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
@@ -61,23 +63,34 @@ public final class AgentInstanceFactory {
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
     private final PermissionContextProvider permissionContexts; // nullable → no native context
     private final int maxRetries; // <= 0 = keep AgentScope's default (av2 Phase 5a native retry)
+    private final Path workspace; // nullable → PigAgent uses a shared temp workspace (av2 5b)
+    private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory) {
-        this(models, toolkits, middlewares, longTermMemory, null, null, 0);
+        this(models, toolkits, middlewares, longTermMemory, null, null, 0, null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, null, 0);
+        this(models, toolkits, middlewares, longTermMemory, stateStore, null, 0, null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, 0);
+        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, 0, null, null);
+    }
+
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries) {
+        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+                null, null);
     }
 
     /**
@@ -89,12 +102,16 @@ public final class AgentInstanceFactory {
      *        = no native permission context (AgentScope default).
      * @param maxRetries native model-call retry count applied to each agent (av2 Phase 5a); {@code <= 0}
      *        keeps AgentScope's default, {@code 1} effectively disables retry.
+     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root;
+     *        {@code null} → PigAgent uses a shared temp workspace.
+     * @param toolResultEviction native tool-result-eviction config (av2 Phase 5b); {@code null} disables it.
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
-                                int maxRetries) {
+                                int maxRetries,
+                                Path workspace, ToolResultEvictionConfig toolResultEviction) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
@@ -102,6 +119,8 @@ public final class AgentInstanceFactory {
         this.stateStore = stateStore;
         this.permissionContexts = permissionContexts;
         this.maxRetries = maxRetries;
+        this.workspace = workspace;
+        this.toolResultEviction = toolResultEviction;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -118,6 +137,8 @@ public final class AgentInstanceFactory {
                 .maxRetries(maxRetries)
                 .stateStore(stateStore)
                 .permissionContext(permissionContexts == null ? null : permissionContexts.contextFor(spec, toolkit))
+                .workspace(workspace)
+                .toolResultEviction(toolResultEviction)
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }
