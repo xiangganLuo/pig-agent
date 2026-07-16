@@ -3,7 +3,6 @@ package io.pigagent.cli;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.PermissionMode;
 import io.pigagent.tool.filesystem.FileSystemTools;
-import io.pigagent.tool.permission.PermissionDeniedTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -20,20 +19,26 @@ class AgentWiringTest {
     }
 
     @Test
-    void toolkitFor_whitelist_keepsOnlyNamedPlusSentinel_originalUntouched() {
+    void toolkitFor_whitelist_keepsOnlyNamed_originalUntouched() {
         // Arrange
         Toolkit full = new Toolkit();
         full.registration().tool(new FileSystemTools()).apply();
-        full.registration().tool(new PermissionDeniedTool()).apply();
         assertThat(full.getToolNames()).contains("readFile", "writeFile", "listDirectory");
 
         // Act
         Toolkit sub = AgentWiring.toolkitFor(full, List.of("readFile"));
 
-        // Assert
-        assertThat(sub.getToolNames()).contains("readFile", PermissionDeniedTool.TOOL_NAME);
+        // Assert — av2 Phase 4: no PermissionDeniedTool sentinel to preserve (native permission).
+        assertThat(sub.getToolNames()).contains("readFile");
         assertThat(sub.getToolNames()).doesNotContain("writeFile", "listDirectory");
         assertThat(full.getToolNames()).contains("writeFile"); // copy, original intact
+    }
+
+    @Test
+    void effectiveMode_prefersSpecOverrideElseGlobal() {
+        assertThat(AgentWiring.effectiveMode("plan", PermissionMode.ASK)).isEqualTo(PermissionMode.PLAN);
+        assertThat(AgentWiring.effectiveMode(null, PermissionMode.ASK)).isEqualTo(PermissionMode.ASK);
+        assertThat(AgentWiring.effectiveMode("bogus", PermissionMode.AUTO)).isEqualTo(PermissionMode.AUTO);
     }
 
     @Test

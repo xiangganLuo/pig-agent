@@ -4,7 +4,6 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.Model;
-import io.agentscope.core.session.JsonSession;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
@@ -177,8 +176,9 @@ class FullLinkAgentIT {
     }
 
     private SessionManager newSessionManager() {
-        JsonSession agentSession = new JsonSession(sessionsDir);
-        return new SessionManager(agentHolder, modelManager, agentSession, memory,
+        // av2 Phase 3/4: no JsonSession — conversation persists via the native AgentStateStore; the
+        // SessionManager is the metadata sidecar (name/timestamps/model binding) this round-trip checks.
+        return new SessionManager(agentHolder, modelManager, memory,
                 new FileSystemSessionRepository(sessionsDir), configManager, sessionsDir);
     }
 

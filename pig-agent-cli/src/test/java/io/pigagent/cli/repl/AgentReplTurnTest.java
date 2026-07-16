@@ -1,8 +1,11 @@
 package io.pigagent.cli.repl;
 
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.ToolResultState;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.session.SessionManager;
@@ -27,8 +30,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * A chat turn must keep the {@code noteUserMessage → maybeCompress → chat → saveCurrent} order
- * (streaming through the kernel so the turn is interruptible) and map stream events to rendered
- * output. Driven directly via {@code runTurn} so no JLine read loop is needed.
+ * (streaming through the kernel so the turn is interruptible + session-bound) and map the typed
+ * {@link AgentEvent} stream to rendered output. Driven directly via {@code runTurn} so no JLine read
+ * loop is needed.
  */
 class AgentReplTurnTest {
 
@@ -44,15 +48,6 @@ class AgentReplTurnTest {
                 .build();
     }
 
-    private static Event event(EventType type, String text) {
-        Event e = mock(Event.class);
-        Msg msg = mock(Msg.class);
-        when(e.getType()).thenReturn(type);
-        when(e.getMessage()).thenReturn(msg);
-        when(msg.getTextContent()).thenReturn(text);
-        return e;
-    }
-
     @Test
     void runTurn_ordersHooksAndStreamsThroughKernel() throws IOException {
         AgentKernel kernel = mock(AgentKernel.class);
@@ -60,8 +55,8 @@ class AgentReplTurnTest {
         CompressionService compression = mock(CompressionService.class);
         when(kernel.activeId()).thenReturn("default");
         when(sessions.getCurrentSessionId()).thenReturn("s1");
-        Event answer = event(EventType.AGENT_RESULT, "hello world\n");
-        when(kernel.chat(eq("default"), any(Msg.class))).thenReturn(Flux.just(answer));
+        AgentEvent answer = new TextBlockDeltaEvent("r1", "b1", "hello world\n");
+        when(kernel.chat(eq("default"), any(Msg.class), eq("s1"))).thenReturn(Flux.just(answer));
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
@@ -73,7 +68,7 @@ class AgentReplTurnTest {
         var order = inOrder(sessions, compression, kernel);
         order.verify(sessions).noteUserMessage("hi");
         order.verify(compression).maybeCompress("s1");
-        order.verify(kernel).chat(eq("default"), any(Msg.class));
+        order.verify(kernel).chat(eq("default"), any(Msg.class), eq("s1"));
         order.verify(sessions).saveCurrent();
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("hello world");
     }
@@ -85,12 +80,26 @@ class AgentReplTurnTest {
         AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
                 null, new AtomicReference<>(), null);
 
-        Event tool = event(EventType.TOOL_RESULT, "exit=0");
-        when(tool.getMessage().getName()).thenReturn("executeCommand");
+        AgentEvent delta = new ToolResultTextDeltaEvent("r1", "tc1", "executeCommand", "exit=0");
+        AgentEvent end = new ToolResultEndEvent("r1", "tc1", "executeCommand", ToolResultState.SUCCESS);
 
-        repl.renderStream(Flux.just(tool), terminal);
+        repl.renderStream(Flux.just(delta, end), terminal);
 
         String printed = out.toString(StandardCharsets.UTF_8);
         assertThat(printed).contains("⏺").contains("executeCommand").contains("└").contains("exit=0");
+    }
+
+    @Test
+    void renderStream_showsDeniedToolResult() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null);
+
+        AgentEvent denied = new ToolResultEndEvent("r1", "tc1", "writeFile", ToolResultState.DENIED);
+
+        repl.renderStream(Flux.just(denied), terminal);
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("writeFile").contains("denied");
     }
 }

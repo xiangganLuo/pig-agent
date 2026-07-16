@@ -1,16 +1,16 @@
 package io.pigagent.cli.smoke;
 
-import io.agentscope.core.hook.Hook;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.PigAgentConfig;
-import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.PigAgent;
 import io.pigagent.model.JsonModelStore;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
@@ -20,19 +20,20 @@ import io.pigagent.provider.gemini.GeminiProtocol;
 import io.pigagent.provider.ollama.OllamaProtocol;
 import io.pigagent.provider.openai.OpenAiProtocol;
 import io.pigagent.provider.registry.ProtocolRegistry;
-import io.pigagent.tool.permission.PermissionDeniedTool;
-import io.pigagent.tool.permission.ToolPermissionHook;
+import io.pigagent.tool.permission.PermissionContextFactory;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 权限体系端到端集成测试：用**真实** {@link ToolPermissionHook}（生产类）+ 真实 anthropic 模型，
- * 验证 plan 模式否决可变工具、bypass 模式放行。区别于 {@code PermissionVetoSpikeIT}（临时 hook）。
+ * 权限体系端到端集成测试（av2 Phase 4，原生路径）：用 AgentScope 2.0 原生
+ * {@link PermissionContextState}（经 {@link PermissionContextFactory} 从 pig 模式 + toolkit 生成）+
+ * 真实 anthropic 模型，验证 plan 模式否决可变工具、bypass 模式放行。取代旧的自研
+ * {@code ToolPermissionHook}/{@code PermissionDeniedTool} 哨兵路径（H-2；旧 {@code PermissionVetoSpikeIT}
+ * 已随哨兵机制归档删除，L-1）。
  *
  * <p>{@code *IT}，不进默认 {@code mvn test}。显式：
  * {@code mvn -pl pig-agent-cli -am test "-Dtest=PermissionEnforcementIT" "-Dsurefire.failIfNoSpecifiedTests=false"}
@@ -70,16 +71,18 @@ class PermissionEnforcementIT {
         SpyMutatingTool spy = new SpyMutatingTool();
         Toolkit toolkit = new Toolkit();
         toolkit.registration().tool(spy).apply();
-        toolkit.registration().tool(new PermissionDeniedTool()).apply();
 
         PigAgentConfig.PermissionConfig cfg = new PigAgentConfig.PermissionConfig();
         cfg.setMode(mode);
-        // confirmer=null（plan 不会问；bypass 直接放行），writer=null
-        ToolPermissionHook hook = new ToolPermissionHook(() -> cfg, null, null);
+        // interactive=false：无 confirmer（plan 不会问；ask→DENY fail-closed；bypass 直接放行）。
+        PermissionContextState permCtx = PermissionContextFactory.build(
+                cfg, cfg.resolveMode(), toolkit.getToolNames(), false);
 
         String sysPrompt = "你是一个测试助理。当用户要求执行某动作时，你必须调用对应的工具，而不是凭空回答。";
-        AgentFactory factory = new AgentFactory("perm-it", sysPrompt, toolkit, List.<Hook>of(hook), null);
-        return new Rig(spy, new AgentHolder(factory.create(model)));
+        PigAgent agent = PigAgent.builder()
+                .name("perm-it").sysPrompt(sysPrompt).model(model)
+                .toolkit(toolkit).permissionContext(permCtx).build();
+        return new Rig(spy, new AgentHolder(agent));
     }
 
     private String ask(AgentHolder holder, String text) {

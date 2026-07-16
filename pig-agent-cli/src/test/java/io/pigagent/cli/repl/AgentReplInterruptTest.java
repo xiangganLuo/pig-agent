@@ -1,8 +1,7 @@
 package io.pigagent.cli.repl;
 
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
-import io.agentscope.core.message.Msg;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.ModelCallStartEvent;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
@@ -47,11 +46,8 @@ class AgentReplInterruptTest {
                 null, new AtomicReference<>(), null);
 
         // A turn that starts (reasoning) then hangs — simulates an in-flight model call.
-        Event reasoning = mock(Event.class);
-        Msg msg = mock(Msg.class);
-        when(reasoning.getType()).thenReturn(EventType.REASONING);
-        when(reasoning.getMessage()).thenReturn(msg);
-        Flux<Event> stream = Flux.concat(Flux.just(reasoning), Flux.never());
+        AgentEvent reasoning = new ModelCallStartEvent("fake-model");
+        Flux<AgentEvent> stream = Flux.concat(Flux.just(reasoning), Flux.never());
 
         Thread turn = new Thread(() -> repl.renderStream(stream, terminal), "turn");
         turn.start();

@@ -2,11 +2,17 @@ package io.pigagent.web.handler;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AllToolsDeniedEvent;
+import io.agentscope.core.event.ModelCallStartEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ThinkingBlockStartEvent;
+import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolResultState;
 import io.pigagent.web.Http;
 import io.pigagent.web.WebContext;
 import io.pigagent.web.WebJson;
@@ -17,13 +23,17 @@ import reactor.core.Disposable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
 /**
  * Streaming chat over SSE — the Web analogue of the REPL's chat turn, delegating straight to
- * {@code kernel.chat(agentId, msg)}. Each agent {@link Event} is pushed as a {@code data:} frame
- * {@code {type,text}} (type = reasoning|tool|answer), then a final {@code {type:"done"}}.
+ * {@code kernel.chat(agentId, msg)}. The typed {@link AgentEvent} stream (av2 Phase 4) is aggregated
+ * the same way as the CLI renderer — answer text from {@code TextBlockDeltaEvent}, tool output from
+ * {@code ToolResultEndEvent} (DENIED shown), reasoning from {@code ModelCallStartEvent} — and each is
+ * pushed as a {@code data:} frame {@code {type,text}} (type = reasoning|tool|answer), then a final
+ * {@code {type:"done"}}.
  *
  * <p>{@code POST /api/chat} body {@code {message, agentId?}}. Uses POST (bodies can be long) so the
  * browser reads it with {@code fetch()} streaming, not {@code EventSource}. One turn holds one
@@ -89,13 +99,9 @@ public final class ChatHandler implements HttpHandler {
         Msg userMsg = Msg.builder().name("user").role(MsgRole.USER)
                 .content(TextBlock.builder().text(message).build()).build();
 
+        Map<String, StringBuilder> toolResults = new LinkedHashMap<>();
         Disposable sub = ctx.agentKernel().chat(agentId, userMsg).subscribe(
-                event -> {
-                    String type = frameType(event.getType());
-                    if (type != null) {
-                        write(os, lock, json.chatFrame(type, text(event)), done);
-                    }
-                },
+                event -> onEvent(event, os, lock, toolResults, done),
                 err -> {
                     write(os, lock, json.chatFrame("error", String.valueOf(err.getMessage())), done);
                     done.countDown();
@@ -114,15 +120,34 @@ public final class ChatHandler implements HttpHandler {
         }
     }
 
-    private static String frameType(EventType type) {
-        if (type == EventType.REASONING) return "reasoning";
-        if (type == EventType.TOOL_RESULT) return "tool";
-        if (type == EventType.AGENT_RESULT) return "answer";
-        return null; // HINT / SUMMARY / ALL are not surfaced
+    /** Map one typed {@link AgentEvent} to an SSE chat frame (mirrors the CLI renderer's aggregation). */
+    private void onEvent(AgentEvent event, OutputStream os, Object lock,
+                         Map<String, StringBuilder> toolResults, CountDownLatch done) {
+        if (event instanceof TextBlockDeltaEvent d) {
+            write(os, lock, json.chatFrame("answer", d.getDelta()), done);
+        } else if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
+            write(os, lock, json.chatFrame("reasoning", ""), done);
+        } else if (event instanceof ToolResultTextDeltaEvent d) {
+            toolResults.computeIfAbsent(key(d.getToolCallId()), k -> new StringBuilder()).append(d.getDelta());
+        } else if (event instanceof ToolResultEndEvent end) {
+            write(os, lock, json.chatFrame("tool", toolSummary(end, toolResults)), done);
+        } else if (event instanceof AllToolsDeniedEvent) {
+            write(os, lock, json.chatFrame("tool", "all tool calls denied by permission policy"), done);
+        }
     }
 
-    private static String text(Event event) {
-        return event.getMessage() == null ? "" : event.getMessage().getTextContent();
+    private static String key(String toolCallId) {
+        return toolCallId == null ? "" : toolCallId;
+    }
+
+    private static String toolSummary(ToolResultEndEvent end, Map<String, StringBuilder> toolResults) {
+        StringBuilder acc = toolResults.get(key(end.getToolCallId()));
+        String text = acc == null ? "" : acc.toString();
+        String name = end.getToolCallName() == null ? "tool" : end.getToolCallName();
+        if (end.getState() == ToolResultState.DENIED) {
+            return name + ": " + (text.isBlank() ? "denied by permission policy" : text);
+        }
+        return text.isBlank() ? name : name + ": " + text;
     }
 
     private void write(OutputStream os, Object lock, Map<String, Object> frame, CountDownLatch done) {

@@ -1,6 +1,6 @@
 package io.pigagent.cli.repl;
 
-import io.agentscope.core.agent.Event;
+import io.agentscope.core.event.AgentEvent;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
@@ -24,7 +24,7 @@ class AgentReplErrorPrintTest {
     @Test
     void streamError_printsErrorExactlyOnce() throws IOException {
         // Arrange — a turn stream that fails, and a REPL to render it.
-        Flux<Event> stream = Flux.error(new RuntimeException("502: upstream_error"));
+        Flux<AgentEvent> stream = Flux.error(new RuntimeException("502: upstream_error"));
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = TerminalBuilder.builder()

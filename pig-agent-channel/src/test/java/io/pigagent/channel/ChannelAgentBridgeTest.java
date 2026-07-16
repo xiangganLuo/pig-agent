@@ -1,7 +1,7 @@
 package io.pigagent.channel;
 
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
@@ -15,11 +15,19 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Bridge routing tests: inbound → agent stream → outbound reply, with a mocked agent + kernel. */
+/**
+ * Bridge routing tests: inbound → agent stream → outbound reply, with a mocked agent + kernel.
+ *
+ * <p>av2 Phase 4: the bridge threads a channel-owned session id ({@code "channel:<id>"}) into the
+ * session-aware {@code stream(Msg, sessionId)} and aggregates the typed {@link AgentEvent} stream
+ * (answer text from {@link TextBlockDeltaEvent}).
+ */
 class ChannelAgentBridgeTest {
 
     /** A test channel that captures the inbound handler and records outbound messages. */
@@ -39,21 +47,17 @@ class ChannelAgentBridgeTest {
         @Override public boolean isRunning() { return true; }
     }
 
-    private static AgentHolder holderStreaming(Flux<Event> stream) {
+    private static AgentHolder holderStreaming(Flux<AgentEvent> stream) {
         PigAgent agent = mock(PigAgent.class);
         when(agent.getAgentName()).thenReturn("A");
-        when(agent.stream(any(Msg.class))).thenReturn(stream);
+        when(agent.stream(any(Msg.class), anyString())).thenReturn(stream);
         return new AgentHolder(agent);
     }
 
     @Test
     void inboundMessageIsRoutedAndReplySentBack() {
-        // Arrange
-        Event event = mock(Event.class);
-        when(event.getType()).thenReturn(EventType.AGENT_RESULT);
-        Msg replyMsg = mock(Msg.class);
-        when(replyMsg.getTextContent()).thenReturn("pong");
-        when(event.getMessage()).thenReturn(replyMsg);
+        // Arrange: a single answer delta "pong"
+        AgentEvent event = new TextBlockDeltaEvent("r1", "b1", "pong");
 
         AgentHolder holder = holderStreaming(Flux.just(event));
         AgentKernel kernel = mock(AgentKernel.class);
@@ -64,9 +68,10 @@ class ChannelAgentBridgeTest {
         // Act
         channel.fire("ping");
 
-        // Assert
+        // Assert: reply routed back, turn bound to the channel-owned session id
         assertThat(channel.sent).containsExactly("pong");
         verify(kernel).noteChannelChat("testchan");
+        verify(holder.get()).stream(any(Msg.class), eq("channel:testchan"));
     }
 
     @Test

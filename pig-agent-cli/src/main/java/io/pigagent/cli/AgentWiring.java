@@ -2,7 +2,6 @@ package io.pigagent.cli;
 
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.PermissionMode;
-import io.pigagent.tool.permission.PermissionDeniedTool;
 
 import java.util.HashSet;
 import java.util.List;
@@ -21,8 +20,11 @@ public final class AgentWiring {
     /**
      * The toolkit an agent should use: the shared full toolkit when {@code toolNames} is empty
      * (= "all tools"), otherwise a {@link Toolkit#copy()} restricted to the whitelisted names.
-     * Unknown names are silently ignored; the permission deny sentinel is always kept so the
-     * permission hook can still rewrite vetoed calls to it.
+     * Unknown names are silently ignored.
+     *
+     * <p>av2 Phase 4: the old {@code PermissionDeniedTool.TOOL_NAME} sentinel-preservation is gone —
+     * native permission ({@code PermissionContextState}) denies before execution and feeds the model a
+     * {@code ToolResultState.DENIED} result, so there is no sentinel tool to keep in the subset.
      */
     public static Toolkit toolkitFor(Toolkit full, List<String> toolNames) {
         if (toolNames == null || toolNames.isEmpty()) {
@@ -30,7 +32,6 @@ public final class AgentWiring {
         }
         Toolkit sub = full.copy();
         Set<String> keep = new HashSet<>(toolNames);
-        keep.add(PermissionDeniedTool.TOOL_NAME);
         for (String name : new HashSet<>(sub.getToolNames())) {
             if (!keep.contains(name)) {
                 sub.removeTool(name);
@@ -45,5 +46,14 @@ public final class AgentWiring {
      */
     public static PermissionMode permissionModeOf(String mode) {
         return PermissionMode.fromString(mode, null);
+    }
+
+    /**
+     * The effective pig permission mode for an agent: its own {@code permissionMode} override when set,
+     * otherwise the given global mode. Used to derive the agent's native permission context (Phase 4).
+     */
+    public static PermissionMode effectiveMode(String specMode, PermissionMode globalMode) {
+        PermissionMode override = permissionModeOf(specMode);
+        return override != null ? override : globalMode;
     }
 }

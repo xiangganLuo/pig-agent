@@ -1,8 +1,10 @@
 package io.pigagent.cli;
 
-import io.agentscope.core.session.JsonSession;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionContextState;
+import io.agentscope.core.state.AgentStateStore;
+import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
@@ -77,10 +79,7 @@ import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
-import io.pigagent.tool.permission.AllowlistWriter;
-import io.pigagent.tool.permission.PermissionConfirmer;
-import io.pigagent.tool.permission.PermissionDeniedTool;
-import io.pigagent.tool.permission.ToolPermissionHook;
+import io.pigagent.tool.permission.PermissionContextFactory;
 import io.pigagent.tool.sandbox.SandboxPolicy;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.SkillsTool;
@@ -98,6 +97,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Builds the shared agent runtime (workspace, config, providers, model, tools, MCP, the agent +
@@ -159,7 +159,6 @@ public final class AgentBootstrap {
         public final CompressionService compressionService;
         public final ToolAvailabilityReport availabilityReport;
         public final AtomicReference<LineReader> readerRef;
-        private final JsonSession agentSession;
         private final TaskScheduler taskScheduler;
         /** Debounce scheduler for memory extraction; null when extraction is disabled. */
         private final AutoCloseable memoryExtractionScheduler;
@@ -170,7 +169,7 @@ public final class AgentBootstrap {
                          AgentKernel agentKernel, SessionManager sessionManager,
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
-                         JsonSession agentSession, TaskScheduler taskScheduler,
+                         TaskScheduler taskScheduler,
                          AutoCloseable memoryExtractionScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
@@ -186,7 +185,6 @@ public final class AgentBootstrap {
             this.compressionService = compressionService;
             this.availabilityReport = availabilityReport;
             this.readerRef = readerRef;
-            this.agentSession = agentSession;
             this.taskScheduler = taskScheduler;
             this.memoryExtractionScheduler = memoryExtractionScheduler;
         }
@@ -194,10 +192,11 @@ public final class AgentBootstrap {
         /** Release the shared resources — call from the frontend's shutdown hook. */
         public void shutdownCommon() {
             sessionManager.saveCurrent();
-            // Flush + stop the memory-extraction scheduler BEFORE closing the session store, so a
-            // last pending extraction lands (no leak, no lost work). No-op when extraction is off.
+            // Flush + stop the memory-extraction scheduler BEFORE final persistence, so a last
+            // pending extraction lands (no leak, no lost work). No-op when extraction is off.
             closeMemoryExtractionScheduler();
-            agentSession.close();
+            // av2 Phase 3/4: conversation state now persists automatically via the native
+            // AgentStateStore per turn (no JsonSession to close); saveCurrent() flushed the active slot.
             taskScheduler.shutdown();
             mcpManager.closeAll();
         }
@@ -279,7 +278,6 @@ public final class AgentBootstrap {
                     new ShellTools(sandboxPolicy),
                     new FileSystemTools(),
                     new SkillsTool(workspace.getSkillsDir()),
-                    new PermissionDeniedTool(),
                     new LoopDetectedTool());
             for (Object tool : builtinTools) {
                 toolkit.registration().tool(tool).apply();
@@ -365,47 +363,30 @@ public final class AgentBootstrap {
                 workspace.getContextDir().resolve("memory.md"));
         CompositeLongTermMemory memory = new CompositeLongTermMemory(globalMemory, config.isMemoryEnabled());
 
-        PermissionConfirmer permissionConfirmer = prompt -> {
-            LineReader r = readerRef.get();
-            if (r == null) {
-                return PermissionConfirmer.Outcome.DENY; // fail-closed when no interactive reader
-            }
-            String ans = r.readLine(Ansi.warn(prompt + " (y=once / a=always / N=deny) "));
-            if (ans == null) {
-                return PermissionConfirmer.Outcome.DENY;
-            }
-            String s = ans.strip().toLowerCase();
-            if (s.equals("y")) {
-                return PermissionConfirmer.Outcome.ALLOW_ONCE;
-            }
-            if (s.equals("a")) {
-                return PermissionConfirmer.Outcome.ALLOW_ALWAYS;
-            }
-            return PermissionConfirmer.Outcome.DENY;
-        };
-        AllowlistWriter allowlistWriter = new AllowlistWriter() {
-            @Override
-            public void rememberTool(String toolName) {
-                configManager.updateConfig(c -> {
-                    List<String> l = c.getPermissions().getAllowlist().getTools();
-                    if (!l.contains(toolName)) {
-                        l.add(toolName);
-                    }
-                });
-            }
+        // av2 Phase 3/4: ONE shared native state store rooted at workspace/state/ (kept apart from the
+        // metadata sidecar under workspace/sessions/{id}/). Passed to every rebuilt agent so per-session
+        // conversation survives model switches + restarts (§10 Phase-3 store seam).
+        AgentStateStore stateStore = new JsonFileAgentStateStore(workspace.getRootPath().resolve("state"));
 
-            @Override
-            public void rememberCommand(String commandKey) {
-                configManager.updateConfig(c -> {
-                    List<String> l = c.getPermissions().getAllowlist().getCommands();
-                    if (!l.contains(commandKey)) {
-                        l.add(commandKey);
-                    }
-                });
-            }
-        };
-        ToolPermissionHook permissionHook = new ToolPermissionHook(
-                () -> configManager.getConfig().getPermissions(), permissionConfirmer, allowlistWriter);
+        // M-1 (interim): command-granular allowlist isn't mapped to native per-tool rules yet
+        // (PermissionContextFactory reads allowlist.tools only). Warn so an operator relying on
+        // allowlist.commands knows those entries still require re-confirmation (fail-closed, safe).
+        int allowCmdCount = config.getPermissions().getAllowlist().getCommands().size();
+        if (allowCmdCount > 0) {
+            log.warn("permissions.allowlist.commands has {} entr{}, but command-granular allowlisting "
+                    + "is not yet wired to native permission (Phase-5); those commands are still confirmed.",
+                    allowCmdCount, allowCmdCount == 1 ? "y" : "ies");
+        }
+
+        // Native permission context (av2 Phase 4) — the 2.0 replacement for ToolPermissionHook. Built
+        // lazily from the CURRENT mode + the toolkit's tool names on each agent (re)build, so a
+        // model-switch rebuild (and an /mcp add rebuild, M-2) picks up the active mode + new tools.
+        // interactive=true → ASK routes to HITL (RequireUserConfirmEvent, handled by AgentRepl);
+        // the channel + autonomous suppliers pass interactive=false (no confirmer → ASK fail-closed).
+        Supplier<PermissionContextState> interactivePermCtx = () -> PermissionContextFactory.build(
+                configManager.getConfig().getPermissions(),
+                configManager.getConfig().getPermissions().resolveMode(),
+                toolkit.getToolNames(), true);
 
         PigAgentConfig.RetryConfig rc = config.getModel().getRetry();
         TransientErrorClassifier retryClassifier = new TransientErrorClassifier();
@@ -441,13 +422,12 @@ public final class AgentBootstrap {
         InterruptController interruptController = new InterruptController();
 
         // Interactive agent hooks: the fixed pig hooks + any hooks contributed by plugins
-        // (change plugin-system). Hooks are ordered by Hook.priority() at dispatch, so appending
-        // plugin hooks at the end does not disturb the permission hook's priority()=0 precedence.
+        // (change plugin-system). av2 Phase 4: permission is NO LONGER a hook — it is the native
+        // PermissionContextState on the builder (interactivePermCtx above). Loop-detection +
+        // ephemeral-memory stay on the legacy hook bridge (Phase-5 migrates them to middleware).
         List<Hook> interactiveHooks = new ArrayList<>();
-        interactiveHooks.add(permissionHook);
-        // Loop detection (loop-detection): after the permission veto (priority()=0) so it never
-        // interferes; STOP reuses the veto-to-sentinel mechanism, WARN reuses the ephemeral
-        // PreReasoning injection. Its own detector instance (per-agent), reset per turn by the hook.
+        // Loop detection (loop-detection): its own detector instance (per-agent), reset per turn by
+        // the hook; STOP rewrites the call to the loop sentinel, WARN reuses the ephemeral injection.
         interactiveHooks.add(newLoopDetectionHook(configManager));
         interactiveHooks.add(new LoggingHook());
         interactiveHooks.add(new ToolCallLoggingHook());
@@ -455,7 +435,8 @@ public final class AgentBootstrap {
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveHooks, memory,
-                interactiveRetry, interruptController, config.getAgent().getMaxIters());
+                interactiveRetry, interruptController, config.getAgent().getMaxIters(),
+                stateStore, interactivePermCtx);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -472,12 +453,17 @@ public final class AgentBootstrap {
                     return interactiveRetry == null ? baseModel : new RetryingModel(baseModel, interactiveRetry);
                 },
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
-                spec -> List.of(
-                        new ToolPermissionHook(() -> configManager.getConfig().getPermissions(),
-                                permissionConfirmer, allowlistWriter, false,
-                                () -> AgentWiring.permissionModeOf(spec.permissionMode())),
-                        new LoggingHook(), new ToolCallLoggingHook()),
-                memory);
+                // av2 Phase 4: permission is native (context provider below), no longer a per-agent hook.
+                spec -> List.of(new LoggingHook(), new ToolCallLoggingHook()),
+                memory,
+                stateStore,
+                // Per-agent native permission context: the agent's permissionMode override (else the
+                // global mode) mapped over its own tool subset. Interactive track → ASK routes to HITL.
+                (spec, tk) -> PermissionContextFactory.build(
+                        configManager.getConfig().getPermissions(),
+                        AgentWiring.effectiveMode(spec.permissionMode(),
+                                configManager.getConfig().getPermissions().resolveMode()),
+                        tk.getToolNames(), true));
         AgentSpecRepository agentRepository = new AgentSpecRepository(workspace.getAgentsDir());
         for (AgentSpec s : agentRepository.findAll()) {
             if (!"default".equals(s.id())) {
@@ -496,18 +482,23 @@ public final class AgentBootstrap {
         // for interruptible-run (its timeout stays best-effort).
         AgentRunner.AgentBuilder autonomousBuilder = (spec, recorder) -> {
             Model runModel = new RetryingModel(modelManager.modelFor(spec.modelId()), interactiveRetry);
-            ToolPermissionHook unattended = new ToolPermissionHook(
-                    () -> mergedPermissionConfig(configManager.getConfig().getPermissions(),
-                            spec.commandAllowlist()),
-                    null, null, false,
-                    () -> AgentWiring.permissionModeOf(spec.permissionMode()),
-                    recorder::record);
+            Toolkit runToolkit = AgentWiring.toolkitFor(toolkit, spec.toolNames());
+            // av2 Phase 4: unattended → interactive=false, so ASK fail-closes to DENY (DONT_ASK base).
+            // The recorder is populated post-hoc by AgentRunner (scanning DENIED tool-results), since
+            // native permission has no build-time denial callback. mergedPermissionConfig still folds
+            // the agent's commandAllowlist into the base allowlist (tools-level rules take effect).
+            PermissionContextState autoCtx = PermissionContextFactory.build(
+                    mergedPermissionConfig(configManager.getConfig().getPermissions(), spec.commandAllowlist()),
+                    AgentWiring.effectiveMode(spec.permissionMode(),
+                            configManager.getConfig().getPermissions().resolveMode()),
+                    runToolkit.getToolNames(), false);
             return PigAgent.builder()
                     .name(spec.name()).sysPrompt(spec.sysPrompt())
                     .model(runModel)
-                    .toolkit(AgentWiring.toolkitFor(toolkit, spec.toolNames()))
-                    .hooks(List.of(unattended, new LoggingHook(), new ToolCallLoggingHook()))
+                    .toolkit(runToolkit)
+                    .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
                     .maxIters(spec.maxIters())
+                    .permissionContext(autoCtx)
                     .build();
         };
         AgentRunner agentRunner = new AgentRunner(
@@ -525,22 +516,38 @@ public final class AgentBootstrap {
             }
         }
 
-        // A separate channel agent (channel-mode permissions, no confirmer). attachChannel rebuilds
-        // it on model switch so channels follow the active model. The CLI starts the channel bridges.
-        ToolPermissionHook channelPermissionHook = new ToolPermissionHook(
-                () -> configManager.getConfig().getPermissions(), null, null, true);
+        // A separate channel agent (channel-mode native permission, no confirmer → ASK fail-closed).
+        // attachChannel rebuilds it on model switch so channels follow the active model. The CLI starts
+        // the channel bridges, each threading its own channel-owned session id (Phase 4).
+        Supplier<PermissionContextState> channelPermCtx = () -> PermissionContextFactory.build(
+                configManager.getConfig().getPermissions(),
+                configManager.getConfig().getPermissions().resolveChannelMode(),
+                toolkit.getToolNames(), false);
         // The channel agent is a separate track (D4) with no stop key; it is deliberately NOT wired
-        // to the interrupt controller (which is scoped to the interactive kernel turn).
+        // to the interrupt controller (which is scoped to the interactive kernel turn). It shares the
+        // one state store — channel conversations live in their own (pig, "channel:<id>") slots.
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(channelPermissionHook, newLoopDetectionHook(configManager),
+                List.of(newLoopDetectionHook(configManager),
                         new LoggingHook(), new ToolCallLoggingHook()), memory,
-                channelRetry, null, config.getAgent().getMaxIters());
+                channelRetry, null, config.getAgent().getMaxIters(),
+                stateStore, channelPermCtx);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
 
-        JsonSession agentSession = new JsonSession(workspace.getSessionsDir());
+        // M-2: on a runtime /mcp add|remove|enable|disable, rebuild the interactive + channel agents so
+        // their native permission context re-snapshots the toolkit's new tool set (same mechanism as a
+        // model switch). Fresh sessions/slots pick up per-tool rules for the new MCP tools; existing
+        // slots stay fail-safe on the base mode (interactive DEFAULT→ASK, channel DONT_ASK→DENY). Fires
+        // only for runtime changes (startup import in initialize() runs before this callback is set).
+        mcpManager.setToolsChangedCallback(() -> modelManager.getCurrentModel().ifPresent(m -> {
+            Model rebuilt = modelManager.buildModel(m);
+            agentHolder.set(agentFactory.create(rebuilt));
+            channelAgentHolder.set(channelAgentFactory.create(rebuilt));
+            log.info("Rebuilt agents after MCP tool change (permission context re-snapshotted).");
+        }));
+
         SessionRepository sessionRepository = new FileSystemSessionRepository(workspace.getSessionsDir());
 
         // Memory extraction (memory-extraction): when enabled, the per-session temp memory is wrapped
@@ -574,7 +581,7 @@ public final class AgentBootstrap {
         }
 
         SessionManager sessionManager = new SessionManager(
-                agentHolder, modelManager, agentSession, memory, sessionRepository,
+                agentHolder, modelManager, memory, sessionRepository,
                 configManager, workspace.getSessionsDir(), sessionMemoryFactory);
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
@@ -592,14 +599,17 @@ public final class AgentBootstrap {
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
-                availabilityReport, readerRef, agentSession, taskScheduler, extractionScheduler);
+                availabilityReport, readerRef, taskScheduler, extractionScheduler);
     }
 
     /**
      * Build a fresh {@link LoopDetectionHook} (with its own {@link LoopDetector} instance, so each
      * agent's window is independent). Thresholds are read from config once here; {@code enabled} is
      * read live via a supplier so {@code loop-detection.enabled=false} bypasses without a restart.
-     * The ignore set holds the two veto sentinels so denied/looped calls are never re-counted.
+     * The ignore set holds the loop-detection sentinel so looped calls are never re-counted.
+     *
+     * <p>av2 Phase 4: the {@code PermissionDeniedTool.TOOL_NAME} sentinel is gone (native permission
+     * denies before execution, no sentinel tool call), so only the loop sentinel remains in the set.
      */
     static LoopDetectionHook newLoopDetectionHook(ConfigurationManager configManager) {
         PigAgentConfig.LoopDetectionConfig lc = configManager.getConfig().getLoopDetection();
@@ -608,7 +618,7 @@ public final class AgentBootstrap {
         return new LoopDetectionHook(
                 detector,
                 () -> configManager.getConfig().getLoopDetection().isEnabled(),
-                Set.of(LoopDetectionHook.SENTINEL_TOOL_NAME, PermissionDeniedTool.TOOL_NAME));
+                Set.of(LoopDetectionHook.SENTINEL_TOOL_NAME));
     }
 
     /**

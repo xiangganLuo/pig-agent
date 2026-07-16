@@ -4,6 +4,7 @@ import io.pigagent.cli.Ansi;
 import io.pigagent.cli.repl.ReplContext;
 import io.pigagent.config.PermissionMode;
 import io.pigagent.config.PigAgentConfig.PermissionConfig;
+import io.pigagent.tool.permission.PermissionContextFactory;
 import org.fusesource.jansi.Ansi.Color;
 import org.jline.terminal.Terminal;
 import picocli.CommandLine.Command;
@@ -15,8 +16,11 @@ import java.util.List;
 /**
  * {@code /permission} — 运行时管理工具权限（模式 + allowlist）。
  *
- * <p>模式 plan/ask/auto/bypass 由 {@link io.pigagent.tool.permission.ToolPermissionHook} 在
- * {@code PreActingEvent} 强制执行。这里只读写 {@code permissions} 配置块并即时持久化。
+ * <p>av2 Phase 4：模式 plan/ask/auto/bypass 由 AgentScope 2.0 原生
+ * {@link io.agentscope.core.permission.PermissionContextState}（在 build 时经
+ * {@link PermissionContextFactory} 从当前模式 + toolkit 生成）在工具执行前强制执行，取代了自研的
+ * {@code ToolPermissionHook}。本命令写 {@code permissions} 配置块（即时持久化，供下次 agent 构建/新会话
+ * 生效），并对当前会话调用 {@code PigAgent.setPermissionMode(...)} 让模式切换即时作用于活动会话。
  */
 @Command(name = "/permission",
         description = "Manage tool permissions (status|mode|channel-mode|allow|revoke|reset|list)")
@@ -99,6 +103,12 @@ public final class PermissionCommand implements Runnable {
                 cfg.getPermissions().setMode(v);
             }
         });
+        if (!channel && ctx.agentHolder() != null) {
+            // Apply immediately to the active session's native permission context (av2 Phase 4).
+            // Channel mode only persists to config → the channel agent picks it up on its next rebuild.
+            String sessionId = ctx.sessionManager() == null ? null : ctx.sessionManager().getCurrentSessionId();
+            ctx.agent().setPermissionMode(PermissionContextFactory.toNativeMode(m), sessionId);
+        }
         Ansi.println(t, Ansi.success((channel ? "Channel mode" : "Mode") + " set to ") + Ansi.info(v));
     }
 

@@ -1,7 +1,8 @@
 package io.pigagent.web;
 
-import io.agentscope.core.agent.Event;
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.ModelCallStartEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import org.junit.jupiter.api.AfterEach;
@@ -21,8 +22,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Verifies {@code POST /api/chat} streams the agent's {@link Event}s as SSE {@code data:} frames and
- * finishes with a {@code done} frame — using a mocked {@link AgentKernel} so no real model runs.
+ * Verifies {@code POST /api/chat} streams the agent's typed {@link AgentEvent}s as SSE {@code data:}
+ * frames and finishes with a {@code done} frame — using a mocked {@link AgentKernel} so no real model
+ * runs. av2 Phase 4: reasoning frames come from {@link ModelCallStartEvent}, answer text from
+ * {@link TextBlockDeltaEvent}.
  */
 class ChatHandlerTest {
 
@@ -33,8 +36,8 @@ class ChatHandlerTest {
     void setUp() throws IOException {
         AgentKernel kernel = mock(AgentKernel.class);
         when(kernel.activeId()).thenReturn("default");
-        Event reasoning = event(EventType.REASONING, "thinking…");
-        Event answer = event(EventType.AGENT_RESULT, "hello world");
+        AgentEvent reasoning = new ModelCallStartEvent("fake-model");
+        AgentEvent answer = new TextBlockDeltaEvent("r1", "b1", "hello world");
         when(kernel.chat(any(), any(Msg.class))).thenReturn(Flux.just(reasoning, answer));
 
         console = new WebConsole(WebContext.ofKernel(kernel), "127.0.0.1", 0);
@@ -45,15 +48,6 @@ class ChatHandlerTest {
     @AfterEach
     void tearDown() {
         if (console != null) console.stop();
-    }
-
-    private static Event event(EventType type, String text) {
-        Event e = mock(Event.class);
-        Msg m = mock(Msg.class);
-        when(m.getTextContent()).thenReturn(text);
-        when(e.getType()).thenReturn(type);
-        when(e.getMessage()).thenReturn(m);
-        return e;
     }
 
     @Test
@@ -68,7 +62,7 @@ class ChatHandlerTest {
         assertThat(r.statusCode()).isEqualTo(200);
         assertThat(r.headers().firstValue("Content-Type").orElse("")).contains("text/event-stream");
         String body = r.body();
-        assertThat(body).contains("\"type\":\"reasoning\"").contains("thinking");
+        assertThat(body).contains("\"type\":\"reasoning\"");
         assertThat(body).contains("\"type\":\"answer\"").contains("hello world");
         assertThat(body).contains("\"type\":\"done\"");
     }

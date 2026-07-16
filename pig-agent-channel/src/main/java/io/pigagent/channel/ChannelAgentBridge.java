@@ -1,6 +1,6 @@
 package io.pigagent.channel;
 
-import io.agentscope.core.agent.EventType;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
@@ -49,6 +49,11 @@ public final class ChannelAgentBridge {
         return channel;
     }
 
+    /** The stable per-channel conversation session id (its own native state slot). */
+    private String channelSessionId() {
+        return "channel:" + channel.channelId();
+    }
+
     private void handleMessage(String userInput) {
         if (userInput == null || userInput.isBlank()) return;
 
@@ -65,9 +70,12 @@ public final class ChannelAgentBridge {
 
         try {
             StringBuilder response = new StringBuilder();
-            agentHolder.get().stream(userMsg).doOnNext(event -> {
-                if (event.getType() == EventType.AGENT_RESULT) {
-                    response.append(event.getMessage().getTextContent());
+            // av2 Phase 4: bind the turn to a channel-owned session id so this channel's conversation
+            // persists in its own (userId="pig", "channel:<id>") state slot — disjoint from the REPL's
+            // sessions and from other channels. Answer text streams from typed TextBlockDeltaEvent.
+            agentHolder.get().stream(userMsg, channelSessionId()).doOnNext(event -> {
+                if (event instanceof TextBlockDeltaEvent delta) {
+                    response.append(delta.getDelta());
                 }
             }).doOnComplete(() -> {
                 String text = response.toString();

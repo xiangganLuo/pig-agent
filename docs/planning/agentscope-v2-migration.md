@@ -1,7 +1,17 @@
 # AgentScope Java 1.0.12 → 2.0 Migration Map
 
 > **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
-> (session/state rewrite) COMPLETE.**
+> (session/state rewrite) + Phase 4 (frontends: cli + web + channel) COMPLETE.**
+> Phase 4 lives on branch `av2/20260716-frontends` (off `av2/20260716-foundation-main`): the **whole
+> reactor compiles + unit-tests GREEN on 2.0**. It wires native permission
+> (`PermissionContextFactory.build(...)` → `ReActAgent.Builder.permissionContext(...)` via
+> `PigAgent.Builder`, runtime `/permission mode` → `setPermissionMode`, ASK→HITL via
+> `RequireUserConfirmEvent`/`ConfirmResult`), the shared `JsonFileAgentStateStore` (root
+> `workspace/state/`) through `AgentFactory`/`AgentInstanceFactory`, and rewrites the CLI/web/channel
+> event rendering onto the typed `AgentEvent` stream. STAYS on the `ReActAgent`-based `PigAgent` (the
+> HarnessAgent wrap + native compaction/memory/subagent/plan-mode are Phase 5). See **§11 Phase 4
+> execution log** for the wiring, the security findings closed (C-1/H-1/M-1/M-2/M-3/L-1/L-2), the tests
+> rewritten, and Phase-5 open items.
 > Phase 3 lives on branch `av2/20260716-session-state` (off `av2/20260716-foundation-main`): it
 > rewrites `pig-agent-session` onto the native `AgentStateStore` (`io.agentscope.core.session.Session`/
 > `JsonSession` deleted), threads a per-`(userId,sessionId)` `RuntimeContext` through
@@ -469,3 +479,100 @@ metadata sidecar and passed unchanged; `SessionTest`/`FileSystemSessionRepositor
 - **`channel`:** thread a channel-owned session id through the new `stream(Msg,sessionId)` seam.
 - **Live-model IT:** a `*IT` confirming multi-turn conversation actually persists + restores across a
   session switch and a simulated restart on a `JsonFileAgentStateStore` (offline tests use `InMemory`).
+
+## 11. Phase 4 execution log (branch `av2/20260716-frontends`)
+
+**Base:** `av2/20260716-foundation-main` (which already carries Phase 2 native permission + Phase 3
+native state). **Not merged** (lead merges into the v2 line). Scope: get the **whole reactor** compiling
++ unit-tests GREEN on 2.0 by wiring native permission + native state + the `AgentEvent` stream into the
+three frontends (`cli`, `web`, `channel`) and re-expressing the `*IT`s. Stays on the `ReActAgent`-based
+`PigAgent` (HarnessAgent adoption = Phase 5).
+
+### Permission wiring (C-1, CRITICAL — closed) — javap-confirmed signatures
+
+`ReActAgent.Builder.permissionContext(io.agentscope.core.permission.PermissionContextState)`;
+`ReActAgent.setPermissionMode(RuntimeContext, PermissionMode)` / `setPermissionMode(String userId,
+String sessionId, PermissionMode)`; `ToolUseBlock.getName()` (no `getSuggestedRules()` — that is
+server-side `ToolBase.generateSuggestions`); `ConfirmResult(boolean, ToolUseBlock)` /
+`ConfirmResult(boolean, ToolUseBlock, List<PermissionRule>)`; `Msg.METADATA_CONFIRM_RESULTS` +
+`Msg.builder().metadata(...)`.
+
+- **Core seams (additive, back-compatible).** `PigAgent.Builder.permissionContext(PermissionContextState)`
+  → `reactBuilder.permissionContext(...)`; `PigAgent.setPermissionMode(nativeMode, sessionId)` →
+  `reactAgent.setPermissionMode(contextFor(sessionId), mode)`. `AgentFactory` gained a
+  `Supplier<PermissionContextState>` (re-evaluated on every `create()`, so a model-switch/MCP rebuild
+  picks up the current mode). `AgentInstanceFactory` gained a `PermissionContextProvider(spec, toolkit)`.
+- **All 4 `ToolPermissionHook` sites replaced** (`AgentBootstrap`): interactive (supplier, `interactive=true`),
+  per-agent factory (provider, agent mode override else global, `interactive=true`), autonomous
+  digital-employee (`interactive=false` → DONT_ASK + ASK→DENY fail-closed), channel
+  (`resolveChannelMode()`, `interactive=false`). `PermissionDeniedTool`/`ToolPermissionHook` refs deleted;
+  `AgentWiring.toolkitFor` dropped the sentinel-preservation; `LoopDetectionHook` ignore-set now holds only
+  the loop sentinel; `AgentWiringTest` updated.
+- **ASK → HITL** in `AgentRepl.renderTurn`: a suspended turn returns its `RequireUserConfirmEvent`; the
+  REPL prompts per tool (y/a/N, `readerRef`), builds `List<ConfirmResult>`, and resumes via
+  `kernel.chat(id, resumeMsg, sessionId)` with `Msg.METADATA_CONFIRM_RESULTS` (round-cap guarded). "always"
+  persists the tool to `permissions.allowlist.tools` (future builds auto-allow). No reader → fail-closed.
+- **Runtime `/permission mode`** (`PermissionCommand`): persists config + `PigAgent.setPermissionMode` on
+  the active session slot (guarded when no live agent, for the isolated command test). Javadoc updated (L-2).
+  Known limit: per-tool rules are re-derived at agent (re)build; `setPermissionMode` flips the base mode
+  (→plan/→bypass exact, →ask/→auto fail-safe).
+
+### State wiring (Phase-3 CLI item — closed)
+
+One shared `JsonFileAgentStateStore(workspace/state/)` built in `AgentBootstrap`, passed to the interactive
+`AgentFactory`, the per-agent `AgentInstanceFactory`, and the channel `AgentFactory` (channels use their own
+`(pig, "channel:<id>")` slots). `runTurn` threads `sessionManager.getCurrentSessionId()` into
+`kernel.chat(activeId, msg, sessionId)`. The last `io.agentscope.core.session.JsonSession` refs were removed
+from `AgentBootstrap` (+ `Services.agentSession`/`shutdownCommon`) and `FullLinkAgentIT`; `SessionManager`
+now uses its Phase-3 (no-`agentSession`) constructor.
+
+### Event-model rewrite (typed `AgentEvent`)
+
+`AgentRepl.renderStream(Flux<AgentEvent>)` aggregates typed events — answer from
+`TextBlockDeltaEvent.getDelta()` (→ `StreamingMarkdownPrinter`), tool blocks from `ToolResultTextDeltaEvent`
++ `ToolResultEndEvent` (`getState()==DENIED` shown as a denial) via `ToolCallFormatter`, `⋯ thinking`
+spinner on `ModelCallStartEvent`/`ThinkingBlockStartEvent`, `ExceedMaxIters`/`AllToolsDenied` notices — and
+returns any `RequireUserConfirmEvent` for the HITL loop. **CC-REPL preserved**: `MarkdownAnsiRenderer`,
+`StreamingMarkdownPrinter`, `ToolCallFormatter` (+ credential redaction), `StatusLine`, `InlineSelector`,
+slash completion are untouched. **Interrupt preserved**: mid-turn Ctrl-C still calls
+`kernel.interruptCurrent()` (native `ReActAgent.interrupt` under `InterruptController`/`TurnHandle`) and
+disposes the subscription. `pig-agent-web` `ChatHandler` and `pig-agent-channel` `ChannelAgentBridge` use
+the same typed-event aggregation (web SSE frames; channel accumulates `TextBlockDeltaEvent`).
+
+### Security findings closed
+
+- **C-1 (CRITICAL)** permission enforcement wired (above). **H-1 (HIGH)** `webSearch` READ_ONLY→NETWORK in
+  `ToolRiskClassifier` + `readOnly=true` removed from `BraveWebSearchTool`. **M-1** startup WARN when
+  `permissions.allowlist.commands` non-empty (command-granular allowlist still Phase-5). **M-2** `McpManager`
+  `setToolsChangedCallback` fires on runtime add/remove/enable/disable → `AgentBootstrap` rebuilds the
+  interactive + channel agents so the permission context re-snapshots the new tool set (existing slots stay
+  fail-safe on the base mode). **M-3** checklist classified (`createChecklist`/`completeItem`→WRITE,
+  `showChecklist`→READ_ONLY) + `@Tool(readOnly=true)` on `showChecklist`. **L-1** defunct
+  `PermissionVetoSpikeIT` (sentinel mechanism) deleted. **L-2** `PermissionCommand` Javadoc updated.
+- **Digital-employee `DeniedActionRecorder`** re-wired onto native DENY: `AgentRunner` scans the finished
+  conversation for `ToolResultBlock`s with `ToolResultState.DENIED` (post-hoc, fault-tolerant) since native
+  permission has no build-time denial callback.
+
+### Tests rewritten (+ why)
+
+- `AgentReplTurnTest` / `AgentReplInterruptTest` / `AgentReplErrorPrintTest`: old `io.agentscope.core.agent.Event`
+  → typed `AgentEvent`; turn now streams via `kernel.chat(id, msg, sessionId)` (+ a DENIED-result render test).
+- `AgentWiringTest`: dropped the `PermissionDeniedTool` sentinel assertions; added `effectiveMode`.
+- `ChannelAgentBridgeTest`: `AgentEvent` + verifies the channel-owned session id `"channel:<id>"`.
+- `web/ChatHandlerTest`: `AgentEvent` frames (`ModelCallStartEvent`→reasoning, `TextBlockDeltaEvent`→answer).
+- `ToolRiskClassifierTest`: added H-1/M-3 assertions.
+- `PermissionEnforcementIT`: re-expressed on `PermissionContextFactory` + `permissionContext(...)` (H-2).
+- `FullLinkAgentIT`: dropped `JsonSession` + old `SessionManager` ctor.
+- `PermissionVetoSpikeIT`: deleted (L-1, defunct sentinel). `MultiAgentSwitchTest`/`DigitalEmployeeScheduledRunTest`
+  needed no change (additive core ctors preserved).
+
+### Phase-5 open items (unchanged scope)
+
+HarnessAgent wrap; native compaction/memory/subagent/plan-mode adoption; hook→middleware
+(`EphemeralMemoryContextHook`, `LoopDetectionHook`); native Gateway for channels; delete
+`RetryingModel`/`InterruptibleModel` (native `.maxRetries`/`.fallbackModel`/`interrupt`); drop the 1.x
+`agentscope` dep + `agentscope.version` property; command-granular allowlist as a `ToolBase`
+`checkPermissions`/`matchRule`; live-model IT run (permission end-to-end, multi-turn persistence). Also: the
+pre-existing `AgentRegistry` default-instance vs `AgentHolder` staleness on holder-only rebuilds (model
+switch + M-2) — the interactive kernel path reads the registry instance; reconcile so a holder rebuild
+updates the active instance too.
