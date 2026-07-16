@@ -5,7 +5,6 @@ import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
-import io.agentscope.core.session.JsonSession;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.AgentModelSwitcher;
@@ -29,8 +28,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Offline behavioural coverage for the {@link SessionManager} orchestrator: session lifecycle
  * (initialize/activate/create/fork/delete/rename), the per-session model switch handshake
  * ({@link AgentModelSwitcher}), memory toggling and temp-memory file handling. Uses a real
- * {@link JsonSession} + {@link FileSystemSessionRepository} on a {@code @TempDir}, a stub
- * {@link Model} (never called), and a recording model switcher — no network.
+ * {@link FileSystemSessionRepository} on a {@code @TempDir}, a real {@link PigAgent} on an
+ * in-memory {@code AgentStateStore} with a stub {@link Model} (never called), and a recording model
+ * switcher — no network. Conversation state is exercised only through the native store (av2 Phase 3);
+ * the metadata sidecar (name/timestamps/model/lineage) is what these assertions verify.
  */
 class SessionManagerTest {
 
@@ -53,8 +54,7 @@ class SessionManagerTest {
         AgentHolder holder = new AgentHolder(
                 PigAgent.builder().name("t").sysPrompt("s").model(stubModel()).build());
         AgentModelSwitcher switcher = id -> ensureModelCalls.add(id);
-        JsonSession agentSession = new JsonSession(sessionsDir);
-        manager = new SessionManager(holder, switcher, agentSession, memory, repository,
+        manager = new SessionManager(holder, switcher, memory, repository,
                 configManager, sessionsDir);
     }
 

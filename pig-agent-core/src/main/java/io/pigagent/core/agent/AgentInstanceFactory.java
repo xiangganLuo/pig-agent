@@ -3,6 +3,7 @@ package io.pigagent.core.agent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 
 import java.util.List;
@@ -45,13 +46,27 @@ public final class AgentInstanceFactory {
     private final ToolkitProvider toolkits;
     private final HooksProvider hooks;
     private final LongTermMemory longTermMemory;
+    private final AgentStateStore stateStore; // nullable → per-agent in-memory default
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 HooksProvider hooks, LongTermMemory longTermMemory) {
+        this(models, toolkits, hooks, longTermMemory, null);
+    }
+
+    /**
+     * @param stateStore shared conversation state store (av2 Phase 3). Passing the same instance to
+     *        every agent lets per-{@code (userId,sessionId)} conversation state persist across model
+     *        switches and (with a {@code JsonFileAgentStateStore}) restarts. {@code null} = each agent
+     *        gets its own in-memory store.
+     */
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.hooks = Objects.requireNonNull(hooks, "hooks");
         this.longTermMemory = longTermMemory; // may be null (no long-term memory)
+        this.stateStore = stateStore;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -64,6 +79,7 @@ public final class AgentInstanceFactory {
                 .hooks(hooks.hooksFor(spec))
                 .longTermMemory(longTermMemory)
                 .maxIters(spec.maxIters())
+                .stateStore(stateStore)
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

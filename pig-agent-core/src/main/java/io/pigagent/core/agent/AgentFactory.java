@@ -3,6 +3,7 @@ package io.pigagent.core.agent;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.core.interrupt.InterruptController;
 import io.pigagent.core.interrupt.InterruptibleModel;
@@ -18,6 +19,11 @@ import java.util.List;
  * <p>Used to rebuild the agent when the user switches models at runtime: the toolkit, hooks
  * and {@code CompositeLongTermMemory} are reused unchanged, only the model differs. The
  * conversation is restored separately via the session layer.
+ *
+ * <p><b>Shared state store (av2 Phase 3).</b> An optional {@link AgentStateStore} is threaded into
+ * every rebuilt {@link PigAgent}. Passing the same store instance across rebuilds is what lets
+ * per-session conversation state survive a model switch (and, with a {@code JsonFileAgentStateStore},
+ * a process restart). When {@code null}, each agent gets its own in-memory store (Phase-0 behavior).
  */
 public final class AgentFactory {
 
@@ -29,6 +35,7 @@ public final class AgentFactory {
     private final RetryPolicy retryPolicy; // nullable
     private final InterruptController interruptController; // nullable
     private final int maxIters; // 0 = keep AgentScope's default (see PigAgent.Builder.maxIters)
+    private final AgentStateStore stateStore; // nullable → per-agent in-memory default
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory) {
@@ -49,6 +56,14 @@ public final class AgentFactory {
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
                         InterruptController interruptController, int maxIters) {
+        this(name, sysPrompt, toolkit, hooks, longTermMemory, retryPolicy, interruptController,
+                maxIters, null);
+    }
+
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<Hook> hooks, LongTermMemory longTermMemory, RetryPolicy retryPolicy,
+                        InterruptController interruptController, int maxIters,
+                        AgentStateStore stateStore) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -57,6 +72,7 @@ public final class AgentFactory {
         this.retryPolicy = retryPolicy;
         this.interruptController = interruptController;
         this.maxIters = maxIters;
+        this.stateStore = stateStore;
     }
 
     /**
@@ -76,6 +92,7 @@ public final class AgentFactory {
                 .hooks(hooks)
                 .longTermMemory(longTermMemory)
                 .maxIters(maxIters)
+                .stateStore(stateStore)
                 .build();
     }
 

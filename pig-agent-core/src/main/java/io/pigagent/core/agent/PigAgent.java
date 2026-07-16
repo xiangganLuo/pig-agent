@@ -8,6 +8,7 @@ import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
@@ -23,27 +24,30 @@ import java.util.Objects;
  * The central Pig Agent, wrapping AgentScope's ReActAgent.
  * Delegates to the underlying ReActAgent for reasoning and tool calling.
  *
- * <p><b>AgentScope 2.0 migration notes (av2 Phase 0):</b>
+ * <p><b>AgentScope 2.0 migration notes (av2 Phase 0 + Phase 3):</b>
  * <ul>
  *   <li>The 1.x {@code .memory(Memory)} builder is gone — conversation state now lives on
  *       {@code AgentState.getContext()}, persisted via an {@link AgentStateStore}
- *       (default {@link InMemoryAgentStateStore}).</li>
+ *       (default {@link InMemoryAgentStateStore}; the CLI injects a shared
+ *       {@code JsonFileAgentStateStore} so state survives model switches + restarts).</li>
  *   <li>{@code ReActAgent} is stateless; a call/stream is keyed by {@code (userId, sessionId)} via a
- *       {@link RuntimeContext}. Phase 0 uses the default session ({@link RuntimeContext#empty()} +
- *       no-arg {@code getAgentState()}); wiring a per-session {@code RuntimeContext} is Phase-1
- *       (session module) work.</li>
- *   <li>{@code call(Msg)}/{@code stream(Msg)} single-arg overloads were removed. {@link #call(Msg)}
- *       now calls {@code call(List, RuntimeContext)}; {@link #stream(Msg)} moves to
+ *       {@link RuntimeContext}. The no-arg {@link #call(Msg)}/{@link #stream(Msg)} use the default
+ *       session ({@link RuntimeContext#empty()}); the session-aware {@link #call(Msg, String)}/
+ *       {@link #stream(Msg, String)} thread a {@code (userId="pig", sessionId)} context so each
+ *       pig session persists into its own slot automatically (Phase 3). The native store
+ *       auto-loads the slot before a turn and auto-saves it after — no manual load/save per turn.</li>
+ *   <li>{@code call(Msg)}/{@code stream(Msg)} single-arg overloads were removed on the ReActAgent.
+ *       {@link #call(Msg)} now calls {@code call(List, RuntimeContext)}; {@link #stream(Msg)} moves to
  *       {@code streamEvents(Msg)} returning {@code Flux<AgentEvent>} (the deprecated
  *       {@code Flux<io.agentscope.core.agent.Event>} stream is retired).</li>
  *   <li>Long-term memory is still injected on the user side, ephemerally, via our own hook — NOT
  *       through AgentScope wiring (see {@link EphemeralMemoryContextHook}). The forward path for
- *       this hook is a {@code MiddlewareBase#onReasoning} (deferred to Phase 1).</li>
+ *       this hook is a {@code MiddlewareBase#onReasoning} (deferred to Phase 4).</li>
  * </ul>
  */
 public final class PigAgent {
 
-    /** State-store partition for this single-user terminal app. */
+    /** State-store partition for this single-user terminal app (the pig {@code userId}). */
     private static final String USER_ID = "pig";
 
     private final ReActAgent reactAgent;
@@ -70,6 +74,30 @@ public final class PigAgent {
         return reactAgent.streamEvents(userMsg);
     }
 
+    /**
+     * Session-aware chat: bind the turn to the {@code (userId="pig", sessionId)} slot so the
+     * conversation is loaded from / saved to that session's own {@link AgentState} automatically
+     * (2.0 native per-{@code (userId,sessionId)} persistence). A {@code null}/blank {@code sessionId}
+     * falls back to the default session ({@link #call(Msg)}), so the default-session path keeps
+     * working unchanged.
+     */
+    public Msg call(Msg userMsg, String sessionId) {
+        return reactAgent.call(List.of(userMsg), contextFor(sessionId)).block();
+    }
+
+    /** Session-aware streaming counterpart of {@link #call(Msg, String)}. */
+    public Flux<AgentEvent> stream(Msg userMsg, String sessionId) {
+        return reactAgent.streamEvents(userMsg, contextFor(sessionId));
+    }
+
+    /** The per-call runtime context for a pig session id (default session when null/blank). */
+    private static RuntimeContext contextFor(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return RuntimeContext.empty();
+        }
+        return RuntimeContext.builder().userId(USER_ID).sessionId(sessionId).build();
+    }
+
     public String getAgentName() {
         return agentName;
     }
@@ -85,14 +113,46 @@ public final class PigAgent {
     /**
      * The agent's short-term conversation, adapted as a {@link Memory} view over the 2.0
      * {@code AgentState} context (used to inspect, clear, or rewrite history, e.g. by compression).
+     * This targets the <em>default</em> session; use {@link #getMemory(String)} for a specific one.
      */
     public Memory getMemory() {
         return new ConversationMemory(reactAgent);
     }
 
-    /** Clear the current conversation history. */
+    /**
+     * A {@link Memory} view over a specific session's conversation slot
+     * ({@code (userId="pig", sessionId)}). This is the seam a session-aware compression path uses so
+     * it rewrites the right conversation; native compaction adoption is deferred to Phase 4.
+     */
+    public Memory getMemory(String sessionId) {
+        return new ConversationMemory(reactAgent, USER_ID, sessionId);
+    }
+
+    /** Clear the default session's conversation history. */
     public void clearMemory() {
         reactAgent.getAgentState().contextMutable().clear();
+    }
+
+    /** Clear one session's conversation and persist the emptied slot. */
+    public void clearConversation(String sessionId) {
+        reactAgent.getAgentState(USER_ID, sessionId).contextMutable().clear();
+        reactAgent.saveAgentState(USER_ID, sessionId);
+    }
+
+    /**
+     * Copy one session's conversation into another session's slot and persist it (backs
+     * {@code /session fork}). A no-op when source and target are the same. Only the conversation
+     * context is copied; metadata (name/timestamps/lineage) is the sidecar's concern.
+     */
+    public void copyConversation(String fromSessionId, String toSessionId) {
+        if (fromSessionId == null || toSessionId == null || fromSessionId.equals(toSessionId)) {
+            return;
+        }
+        List<Msg> source = reactAgent.getAgentState(USER_ID, fromSessionId).getContext();
+        AgentState target = reactAgent.getAgentState(USER_ID, toSessionId);
+        target.contextMutable().clear();
+        target.contextMutable().addAll(source);
+        reactAgent.saveAgentState(USER_ID, toSessionId);
     }
 
     /** Persist the agent's state (incl. conversation) under the given session id. */
@@ -102,8 +162,8 @@ public final class PigAgent {
 
     /**
      * Whether persisted state exists for the given session id. Actual restoration is automatic on
-     * the next {@code call}/{@code stream} that carries a session-bound {@link RuntimeContext}
-     * (Phase-1 session wiring).
+     * the next session-aware {@code call}/{@code stream} (see {@link #stream(Msg, String)}), which
+     * carries a session-bound {@link RuntimeContext} the native store resolves.
      */
     public boolean loadIfExists(String sessionId) {
         return stateStore.exists(USER_ID, sessionId);

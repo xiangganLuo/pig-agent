@@ -108,6 +108,17 @@ public final class AgentKernel {
 
     /** Stream a chat turn on the given agent (or the active one if it is not the active id). */
     public Flux<AgentEvent> chat(String agentId, Msg msg) {
+        return chat(agentId, msg, null);
+    }
+
+    /**
+     * Stream a chat turn bound to a specific conversation session (Phase 3). The {@code sessionId}
+     * is threaded into the agent's {@code (userId="pig", sessionId)} state slot so each pig session
+     * persists independently via the native {@code AgentStateStore}; a {@code null} sessionId uses the
+     * default session (backward compatible). The session module owns the active session id and the
+     * CLI (Phase 4) passes it here.
+     */
+    public Flux<AgentEvent> chat(String agentId, Msg msg, String sessionId) {
         AgentInstance instance = registry.get(agentId).orElse(registry.active().orElse(null));
         if (instance == null) {
             return Flux.error(new IllegalStateException("No agent available: " + agentId));
@@ -116,7 +127,7 @@ public final class AgentKernel {
         // Register a cancellable turn for the lifetime of this stream: begin on subscribe (so an
         // unsubscribed Flux leaks nothing), clear on any termination (complete/error/cancel).
         AtomicReference<TurnHandle> handle = new AtomicReference<>();
-        return instance.agent().stream(msg)
+        return instance.agent().stream(msg, sessionId)
                 .doOnSubscribe(s -> handle.set(interrupts.begin()))
                 .doFinally(sig -> interrupts.end(handle.get()));
     }

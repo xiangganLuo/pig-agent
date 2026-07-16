@@ -1,6 +1,14 @@
 # AgentScope Java 1.0.12 → 2.0 Migration Map
 
-> **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) COMPLETE.**
+> **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
+> (session/state rewrite) COMPLETE.**
+> Phase 3 lives on branch `av2/20260716-session-state` (off `av2/20260716-foundation-main`): it
+> rewrites `pig-agent-session` onto the native `AgentStateStore` (`io.agentscope.core.session.Session`/
+> `JsonSession` deleted), threads a per-`(userId,sessionId)` `RuntimeContext` through
+> `PigAgent`/`AgentKernel`, and keeps pig's `Session` metadata + compression-lineage as a thin sidecar.
+> See **§10 Phase 3 execution log** for the design, the javap-confirmed `AgentStateStore`/
+> `RuntimeContext` signatures, the data-migration note, and Phase-4 open items.
+>
 > Phase 2 lives on branch `av2/20260716-tools-permission` (off `av2/20260716-foundation-main`):
 > Step 0 relocated `AgentModelSwitcher` to core (unblocking model/onboarding), Step 1 got
 > `tools`/`mcp`/`plugin`/`plugin-builtin`/`skills-builtin` compiling+green on 2.0 (legacy-hook
@@ -114,9 +122,9 @@ where they differ.
 | 3 | **pig-agent-plugin** | ✅ DONE | POM → `agentscope-core`; plugin SPI still uses the legacy `io.agentscope.core.hook.Hook` bridge (deprecation warnings, present via `LegacyHookDispatcher`). 18 tests green. | Low — done |
 | 3 | **pig-agent-plugin-builtin** | ✅ DONE | POM → `agentscope-core`; read-only compute + `webSearch` `@Tool` flagged `readOnly=true`. `SsrfGuard`/`SmartWebFetchTool` unchanged (no hook). 132 tests green. | Low — done |
 | 3 | **pig-agent-skills-builtin** | ✅ DONE | Classpath `SKILL.md` + `SkillProvider` SPI, pig-owned; no agentscope dep. 12 tests green. | Low — done |
-| 4 | **pig-agent-session** (`SessionManager`) | **L** — **PROVEN BOUNDARY** | **Biggest rewrite, and it sits UPSTREAM of model/onboarding.** Empirically confirmed to fail on 2.0 (`mvn -pl pig-agent-model -am compile`): `SessionManager` holds an `io.agentscope.core.session.Session agentSession` field (fields 30/42/53 — the class is **removed** in 2.0, currently only resolving because session still declares the 1.x all-in-one) and calls the **old 2-arg** `agentHolder.get().saveTo(agentSession, id)` (lines 153/174/218) + `loadIfExists(agentSession, id)` (line 103) — which no longer match the Phase-0-migrated `PigAgent.saveTo(String)`/`loadIfExists(String)`. Rewrite: `io.agentscope.core.session.Session` + `JsonSession` → `AgentStateStore` (`JsonFileAgentStateStore`) keyed by `(userId,sessionId)`; wire a per-session `RuntimeContext` into `PigAgent.call/stream` (Phase-0 uses the default session); adapt to the new `PigAgent.saveTo/loadIfExists(sessionId)`; keep pig's `Session` metadata record + two-tier temp memory + compression lineage. **NB — quick unblock option for model/onboarding without the full rewrite:** the only thing model needs from session is the tiny `AgentModelSwitcher` interface (1 method, zero AgentScope coupling); relocating it to `pig-agent-core` (an SPI seam) breaks the `model → session` edge so model+onboarding could go 2.0-green ahead of the session rewrite. Deferred here because it edits the Phase-3 module and the scope was "stop at the boundary". | **High** (state/persistence semantics; data-format change for existing session dirs) |
-| 5 | **pig-agent-channel** | M | `ChannelAgentBridge` routes turns via the agent (`call`/`stream`) + a channel-mode permission track. Move to `streamEvents`/native permission-mode; channel keeps its own state store partition. | Med |
-| 6 | **pig-agent-cli** (`AgentRepl` + renderers) | **L** | Consumes `kernel.chat` → now `Flux<AgentEvent>`: rewrite `renderStream` to aggregate typed events (`TextBlockDeltaEvent.getDelta()`, `ThinkingBlock*`, `ToolCall*`, `ToolResult*`, `AgentEndEvent`, HITL `RequireUserConfirmEvent`) instead of `Event`/`EventType`. `AgentBootstrap` re-wires state store, permission context, middleware, retry (native). **Preserve** CC-REPL renderers, StatusLine, InlineSelector, slash completion. | Med–High (event-model rewrite; most user-visible) |
+| 4 | **pig-agent-session** (`SessionManager`) | ✅ DONE (Phase 3) | **Rewritten onto native state.** Deleted the `io.agentscope.core.session.Session agentSession` field + all `saveTo(agentSession,id)`/`loadIfExists(agentSession,id)`/`clearMemory()`-then-load handshakes. Conversation now persists automatically via the native `AgentStateStore` keyed by `(userId="pig", sessionId)`; the active session id is threaded per turn (`PigAgent.stream(Msg,sessionId)` → `RuntimeContext`). `SessionManager` keeps only the metadata sidecar (`Session` record + temp-memory + compression lineage) and does save-current→ensure-model→point-temp-memory→record-id on switch. POM: `agentscope` (1.x all-in-one) → `agentscope-core` (drops the dual-jar). **session 45 tests / core 234 tests green on 2.0.** See §10. | **High → resolved** (data-format change for existing session dirs — see §10 migration note) |
+| 5 | **pig-agent-channel** | M | `ChannelAgentBridge` routes turns via the agent (`call`/`stream`) + a channel-mode permission track. Move to `streamEvents`/native permission-mode; **thread its own session id via the new `PigAgent.stream(Msg,sessionId)` / `AgentKernel.chat(id,msg,sessionId)` seam** so channel conversations persist in their own `(userId,sessionId)` slot. | Med |
+| 6 | **pig-agent-cli** (`AgentRepl` + renderers) | **L** | Consumes `kernel.chat` → now `Flux<AgentEvent>`: rewrite `renderStream` to aggregate typed events (`TextBlockDeltaEvent.getDelta()`, `ThinkingBlock*`, `ToolCall*`, `ToolResult*`, `AgentEndEvent`, HITL `RequireUserConfirmEvent`) instead of `Event`/`EventType`. `AgentBootstrap` re-wires the **shared `JsonFileAgentStateStore`** (via the new `AgentFactory`/`AgentInstanceFactory` store seam) so per-session state survives model switches + restarts, passes `sessionManager.getCurrentSessionId()` into `kernel.chat(id,msg,sessionId)`, plus permission context, middleware, retry (native). **Preserve** CC-REPL renderers, StatusLine, InlineSelector, slash completion. | Med–High (event-model rewrite; most user-visible) |
 | 6 | **pig-agent-web** | M | SSE handler consumes the same event stream → same `AgentEvent` aggregation as CLI (share a mapper). | Med |
 | 6 | **pig-agent-cli `*IT`** | M | `PermissionVetoSpikeIT`/`PermissionEnforcementIT`/`FullLinkAgentIT` re-expressed against native permission + `streamEvents`; these become the live-model proof for Risk 2 end-to-end. | Med |
 
@@ -129,7 +137,7 @@ where they differ.
 | `RetryingModel` (`core.retry`) | `.maxRetries(int)` + `.fallbackModel(...)` | Native retry is on the builder. **Verify** it wraps `model.stream` (fresh HTTP) not the single-flight agent, and honors a "don't re-run after content emitted" guard — pig's `RetryPolicy`/`TransientErrorClassifier` may still be wanted for transient-vs-permanent classification. Keep the classifier if native lacks it. |
 | `InterruptibleModel` (`core.interrupt`) | native `ReActAgent.interrupt(...)` | Native interrupt exists. Keep pig's `InterruptController`/`TurnHandle` as the frontend-facing turn abstraction, but drive native `interrupt()` underneath. |
 | `ToolPermissionHook` + `PermissionDeniedTool` (`tools.permission`) | native `PermissionEngine` + `PermissionContextState` + `PermissionMode` + `ToolResultState.DENIED` | Risk-2 PoC proves parity. Keep pig's mode names/`/permission` UX + risk classifier → map to rules. |
-| `io.agentscope.core.session.Session` usage + parts of `SessionManager` | `AgentStateStore` (`JsonFileAgentStateStore`) | Conversation persistence is native + automatic per `(userId,sessionId)`. |
+| `io.agentscope.core.session.Session` usage + parts of `SessionManager` | `AgentStateStore` (`JsonFileAgentStateStore`) | **✅ DONE (Phase 3).** Conversation persistence is native + automatic per `(userId,sessionId)`; `SessionManager` keeps only the metadata sidecar. |
 | `EphemeralMemoryContextHook` (injection half) | `EphemeralMemoryMiddleware.onReasoning` (already written) | Legacy hook is a bridge; middleware is the forward path. |
 | **Candidate:** `CompressionService` + `CompositeLongTermMemory`/`FileSystemLongTermMemory`/`CachingLongTermMemory` | native `CompactionConfig`/`MemoryConfig` (harness) + `AgentState` | **Evaluate in Phase 1.** Native compaction can use a dedicated cheap model. pig's two-tier (global + per-session temp) + `/compress`/`/memory` UX + compression-lineage are differentiators — port the UX over native mechanics rather than keep the whole self-built stack. `ConversationMemory` adapter is an interim bridge. |
 | **Candidate:** `LoggingHook`/`ToolCallLoggingHook` | `OtelTracingMiddleware` or `onActing`/`onModelCall` middleware | Optional; legacy hooks still work. |
@@ -158,8 +166,10 @@ where they differ.
    bridge), then the **native permission re-architecture** (delete `ToolPermissionHook`/`PermissionDeniedTool`)
    with a security review + the live-model permission IT. `mcp`, `plugin`, `plugin-builtin`, `skills-builtin`
    recompile behind it.
-3. **Phase 3 — session (the state rewrite):** `JsonSession`→`AgentStateStore`, per-session `RuntimeContext`,
-   data-migration story for existing `workspace/sessions/*`. Decide the compression/memory native-vs-port here.
+3. **✅ Phase 3 — session (the state rewrite):** `JsonSession`→`AgentStateStore`, per-session `RuntimeContext`
+   threaded through `PigAgent`/`AgentKernel`, metadata sidecar preserved, data-migration note (§10).
+   Compression/memory kept on the `ConversationMemory` bridge (native `CompactionConfig`/`MemoryConfig`
+   adoption deferred to Phase 4). session 45 + core 234 tests green.
 4. **Phase 4 — frontends:** `cli` (event-model rewrite of `renderStream`; wire native retry/permission/state
    in `AgentBootstrap`) then `web` (shared `AgentEvent` mapper) and `channel`. Re-express the `*IT`s.
 5. **Phase 5 — cleanup:** delete the superseded decorators/hooks; migrate `EphemeralMemoryContextHook` →
@@ -173,13 +183,17 @@ where they differ.
   is unchanged in 2.0) — a zero-risk bridge. Native `.maxRetries`/`.fallbackModel` adoption is deferred;
   keep `TransientErrorClassifier` until native transient-vs-permanent classification is confirmed.
 - `McpClientWrapper` construction API for stdio/SSE/streamable-http — **not touched** (Phase 3, `mcp`).
-- Per-session `RuntimeContext` wiring — **CONFIRMED still the default session.** `PigAgent.call/stream`
-  use `RuntimeContext.empty()` + no-arg `getAgentState()` (Phase-0 design, unchanged in redux).
-  `pig-agent-session` is the exact place that must thread `(userId,sessionId)` — and it is the proven
-  Phase-3 boundary (§3/§8): its `SessionManager` still calls the old 2-arg `saveTo/loadIfExists`.
-- `JsonFileAgentStateStore` on-disk format vs pig's existing `workspace/sessions/{id}/` — **not touched**
-  (Phase 3). `PigAgent.loadIfExists(sessionId)` now delegates to `AgentStateStore.exists(userId,sessionId)`
-  on an `InMemoryAgentStateStore` default; a `JsonFileAgentStateStore` + migration is Phase-3 work.
+- Per-session `RuntimeContext` wiring — **✅ RESOLVED (Phase 3).** `PigAgent` now has session-aware
+  `call(Msg,sessionId)`/`stream(Msg,sessionId)` that build `RuntimeContext.builder().userId("pig")
+  .sessionId(id)` so each session persists to its own `(pig,id)` slot automatically; the no-arg
+  `call(Msg)`/`stream(Msg)` still use the default session. `AgentKernel.chat(id,msg,sessionId)` threads
+  it from the frontend. See §10.
+- `JsonFileAgentStateStore` on-disk format vs pig's existing `workspace/sessions/{id}/` — **format
+  change documented (Phase 3 §10).** The store seam is provided (`PigAgent.Builder.stateStore` +
+  `AgentFactory`/`AgentInstanceFactory` optional `AgentStateStore`); the CLI passes a shared
+  `JsonFileAgentStateStore` in Phase 4. Old 1.x-`JsonSession` conversation dirs are **not**
+  auto-converted — fault-tolerant "start fresh if the native store has no slot"; the pig `meta.json`
+  sidecar (name/timestamps/model/lineage) is unaffected and still read.
 - Whether to keep `CompressionService` or adopt native `CompactionConfig` — **can be deferred safely.**
   Resolved for now: `CompressionService` + `ContextEngineer` (A5) run **green on 2.0 unchanged** via the
   `ConversationMemory` adapter (a `Memory` view over `AgentState.contextMutable()`), so the native-vs-port
@@ -353,3 +367,105 @@ deny > ask/built-in > allow > mode-fallback.
 / `pig-agent-plugin` **18** / `pig-agent-plugin-builtin` **132** / `pig-agent-skills-builtin` **12** /
 `pig-agent-model` **21** (1 skip) / `pig-agent-onboarding` (no unit tests) — **506 tests, 0 failures,
 0 errors, 5 skipped.**
+
+## 10. Phase 3 execution log (branch `av2/20260716-session-state`)
+
+**Base:** `av2/20260716-foundation-main`. **Not merged** (lead merges into the v2 line). Scope: rewrite
+`pig-agent-session` onto native 2.0 state; touch `pig-agent-core` (`PigAgent`/`AgentKernel`/factories)
+minimally to thread a per-session `RuntimeContext`; keep `cli`/`web`/`channel` on Phase 4.
+
+### The native state model (javap-confirmed, `agentscope-core-2.0.0`)
+
+`io.agentscope.core.state.AgentStateStore` (interface): `save(userId, sessionId, stateKey, State)` (+
+list overload) · `<T> Optional<T> get(userId, sessionId, stateKey, Class<T>)` · `boolean exists(userId,
+sessionId)` · `void delete(userId, sessionId)` · `Set<String> listSessionIds(userId)` · `default close()`.
+Impls: `InMemoryAgentStateStore()` (tests) · `JsonFileAgentStateStore()` (default root
+`~/.agentscope/state/`) / `JsonFileAgentStateStore(Path root)` (custom; writes `<userId>/<sessionId>/…`,
+anonymous → `__anon__`).
+
+`io.agentscope.core.agent.RuntimeContext`: `empty()` = `(userId=null, sessionId=null)`; `builder()
+.userId(String).sessionId(String).build()`; `getUserId()`/`getSessionId()`/`getAgentState()`.
+
+`ReActAgent` state internals (the caching contract that makes the sidecar design safe): a
+`ConcurrentHashMap<slotKey, AgentState> stateCache`; `getAgentState(userId, sessionId)` =
+`stateCache.computeIfAbsent(slotKey(userId,sessionId), loadOrCreateAgentStateForSlot(...))` — **caches
+per slot, load-or-create from the store**, so repeated reads return the same instance and mutations to
+`getAgentState(u,s).contextMutable()` are seen by the next same-slot turn. `getAgentState()` (no-arg) =
+`getAgentState(null, defaultSessionId)`. `saveAgentState(userId, sessionId)` persists the **cached** slot
+to the store (no-op if the slot was never activated). `call(List, RuntimeContext)` /
+`streamEvents(Msg, RuntimeContext)` activate the slot for the ctx, run, and auto-save at the end of the
+call. `slotKey(userId, sessionId)` = `<userId or __anon__>:<sessionId>`.
+
+### RuntimeContext threading design
+
+- **`PigAgent` (core).** Added session-aware, additive-only: `call(Msg, sessionId)` /
+  `stream(Msg, sessionId)` build `RuntimeContext(userId="pig", sessionId)` (null/blank → `empty()` =
+  default session, so the Phase-0 no-arg path is unchanged); `clearConversation(sessionId)`,
+  `copyConversation(from,to)` (backs `/session fork`, no-op when from==to), `getMemory(sessionId)`
+  (session-scoped `ConversationMemory` view for a future per-session compression path). Kept: `call(Msg)`,
+  `stream(Msg)`, `clearMemory()`, `getMemory()`, `saveTo(sessionId)`, `loadIfExists(sessionId)`. Partition:
+  session turns live under `("pig", sessionId)`; the default path under `(null, defaultSessionId)` — disjoint.
+- **`AgentKernel` (core).** Added `chat(agentId, msg, sessionId)` (threads into
+  `instance.agent().stream(msg, sessionId)`); `chat(agentId, msg)` now delegates with `sessionId=null`.
+  Interrupt-turn registration + `CHAT_STARTED` emission unchanged.
+- **`ConversationMemory` (core).** Added a `(agent, userId, sessionId)` constructor viewing a specific
+  slot via `getAgentState(userId,sessionId)`; the no-arg view (default session) is unchanged.
+- **Store seam.** `AgentFactory` and `AgentInstanceFactory` gained an optional `AgentStateStore` (threaded
+  to `PigAgent.Builder.stateStore`); `null` ⇒ per-agent `InMemoryAgentStateStore` (Phase-0 behavior).
+  Passing **one shared `JsonFileAgentStateStore`** to every rebuilt agent is what makes per-session
+  conversation survive a model switch (new agent, same store) and a restart — the CLI wires this in Phase 4.
+
+### `SessionManager` = metadata sidecar over native state
+
+Deleted the `io.agentscope.core.session.Session agentSession` field/param and every
+`saveTo(agentSession,id)` / `loadIfExists(agentSession,id)` / `clearMemory()`-then-load call. The manager
+no longer loads or clears the agent's conversation on a switch — the native store does it per turn. It now
+owns only pig's differentiators: the `Session` record (name/timestamps/model binding/**compression
+lineage**) via `FileSystemSessionRepository` (`meta.json`), the per-session temp-memory file, and
+`current-session-id` restore + `SessionManager.lineageOf`. `activate` = save-current → `ensureModel(...)`
+→ point the temp-memory tier at the target → record the id (+ config). `fork` copies the conversation via
+`PigAgent.copyConversation`; `clearConversation` via `PigAgent.clearConversation`; `saveCurrent` via
+`PigAgent.saveTo`. POM: `io.agentscope:agentscope` (1.x all-in-one) → `agentscope-core`, removing the
+dual-jar classpath that only masked the removed 1.x `session` package.
+
+### Compaction / memory: kept on the bridge (native adoption deferred to Phase 4)
+
+`CompressionService` + `CompositeLongTermMemory`/`ExtractingLongTermMemory` are **unchanged** and still
+compile+run green via the `ConversationMemory` adapter over `AgentState`. Native `CompactionConfig` /
+`MemoryConfig` (a `HarnessAgent`-build-time concern) are adopted in Phase 4 when the agent is assembled in
+the CLI; the session-scoped `PigAgent.getMemory(sessionId)` seam is provided now so Phase-4 compression can
+target the right conversation. Compression lineage (`SessionLineageWriter`) is untouched and still passes.
+
+### Data-migration note (existing `workspace/sessions/{id}/`)
+
+Old session dirs held 1.x-`JsonSession` conversation state; the native `JsonFileAgentStateStore` uses a
+different layout (`<root>/pig/<sessionId>/…` when rooted at the sessions dir, or a dedicated `state/` root)
+and format. **No auto-conversion** — best-effort, fault-tolerant: on first use a pre-existing session's
+conversation "starts fresh" if the native store has no `("pig", sessionId)` slot, while the pig `meta.json`
+sidecar (name/timestamps/model/lineage) is read unchanged, so sessions still list and switch correctly.
+The Phase-4 CLI chooses the store root (recommend a dedicated `workspace/state/` to avoid mixing native
+state files with the `meta.json`/`temp-memory.md` sidecar under `workspace/sessions/{id}/`).
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn -pl pig-agent-core,pig-agent-session -am compile` green. `mvn -pl pig-agent-session -am test`:
+**pig-agent-session 45 / 0 fail / 0 error / 0 skip** (`FileSystemSessionRepositoryTest` 9,
+`SessionManagerTest` 22, `SessionTest` 11, `SessionLineageWriterTest` 3) and **pig-agent-core 234 / 0 / 0 /
+0** (unchanged — the additive core changes broke nothing). Only `SessionManagerTest` needed porting: it
+dropped `import io.agentscope.core.session.JsonSession`, the `new JsonSession(sessionsDir)` local, and the
+`agentSession` constructor arg — every assertion (lifecycle/model-switch/temp-memory/lineage) is about the
+metadata sidecar and passed unchanged; `SessionTest`/`FileSystemSessionRepositoryTest`/
+`SessionLineageWriterTest` had zero AgentScope-`session` coupling and were untouched.
+
+### Phase-4 open items
+
+- **CLI wiring:** build one shared `JsonFileAgentStateStore` in `AgentBootstrap`, pass it to
+  `AgentFactory`/`AgentInstanceFactory`, and call `kernel.chat(activeId, msg, sessionManager
+  .getCurrentSessionId())`; choose the store root; remove the last references to the deleted 1.x session
+  API in `AgentBootstrap`/`FullLinkAgentIT`.
+- **Native compaction/memory adoption:** move `CompressionService`/two-tier memory onto
+  `CompactionConfig`/`MemoryConfig` at agent-build time (or keep the bridge + point compression at
+  `getMemory(sessionId)`); decide per-session vs per-`IsolationScope` memory semantics.
+- **`channel`:** thread a channel-owned session id through the new `stream(Msg,sessionId)` seam.
+- **Live-model IT:** a `*IT` confirming multi-turn conversation actually persists + restores across a
+  session switch and a simulated restart on a `JsonFileAgentStateStore` (offline tests use `InMemory`).

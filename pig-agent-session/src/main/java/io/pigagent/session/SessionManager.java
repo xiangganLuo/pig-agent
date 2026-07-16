@@ -16,11 +16,21 @@ import java.util.Optional;
 
 /**
  * Coordinates the session lifecycle. The agent is read through an {@link AgentHolder} so that
- * a runtime model switch (which rebuilds the agent) is transparent here. Before a session's
- * conversation is loaded, {@link AgentModelSwitcher#ensureModel(String)} makes the agent use
- * that session's bound model (or the global default), satisfying per-session temporary
- * switching. Conversation persistence uses AgentScope's session store; listing metadata uses
- * {@link SessionRepository}.
+ * a runtime model switch (which rebuilds the agent) is transparent here. When a session is
+ * activated, {@link AgentModelSwitcher#ensureModel(String)} makes the agent use that session's
+ * bound model (or the global default), satisfying per-session temporary switching.
+ *
+ * <p><b>AgentScope 2.0 conversation state (av2 Phase 3).</b> The 1.x
+ * {@code io.agentscope.core.session.Session}/{@code JsonSession} classes are removed; conversation
+ * history now persists automatically through the native {@code AgentStateStore}, keyed by
+ * {@code (userId="pig", sessionId)}. This manager no longer loads/clears the agent's conversation on
+ * a switch — instead the active session id flows into the agent's per-turn
+ * {@code call/stream} (via {@code PigAgent.stream(Msg, sessionId)}), and the
+ * store auto-loads/saves the correct slot per turn. This manager keeps pig's differentiators as a
+ * thin <em>metadata sidecar</em>: the {@link Session} record (name/timestamps/model binding/
+ * compression lineage) via {@link SessionRepository}, plus the per-session temporary memory file.
+ * Switching a session = save current → ensure the session's model → point the temp-memory tier at
+ * the target → record the active id (the native store handles the conversation itself).
  */
 public final class SessionManager {
 
@@ -28,7 +38,6 @@ public final class SessionManager {
 
     private final AgentHolder agentHolder;
     private final AgentModelSwitcher modelSwitcher;
-    private final io.agentscope.core.session.Session agentSession;
     private final CompositeLongTermMemory memory;
     private final SessionRepository repository;
     private final ConfigurationManager configManager;
@@ -40,18 +49,16 @@ public final class SessionManager {
     /** Backward-compatible constructor: uses the raw {@link SessionMemoryFactory#DEFAULT}. */
     public SessionManager(AgentHolder agentHolder,
                           AgentModelSwitcher modelSwitcher,
-                          io.agentscope.core.session.Session agentSession,
                           CompositeLongTermMemory memory,
                           SessionRepository repository,
                           ConfigurationManager configManager,
                           Path sessionsDir) {
-        this(agentHolder, modelSwitcher, agentSession, memory, repository, configManager,
+        this(agentHolder, modelSwitcher, memory, repository, configManager,
                 sessionsDir, SessionMemoryFactory.DEFAULT);
     }
 
     public SessionManager(AgentHolder agentHolder,
                           AgentModelSwitcher modelSwitcher,
-                          io.agentscope.core.session.Session agentSession,
                           CompositeLongTermMemory memory,
                           SessionRepository repository,
                           ConfigurationManager configManager,
@@ -59,7 +66,6 @@ public final class SessionManager {
                           SessionMemoryFactory sessionMemoryFactory) {
         this.agentHolder = agentHolder;
         this.modelSwitcher = modelSwitcher;
-        this.agentSession = agentSession;
         this.memory = memory;
         this.repository = repository;
         this.configManager = configManager;
@@ -92,7 +98,8 @@ public final class SessionManager {
     }
 
     /** Make the given session current: persist the previous conversation, ensure the right
-     * model is loaded, then restore this session's conversation and temp memory. */
+     * model is loaded, then point the temp-memory tier at this session. The conversation itself is
+     * restored automatically by the native state store on the next session-aware turn. */
     public void activate(String id) {
         if (currentSessionId != null) {
             saveCurrent();
@@ -100,8 +107,8 @@ public final class SessionManager {
         Session target = repository.findById(id).orElse(null);
         modelSwitcher.ensureModel(target != null ? target.modelId() : null);
 
-        agentHolder.get().clearMemory();
-        agentHolder.get().loadIfExists(agentSession, id);
+        // No manual clear/load: the native AgentStateStore auto-loads the (pig, id) conversation
+        // slot on the next session-aware call/stream (and auto-saves it after each turn).
         memory.setSessionMemory(sessionMemoryFactory.create(tempMemoryPath(id)));
         currentSessionId = id;
         configManager.updateConfig(c -> c.setCurrentSessionId(id));
@@ -150,8 +157,8 @@ public final class SessionManager {
             forked = forked.withModelId(source.modelId());
         }
         forked = repository.save(forked);
-        // The live agent currently holds the source conversation; persist it under the new id.
-        agentHolder.get().saveTo(agentSession, forked.id());
+        // Copy the source session's conversation slot into the fork's slot (native state store).
+        agentHolder.get().copyConversation(currentSessionId, forked.id());
         copyTempMemory(currentSessionId, forked.id());
 
         activate(forked.id());
@@ -171,8 +178,7 @@ public final class SessionManager {
         if (currentSessionId == null) {
             return;
         }
-        agentHolder.get().clearMemory();
-        agentHolder.get().saveTo(agentSession, currentSessionId);
+        agentHolder.get().clearConversation(currentSessionId);
         if (withTempMemory) {
             try {
                 Files.deleteIfExists(tempMemoryPath(currentSessionId));
@@ -211,12 +217,13 @@ public final class SessionManager {
                 .ifPresent(s -> repository.save(s.withName(name.strip())));
     }
 
-    /** Persist the current conversation and bump its last-active time (autosave per turn). */
+    /** Persist the current conversation and bump its last-active time (autosave per turn). The
+     * native store also auto-saves per turn; this is an explicit flush of the current slot. */
     public void saveCurrent() {
         if (currentSessionId == null) {
             return;
         }
-        agentHolder.get().saveTo(agentSession, currentSessionId);
+        agentHolder.get().saveTo(currentSessionId);
         touch(currentSessionId);
     }
 
