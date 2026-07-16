@@ -11,7 +11,7 @@ public final class UuidTool {
 
     private static final int MAX_COUNT = 100;
 
-    @Tool(name = "generateUuid",
+    @Tool(name = "generateUuid", readOnly = true,
             description = "Generate one or more random (v4) UUIDs; count defaults to 1, max 100.")
     public String generateUuid(
             @ToolParam(name = "count", required = false,

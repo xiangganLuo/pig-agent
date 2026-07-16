@@ -35,12 +35,14 @@ class ToolRegistrarTest {
 
         // Assert — every CORE builtin tool name is present (tools-core-slim): web search / web fetch /
         // checklist are no longer here — they moved to pig-agent-plugin-builtin as plugins.
+        // NB: permissionDenied sentinel removed in the av2 native-permission re-architecture
+        // (PermissionEngine + ToolResultState.DENIED replace the veto-to-sentinel mechanism).
         assertThat(toolkit.getToolNames()).contains(
                 "executeCommand",
                 "readFile", "writeFile", "listDirectory",
                 "createTask", "listTasks", "updateTaskStatus",
-                "listSkills", "loadSkill",
-                "permissionDenied");
+                "listSkills", "loadSkill");
+        assertThat(toolkit.getToolNames()).doesNotContain("permissionDenied");
         assertThat(toolkit.getToolNames()).doesNotContain("fetchUrl", "webSearch");
         assertThat(result.failures).isEmpty();
         assertThat(result.duplicatesSkipped).isEmpty();

@@ -17,7 +17,7 @@ public final class RandomTool {
     private static final String ALPHANUMERIC =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-    @Tool(name = "randomNumber",
+    @Tool(name = "randomNumber", readOnly = true,
             description = "Random integer in the inclusive range [min, max]. Not cryptographically secure.")
     public String randomNumber(
             @ToolParam(name = "min", description = "inclusive lower bound") long min,
@@ -32,7 +32,7 @@ public final class RandomTool {
         return Long.toString(value);
     }
 
-    @Tool(name = "randomString",
+    @Tool(name = "randomString", readOnly = true,
             description = "Random string of a given length. charset: 'alphanumeric' (default), "
                     + "'alpha', 'numeric', or 'hex'. Not cryptographically secure.")
     public String randomString(

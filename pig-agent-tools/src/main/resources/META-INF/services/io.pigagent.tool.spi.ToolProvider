@@ -3,7 +3,6 @@
 # Core tools only (tools-core-slim); web search / web fetch / checklist moved to pig-agent-plugin-builtin.
 io.pigagent.tool.spi.providers.ShellToolsProvider
 io.pigagent.tool.spi.providers.FileSystemToolsProvider
-io.pigagent.tool.spi.providers.PermissionDeniedToolProvider
 io.pigagent.tool.spi.providers.LoopDetectedToolProvider
 io.pigagent.tool.spi.providers.TaskToolProvider
 io.pigagent.tool.spi.providers.SkillsToolProvider

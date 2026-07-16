@@ -19,7 +19,7 @@ public final class TimeTool {
 
     private static final String UTC = "UTC";
 
-    @Tool(name = "currentDateTime",
+    @Tool(name = "currentDateTime", readOnly = true,
             description = "Get the current date-time as ISO-8601 for a timezone (IANA id, default UTC).")
     public String currentDateTime(
             @ToolParam(name = "timezone", required = false,
@@ -33,7 +33,7 @@ public final class TimeTool {
         return ZonedDateTime.now(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
     }
 
-    @Tool(name = "convertTimezone",
+    @Tool(name = "convertTimezone", readOnly = true,
             description = "Convert an ISO-8601 date-time from one IANA timezone to another.")
     public String convertTimezone(
             @ToolParam(name = "datetime", description = "ISO-8601 date-time, e.g. 2026-07-15T08:30:00") String datetime,
@@ -55,7 +55,7 @@ public final class TimeTool {
         }
     }
 
-    @Tool(name = "epochToIso",
+    @Tool(name = "epochToIso", readOnly = true,
             description = "Convert a Unix epoch to ISO-8601 in a timezone. unit is 'seconds' or 'millis'.")
     public String epochToIso(
             @ToolParam(name = "epoch", description = "epoch value (integer)") long epoch,
@@ -79,7 +79,7 @@ public final class TimeTool {
         }
     }
 
-    @Tool(name = "isoToEpoch",
+    @Tool(name = "isoToEpoch", readOnly = true,
             description = "Convert an ISO-8601 date-time to Unix epoch seconds and milliseconds (JSON).")
     public String isoToEpoch(
             @ToolParam(name = "datetime",

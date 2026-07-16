@@ -35,7 +35,8 @@ public final class ToolSearchTool {
             + "currently loaded into your tool list (they were deferred to save context). Given a "
             + "query of keywords describing the capability you need, this returns matching tools' "
             + "names and descriptions and makes them available to call in your next steps. Use it "
-            + "whenever you need a capability you do not see among your current tools.")
+            + "whenever you need a capability you do not see among your current tools.",
+            readOnly = true)
     public String toolSearch(@ToolParam(name = "query", description = "Keywords describing the "
             + "capability you need, e.g. 'weather forecast', 'query database', 'send email'.")
                              String query) {

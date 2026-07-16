@@ -60,7 +60,7 @@ public final class SkillsTool {
                 new ClasspathSkillSource())));
     }
 
-    @Tool(description = "List available skills from the skills directory")
+    @Tool(description = "List available skills from the skills directory", readOnly = true)
     public String listSkills() {
         List<Skill> skills = registry.all();
         if (skills.isEmpty()) {
@@ -72,7 +72,7 @@ public final class SkillsTool {
                 .collect(Collectors.joining("\n"));
     }
 
-    @Tool(description = "Load and read a skill's content by name")
+    @Tool(description = "Load and read a skill's content by name", readOnly = true)
     public String loadSkill(@ToolParam(name = "skill_name", description = "Skill name") String skillName) {
         Optional<Skill> skill = registry.find(skillName);
         if (skill.isEmpty()) {

@@ -32,7 +32,7 @@ public final class McpTool {
         this.confirmer = confirmer;
     }
 
-    @Tool(description = "列出已配置的 MCP 服务器及其实时健康（密钥已脱敏）")
+    @Tool(description = "列出已配置的 MCP 服务器及其实时健康（密钥已脱敏）", readOnly = true)
     public String listMcpServers() {
         List<McpManager.ServerStatus> list = mcp.list();
         if (list.isEmpty()) {
@@ -52,7 +52,7 @@ public final class McpTool {
         return sb.toString().trim();
     }
 
-    @Tool(description = "测试一个已配置 MCP 服务器的连通性")
+    @Tool(description = "测试一个已配置 MCP 服务器的连通性", readOnly = true)
     public String testMcpServer(@ToolParam(name = "name", description = "服务器名") String name) {
         McpServerSpec spec = mcp.findByName(name).orElse(null);
         if (spec == null) {

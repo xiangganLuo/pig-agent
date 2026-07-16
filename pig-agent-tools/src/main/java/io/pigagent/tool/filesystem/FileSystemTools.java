@@ -47,7 +47,7 @@ public final class FileSystemTools {
         this.deniedPaths = Set.copyOf(denied);
     }
 
-    @Tool(description = "Read the contents of a file")
+    @Tool(description = "Read the contents of a file", readOnly = true)
     public String readFile(@ToolParam(name = "path", description = "Absolute file path") String path) {
         if (isDenied(path)) {
             return ToolErrors.message("access denied: credential file");
@@ -75,7 +75,7 @@ public final class FileSystemTools {
         }
     }
 
-    @Tool(description = "List files in a directory")
+    @Tool(description = "List files in a directory", readOnly = true)
     public String listDirectory(@ToolParam(name = "path", description = "Directory path") String path) {
         try (var stream = Files.list(Path.of(path))) {
             return stream.map(p -> p.getFileName().toString() + (Files.isDirectory(p) ? "/" : ""))

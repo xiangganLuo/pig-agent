@@ -16,12 +16,14 @@ public final class HashTool {
 
     private static final char[] HEX = "0123456789abcdef".toCharArray();
 
-    @Tool(name = "md5Hash", description = "Compute the MD5 digest of UTF-8 text as lowercase hex.")
+    @Tool(name = "md5Hash", readOnly = true,
+            description = "Compute the MD5 digest of UTF-8 text as lowercase hex.")
     public String md5Hash(@ToolParam(name = "text", description = "text to hash") String text) {
         return digest("MD5", text);
     }
 
-    @Tool(name = "sha256Hash", description = "Compute the SHA-256 digest of UTF-8 text as lowercase hex.")
+    @Tool(name = "sha256Hash", readOnly = true,
+            description = "Compute the SHA-256 digest of UTF-8 text as lowercase hex.")
     public String sha256Hash(@ToolParam(name = "text", description = "text to hash") String text) {
         return digest("SHA-256", text);
     }

@@ -15,7 +15,7 @@ public final class JsonTool {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    @Tool(name = "jsonPrettyPrint",
+    @Tool(name = "jsonPrettyPrint", readOnly = true,
             description = "Reformat a JSON string with 2-space indentation; invalid JSON returns an error.")
     public String jsonPrettyPrint(
             @ToolParam(name = "json", description = "the JSON text to pretty-print") String json) {
@@ -27,7 +27,7 @@ public final class JsonTool {
         }
     }
 
-    @Tool(name = "jsonValidate",
+    @Tool(name = "jsonValidate", readOnly = true,
             description = "Validate a JSON string; returns {\"valid\":true} or {\"valid\":false,\"error\":...}.")
     public String jsonValidate(
             @ToolParam(name = "json", description = "the JSON text to validate") String json) {
