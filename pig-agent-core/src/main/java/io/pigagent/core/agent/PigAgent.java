@@ -27,8 +27,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * The central Pig Agent, wrapping AgentScope's ReActAgent.
@@ -82,6 +84,9 @@ public final class PigAgent {
 
     /** State-store partition for this single-user terminal app (the pig {@code userId}). */
     private static final String USER_ID = "pig";
+
+    /** The built-in general-purpose subagent id (native {@code agent_spawn} target). */
+    private static final String GENERAL_PURPOSE_ID = "general-purpose";
 
     /** Lazily-created shared temp workspace used only when no workspace is supplied (tests). */
     private static volatile Path fallbackWorkspace;
@@ -482,16 +487,25 @@ public final class PigAgent {
                 hb.disableToolResultEviction();
             }
 
-            // av2 Phase 6a: native subagent delegation. Enabled → the vehicle registers the built-in
-            // general-purpose subagent + agent_spawn/send/list + task_* tools and discovers
-            // <workspace>/subagents/*.md; any code-declared subagents (pig peer specs) are added too.
-            // Disabled (default) → keep the pre-6a disable calls so the schema is byte-for-byte the old
-            // one. The 3-level recursion cap (leaf children) IS a native invariant. NOTE: parent→child
-            // permission inheritance is NOT: 2.0.0's SubagentDeclaration.inheritParentPermissions is
-            // declared but inert (no harness class reads it), so a spawned child runs under its own
-            // permissive context — a permission-escape. That is why config `subagents.enabled` defaults
-            // OFF; wiring child-permission inheritance is a Phase-6b item (see agentscope-v2-migration).
+            // av2 Phase 6a/6b: native subagent delegation WITH pig-enforced permission inheritance.
+            // Enabled → the vehicle registers the built-in general-purpose subagent + agent_spawn/send/
+            // list + task_* tools and discovers <workspace>/subagents/*.md; any code-declared subagents
+            // (pig peer specs) are added too. Disabled (default until 6b) → keep the pre-6a disable calls
+            // so the schema is byte-for-byte the old one. The 3-level recursion cap (leaf children) IS a
+            // native invariant.
+            //
+            // Phase-6b inheritance (security): 2.0.0's SubagentDeclaration.inheritParentPermissions is
+            // declared but INERT (no harness class reads it) — a natively-spawned child would run under
+            // its own permissive context and could execute a tool the parent denied (a permission-escape,
+            // which is why 6a kept the default OFF). We close it by building every spawnable child
+            // ourselves via HarnessAgent.Builder.subagentFactory(name, fn): the custom factory is appended
+            // AFTER the built-in general-purpose + declared entries, so it wins the last-put factory map
+            // DefaultAgentManager.createAgent resolves against. Each child is a LEAF (subagents disabled)
+            // running under SubagentPermissions.deriveChildContext(parent) — the parent's DENY rules bind
+            // it, inherited ASK fail-closes to DENY (a child has no confirmer), EXPLORE/BYPASS are
+            // preserved. With the escape closed, config `subagents.enabled` now defaults ON.
             if (subagentsEnabled) {
+                registerInheritingSubagentFactories(hb);
                 if (subagentDeclarations != null && !subagentDeclarations.isEmpty()) {
                     hb.subagents(subagentDeclarations);
                 }
@@ -502,6 +516,101 @@ public final class PigAgent {
 
             HarnessAgent harness = hb.build();
             return new PigAgent(harness, harness.getDelegate(), name, model, effectiveStore);
+        }
+
+        /**
+         * Register a pig-owned {@code subagentFactory} for the built-in {@code general-purpose} child and
+         * for every declared subagent, so each spawnable child is built under a fail-closed permission
+         * context derived from this parent's (av2 Phase-6b). The factory is invoked per-spawn (so the
+         * child toolkit is a fresh {@link Toolkit#copy()} and its state is ephemeral in-memory), and the
+         * child is a LEAF ({@code disableSubagents}) so the recursion cap and no-escalation both hold.
+         */
+        private void registerInheritingSubagentFactories(HarnessAgent.Builder hb) {
+            PermissionContextState childCtx = permissionContext == null
+                    ? null : SubagentPermissions.deriveChildContext(permissionContext);
+            Path childWorkspace = workspace != null ? workspace : fallbackWorkspace();
+            Toolkit parentToolkit = toolkit != null ? toolkit : new Toolkit();
+            String parentPrompt = sysPrompt;
+            Model parentModel = model;
+            int childIters = maxIters;
+            int childRetries = maxRetries;
+            hb.subagentFactory(GENERAL_PURPOSE_ID, ignoredName -> buildLeafChild(
+                    GENERAL_PURPOSE_ID, parentPrompt, parentToolkit.copy(), childCtx,
+                    parentModel, childWorkspace, childIters, childRetries));
+            if (subagentDeclarations != null) {
+                for (SubagentDeclaration d : subagentDeclarations) {
+                    String childName = d.getName();
+                    String body = d.getInlineAgentsBody();
+                    String childPrompt = (body != null && !body.isBlank()) ? body : parentPrompt;
+                    List<String> tools = d.getTools();
+                    hb.subagentFactory(childName, ignoredName -> buildLeafChild(
+                            childName, childPrompt, childToolkit(parentToolkit, tools), childCtx,
+                            parentModel, childWorkspace, childIters, childRetries));
+                }
+            }
+        }
+
+        /**
+         * Build a single leaf child {@link HarnessAgent} for a subagent spawn: the parent's model, a
+         * fresh (isolated, ephemeral) toolkit + state store, the derived fail-closed permission context,
+         * and every native batteries-included extra disabled (mirroring the parent) — crucially
+         * {@code disableSubagents()} so the child cannot spawn (leaf).
+         */
+        private static io.agentscope.core.agent.Agent buildLeafChild(
+                String childName, String childSysPrompt, Toolkit childToolkit,
+                PermissionContextState childCtx, Model model, Path workspace,
+                int maxIters, int maxRetries) {
+            HarnessAgent.Builder cb = HarnessAgent.builder()
+                    .name(childName + "-subagent")
+                    .sysPrompt(childSysPrompt)
+                    .model(model)
+                    .stateStore(new InMemoryAgentStateStore())
+                    .toolkit(childToolkit)
+                    .workspace(workspace)
+                    .disableFilesystemTools()
+                    .disableShellTool()
+                    .disableMemoryTools()
+                    .disableMemoryHooks()
+                    .disableCompaction()
+                    .disableWorkspaceContext()
+                    .disableAtPathExpansion()
+                    .disableDynamicSkills()
+                    .disableDefaultWorkspaceSkills()
+                    .disableToolsConfig()
+                    .disableSessionPersistence()
+                    .disableToolResultEviction()
+                    .disableSubagents()        // LEAF — a spawned child cannot itself spawn
+                    .disableDynamicSubagents();
+            if (childCtx != null) {
+                cb.permissionContext(childCtx);
+            }
+            if (maxIters > 0) {
+                cb.maxIters(maxIters);
+            }
+            if (maxRetries > 0) {
+                cb.maxRetries(maxRetries);
+            }
+            return cb.build();
+        }
+
+        /**
+         * The child's toolkit: a fresh {@link Toolkit#copy()} of the parent's, narrowed to
+         * {@code allowedTools} when a subset is declared (empty/null = inherit all). Filtering by name
+         * keeps the child's tools a subset of the parent's, so the child never sees a tool the parent
+         * lacks.
+         */
+        private static Toolkit childToolkit(Toolkit parent, List<String> allowedTools) {
+            Toolkit copy = parent.copy();
+            if (allowedTools == null || allowedTools.isEmpty()) {
+                return copy;
+            }
+            Set<String> keep = new HashSet<>(allowedTools);
+            for (String name : new HashSet<>(copy.getToolNames())) {
+                if (!keep.contains(name)) {
+                    copy.removeTool(name);
+                }
+            }
+            return copy;
         }
     }
 

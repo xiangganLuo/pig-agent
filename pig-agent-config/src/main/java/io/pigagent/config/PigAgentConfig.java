@@ -311,23 +311,24 @@ public final class PigAgentConfig {
      * （{@code /agent use} 切换当前 agent）是两个正交概念，互不冲突：peer=切换活跃 agent，subagent=活跃
      * agent 委派子任务给子 agent。
      *
-     * <p>{@code enabled} <b>默认 false</b>（保守）。两条理由，安全为主：
-     * <ol>
-     *   <li><b>权限逃逸（主因）</b>：AgentScope 2.0.0 的 {@code SubagentDeclaration.inheritParentPermissions}
-     *       字段<em>已声明但未接线</em>——harness 里没有任何类读它（javap 证实），实测被 spawn 的子 agent
-     *       会以自身（宽松）权限运行，<b>不继承父 agent 的 DENY 规则 / pig 的权限 mode</b>。即：开启后一个
-     *       子 agent 可能做父 agent 被禁止的事。把「子 agent 继承父权限上下文」接线（自定义
-     *       {@code subagentFactory} 注入父 {@code PermissionContextState}）是 Phase-6b 事项——在此之前默认关闭。</li>
-     *   <li><b>token 成本</b>：开启会给模型 schema 增加 {@code agent_spawn}/{@code agent_send}/{@code agent_list}/
-     *       {@code task_output}/{@code task_cancel}/{@code task_list} 六个工具，每轮多耗少量提示词 token。</li>
-     * </ol>
-     * {@code enabled: true} 显式开启委派（内置 {@code general-purpose} + 工作区 {@code subagents/<id>.md}
-     * + pig peer 映射）——是操作者知情下的选择。{@code enabled: false}（默认）逐字节等于 6a 之前的行为
-     * （schema 里没有任何子 agent 工具）。仅作用于交互式 agent（默认 + {@code /agent} peer）；渠道 / 自主
-     * 数字员工轨道始终关闭（fail-closed 姿态）。
+     * <p>{@code enabled} <b>默认 true</b>（av2 Phase-6b 起）。此前默认 false，唯一阻塞理由是<b>权限逃逸</b>：
+     * AgentScope 2.0.0 的 {@code SubagentDeclaration.inheritParentPermissions} 字段<em>已声明但未接线</em>
+     * （harness 里没有任何类读它，javap 证实），被 spawn 的子 agent 会以自身宽松权限运行，不继承父 agent
+     * 的 DENY 规则。Phase-6b <b>已在 pig 侧接线继承</b>：pig 通过自定义 {@code HarnessAgent.Builder
+     * .subagentFactory} 自建每个可 spawn 的子 agent，注入由父上下文派生的 fail-closed 权限上下文
+     * （{@code SubagentPermissions.deriveChildContext}——父 DENY 绑定子、继承的 ASK 降级为 DENY（子无
+     * confirmer）、EXPLORE/BYPASS 保留），逃逸已闭合（真实 spawn-path 测试 {@code SubagentDelegationTest}
+     * 证明：父 DENY 的工具子 agent 无法执行）。故现在默认开启。仍保留开关，且渠道 / 自主数字员工轨道的子
+     * agent 依旧受各自 fail-closed 上下文约束。
+     *
+     * <p>开启会给模型 schema 增加 {@code agent_spawn}/{@code agent_send}/{@code agent_list}/
+     * {@code task_output}/{@code task_cancel}/{@code task_list} 六个工具（每轮少量提示词 token）；
+     * {@code enabled: false} 逐字节回到 6a 之前的行为（schema 里没有任何子 agent 工具）。这与 pig 的
+     * <b>peer</b> agent（{@code /agent use} 切换活跃 agent）是两个正交概念：peer=切换活跃 agent，
+     * subagent=活跃 agent 委派子任务给瞬态子 agent。
      */
     public static final class SubagentsConfig {
-        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("enabled") private boolean enabled = true;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
     }

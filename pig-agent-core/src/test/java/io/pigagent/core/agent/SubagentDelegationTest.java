@@ -29,11 +29,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * av2 Phase 6a — native subagent delegation on the {@link PigAgent}/{@code HarnessAgent} vehicle.
+ * av2 Phase 6a/6b — native subagent delegation on the {@link PigAgent}/{@code HarnessAgent} vehicle.
  * Proves: (1) the orchestration toolset is registered when enabled and absent when disabled;
  * (2) a spawned built-in {@code general-purpose} child actually runs and its result returns to the
- * parent; (3) the parent's permission DENY rules are inherited by the spawned child (a delegated task
- * cannot exceed the parent's authority). Fully offline — scripted fake models + {@code @TempDir}.
+ * parent; (3) <b>Phase-6b</b> — the parent's permission DENY rules are <em>inherited</em> by the
+ * spawned child (a delegated task cannot exceed the parent's authority): pig builds the child under a
+ * fail-closed context derived from the parent, so a child spawned by a parent that DENies a tool
+ * <em>cannot</em> execute it. Fully offline — scripted fake models + {@code @TempDir}.
  */
 class SubagentDelegationTest {
 
@@ -200,15 +202,15 @@ class SubagentDelegationTest {
         agent.close();
     }
 
-    // ---- D: 2.0.0 does NOT propagate the parent's DENY to a spawned child (documented gap) -------
+    // ---- D: Phase-6b — pig ENFORCES parent→child permission inheritance ---------------------------
     //
-    // The acceptance goal was "parent DENY → child denied". This test is the honest verification of
-    // that: AgentScope 2.0.0's SubagentDeclaration.inheritParentPermissions field is DECLARED BUT
-    // INERT (javap: no harness class reads it), so a spawned child runs under its own permissive
-    // context and EXECUTES a tool the parent denied — a permission-escape. This is the concrete reason
-    // pig defaults `subagents.enabled` OFF (wiring child-permission inheritance is Phase-6b). The test
-    // guards the known behavior: if a future AgentScope honors inheritance, `secret.invoked` would be
-    // 0 and this test would fail — a signal to flip the default and update the docs.
+    // 2.0.0's SubagentDeclaration.inheritParentPermissions is declared but INERT (javap: no harness
+    // class reads it), so a natively-built child would run under its own permissive context and could
+    // execute a tool the parent denied — a permission-escape. pig closes it by building every spawnable
+    // child itself (HarnessAgent.Builder.subagentFactory) under a fail-closed context derived from the
+    // parent (SubagentPermissions.deriveChildContext), so the parent's DENY binds the child. This is
+    // the genuine spawn-path proof: a real general-purpose child is spawned and its attempt to run the
+    // parent-denied tool is refused (the tool body is never invoked).
 
     static final class SecretTool {
         final AtomicInteger invoked = new AtomicInteger();
@@ -246,14 +248,14 @@ class SubagentDelegationTest {
     }
 
     @Test
-    void spawnedChildDoesNotInheritParentDenyRule_native2_0_0Gap(@TempDir Path ws) {
+    void spawnedChildInheritsParentDenyRule_andCannotRunDeniedTool(@TempDir Path ws) {
         SecretTool secret = new SecretTool();
         Toolkit toolkit = new Toolkit();
         toolkit.registerTool(secret);
 
         // Deny secretTool but ALLOW the parent to spawn (else agent_spawn itself would fail-close under
-        // DEFAULT with no confirmer, and the child would never run). The child inherits BOTH rules; only
-        // the DENY is relevant to it (it's a leaf and can't spawn).
+        // DEFAULT with no confirmer, and the child would never run). The child inherits the DENY (the
+        // ALLOW for agent_spawn is irrelevant to the child — it is a leaf and cannot spawn).
         PermissionContextState denyCtx = PermissionContextState.builder()
                 .mode(PermissionMode.DEFAULT)
                 .addAllowRule("agent_spawn",
@@ -277,11 +279,10 @@ class SubagentDelegationTest {
         // The child DID attempt the tool (so the assertion below is meaningful, not vacuous).
         assertThat(model.childToolCallEmitted.get())
                 .as("the spawned child attempted the tool").isGreaterThanOrEqualTo(1);
-        // 2.0.0 GAP: the parent's DENY rule is NOT inherited — the child ran the tool the parent denied.
-        // (When inheritance is honored this becomes 0; see the class comment. Guards the known gap.)
+        // Phase-6b: the parent's DENY rule IS inherited — the child could NOT execute the denied tool.
         assertThat(secret.invoked.get())
-                .as("2.0.0 does not propagate parent DENY to the child (inheritParentPermissions inert)")
-                .isGreaterThanOrEqualTo(1);
+                .as("the spawned child inherits the parent's DENY and never runs the denied tool")
+                .isZero();
         agent.close();
     }
 
