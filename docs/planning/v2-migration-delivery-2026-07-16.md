@@ -47,5 +47,13 @@
 
 **建议**：额度到位→跑真模型 `*IT`（上面 1）→绿则连同真渠道抽验→你确认后执行 v2→main 切换（v1 已 tag 备份，可回滚）。切换前不动 `main`。
 
+## 收官更新（2026-07-16 晚，Doubao key + Gateway 就绪后）
+- ✅ **真模型 `*IT`（Doubao）跑通**：`PermissionEnforcementIT` 4/4 + `FullLinkAgentIT` 5/5 + 连通性 1/1 = **10/10 绿**。**P0 运行时确证**：`plan(guarded) spyExecuted=false`——mutating 工具在真实 `GuardedAgentTool` 生产路径下被原生 `PermissionEngine` 真拦住；加了回归守卫。（commit `1b5074a`）
+- ✅ **Gateway 增强合入 v2 线**：原生 `Gateway`/`ChatUiChannel` 内核（藏 `AgentKernel` 后，默认关）+ 原生适配器 opt-in（缺 jar 时优雅降级到自研）+ `expose_to_user` 离线端到端验证 + 外呼 send-seam 对接。channel 模块 132 测试绿。（v2 线 `f1f84ff`）
+- ✅ **新鲜 v1 备份**：分支 `v1-stable-20260716` + tag `v1-final-20260716`（= 当前 v1 main，含全部 v1 特性）。
+
+## 提升 v2→main 状态
+**已就绪，可逆（v1 双备份）**。核心路径（权限 DENY、全链路）已真模型验证；**仍 live-unverified（切换前须知晓）**：多轮会话历史持久化(原生 store)、渠道实发(飞书/钉钉端点)、子agent 委派(小模型 `agent_spawn` 稳定性)——机制均离线覆盖，仅缺真环境跑。切换一条命令、v1 可秒回滚。
+
 ## 结论
-v2 迁移的**离线可达部分全部完成**：pig 在纯 2.0 上编译+单测全绿、与 v1 对齐、差异化保留、安全硬化（含 P0）。剩余只有**真模型/真渠道验证（额度/端点门）**与**可选增强**。`main` 保持 v1 稳定不动，直到你在真验证后拍板切换。
+**v2 全量迁移已完成并核心真模型验证**：纯 2.0 全绿、与 v1 对齐、差异化保留、安全硬化（含 P0 修复+运行时确证）、Gateway 渠道内核对齐。`main` 暂保持 v1；**主线切换这一步待拍板**（其余全部做完，v1 已备份可回滚）。
