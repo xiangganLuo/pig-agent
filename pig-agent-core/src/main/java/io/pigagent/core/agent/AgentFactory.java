@@ -1,7 +1,7 @@
 package io.pigagent.core.agent;
 
-import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
@@ -12,7 +12,7 @@ import java.util.function.Supplier;
 
 /**
  * Builds {@link PigAgent} instances that all share the same configuration (name, system
- * prompt, toolkit, hooks, long-term memory) but a swappable {@code Model}.
+ * prompt, toolkit, middlewares, long-term memory) but a swappable {@code Model}.
  *
  * <p>Used to rebuild the agent when the user switches models at runtime: the toolkit, hooks
  * and {@code CompositeLongTermMemory} are reused unchanged, only the model differs. The
@@ -34,7 +34,7 @@ public final class AgentFactory {
     private final String name;
     private final String sysPrompt;
     private final Toolkit toolkit;
-    private final List<Hook> hooks;
+    private final List<MiddlewareBase> middlewares;
     private final LongTermMemory longTermMemory;
     private final int maxRetries; // <= 0 = keep AgentScope's ExecutionConfig default retry
     private final Model fallbackModel; // nullable → no fallback model
@@ -45,13 +45,13 @@ public final class AgentFactory {
     private final Supplier<PermissionContextState> permissionContextSupplier;
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<Hook> hooks, LongTermMemory longTermMemory) {
-        this(name, sysPrompt, toolkit, hooks, longTermMemory, 0, null, 0, null, null);
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory) {
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, 0, null, 0, null, null);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<Hook> hooks, LongTermMemory longTermMemory, int maxRetries) {
-        this(name, sysPrompt, toolkit, hooks, longTermMemory, maxRetries, null, 0, null, null);
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries) {
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, null, 0, null, null);
     }
 
     /**
@@ -64,13 +64,13 @@ public final class AgentFactory {
      *        current permission mode. {@code null} = no native permission context.
      */
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<Hook> hooks, LongTermMemory longTermMemory, int maxRetries,
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
-        this.hooks = hooks;
+        this.middlewares = middlewares;
         this.longTermMemory = longTermMemory;
         this.maxRetries = maxRetries;
         this.fallbackModel = fallbackModel;
@@ -91,7 +91,7 @@ public final class AgentFactory {
                 .sysPrompt(sysPrompt)
                 .model(model)
                 .toolkit(toolkit)
-                .hooks(hooks)
+                .middlewares(middlewares)
                 .longTermMemory(longTermMemory)
                 .maxIters(maxIters)
                 .maxRetries(maxRetries)

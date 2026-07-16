@@ -1,35 +1,33 @@
 package io.pigagent.plugin;
 
-import io.agentscope.core.hook.Hook;
-import io.agentscope.core.hook.HookEvent;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.pigagent.tool.spi.ToolContext;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link CollectingPluginContext}: it accumulates a plugin's tool/hook contributions
- * in order, is null-safe, and passes the shared {@link ToolContext} through unchanged.
+ * Unit tests for {@link CollectingPluginContext}: it accumulates a plugin's tool/middleware
+ * contributions in order, is null-safe, and passes the shared {@link ToolContext} through unchanged.
  */
 class CollectingPluginContextTest {
 
     @Test
-    void accumulatesToolsAndHooksInOrder() {
+    void accumulatesToolsAndMiddlewaresInOrder() {
         // Arrange
         CollectingPluginContext ctx = new CollectingPluginContext(new ToolContext(null, null));
         Object toolA = new Object();
         Object toolB = new Object();
-        Hook hook = new NoopHook();
+        MiddlewareBase middleware = new NoopMiddleware();
 
         // Act
-        ctx.addTool(toolA).addTools(List.of(toolB)).addHook(hook);
+        ctx.addTool(toolA).addTools(List.of(toolB)).addMiddleware(middleware);
 
         // Assert
         assertThat(ctx.tools()).containsExactly(toolA, toolB);
-        assertThat(ctx.hooks()).containsExactly(hook);
+        assertThat(ctx.middlewares()).containsExactly(middleware);
     }
 
     @Test
@@ -38,11 +36,11 @@ class CollectingPluginContextTest {
         CollectingPluginContext ctx = new CollectingPluginContext(new ToolContext(null, null));
 
         // Act
-        ctx.addTool(null).addTools(null).addHook(null).addHooks(null);
+        ctx.addTool(null).addTools(null).addMiddleware(null).addMiddlewares(null);
 
         // Assert
         assertThat(ctx.tools()).isEmpty();
-        assertThat(ctx.hooks()).isEmpty();
+        assertThat(ctx.middlewares()).isEmpty();
     }
 
     @Test
@@ -55,11 +53,7 @@ class CollectingPluginContextTest {
         assertThat(ctx.toolContext()).isSameAs(toolContext);
     }
 
-    /** A do-nothing hook usable as a contribution fixture. */
-    static final class NoopHook implements Hook {
-        @Override
-        public <T extends HookEvent> Mono<T> onEvent(T event) {
-            return Mono.just(event);
-        }
+    /** A do-nothing middleware usable as a contribution fixture (all MiddlewareBase hooks default). */
+    static final class NoopMiddleware implements MiddlewareBase {
     }
 }

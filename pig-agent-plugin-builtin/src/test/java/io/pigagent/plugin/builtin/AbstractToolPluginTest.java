@@ -41,7 +41,7 @@ class AbstractToolPluginTest {
 
         // Assert — both factory-produced tools were added via the fixed skeleton
         assertThat(ctx.tools()).containsExactly(plugin.a, plugin.b);
-        assertThat(ctx.hooks()).isEmpty();
+        assertThat(ctx.middlewares()).isEmpty();
     }
 
     @Test

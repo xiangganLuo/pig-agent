@@ -1,6 +1,6 @@
 package io.pigagent.plugin;
 
-import io.agentscope.core.hook.Hook;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.tool.spi.ToolContext;
 import io.pigagent.tool.spi.ToolRegistrar;
@@ -25,7 +25,8 @@ import java.util.Set;
  *   <li><b>Register tools</b> via {@link ToolRegistrar#registerTools} — same de-dup/override rules as
  *       auto discovery: built-ins are registered first so they win any name collision (first-wins);
  *       a colliding plugin tool is skipped and recorded, never silently stacked.</li>
- *   <li><b>Collect hooks</b> in order for the caller to append to the agent's hook list.</li>
+ *   <li><b>Collect middlewares</b> in order for the caller to append to the agent's middleware list
+ *       (av2 Phase 5a — 2.0 {@link MiddlewareBase}, replacing the 1.x hook contribution).</li>
  * </ol>
  *
  * <p>This registrar only decides how plugin-contributed extensions enter the runtime; the permission
@@ -52,14 +53,14 @@ public final class PluginRegistry {
         public final Set<String> toolsSkipped = new LinkedHashSet<>();
         /** Tool instances successfully registered (for downstream availability gating). */
         public final List<Object> toolInstances = new ArrayList<>();
-        /** Hooks contributed by loaded plugins, in discovery order. */
-        public final List<Hook> hooks = new ArrayList<>();
+        /** Middlewares contributed by loaded plugins, in discovery order (av2 Phase 5a). */
+        public final List<MiddlewareBase> middlewares = new ArrayList<>();
     }
 
     /**
      * Discover plugins from {@code sources}, run their {@code register}, and register contributed
-     * tools into {@code toolkit}. Contributed hooks are returned on the {@link Result} for the caller
-     * to wire into the agent.
+     * tools into {@code toolkit}. Contributed middlewares are returned on the {@link Result} for the
+     * caller to wire into the agent.
      *
      * @param sources     discovery sources, tried in order; may be {@code null}/empty (→ no plugins)
      * @param toolContext runtime dependencies handed to each plugin (must not be {@code null})
@@ -82,10 +83,10 @@ public final class PluginRegistry {
                 continue; // discard this plugin's partial contributions
             }
             contributedTools.addAll(ctx.tools());
-            result.hooks.addAll(ctx.hooks());
+            result.middlewares.addAll(ctx.middlewares());
             result.loaded.add(id);
-            log.info("Plugin registered: {} (+{} tool(s), +{} hook(s))",
-                    id, ctx.tools().size(), ctx.hooks().size());
+            log.info("Plugin registered: {} (+{} tool(s), +{} middleware(s))",
+                    id, ctx.tools().size(), ctx.middlewares().size());
         }
 
         ToolRegistrar.Result toolReg = ToolRegistrar.registerTools(toolkit, contributedTools);

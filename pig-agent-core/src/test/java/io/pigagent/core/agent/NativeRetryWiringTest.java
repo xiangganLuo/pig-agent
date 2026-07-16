@@ -6,7 +6,7 @@ import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
-import io.agentscope.core.hook.Hook;
+import io.agentscope.core.middleware.MiddlewareBase;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
@@ -70,7 +70,7 @@ class NativeRetryWiringTest {
 
     @Test
     void agentFactory_propagatesMaxRetries() {
-        AgentFactory factory = new AgentFactory("t", "s", null, List.<Hook>of(), null, 5);
+        AgentFactory factory = new AgentFactory("t", "s", null, List.<MiddlewareBase>of(), null, 5);
 
         PigAgent agent = factory.create(dummyModel());
 

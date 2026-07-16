@@ -1,6 +1,6 @@
 package io.pigagent.plugin;
 
-import io.agentscope.core.hook.Hook;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.pigagent.tool.spi.ToolContext;
 
 import java.util.ArrayList;
@@ -10,14 +10,14 @@ import java.util.List;
 /**
  * A {@link PluginContext} that accumulates a single plugin's contributions into in-memory lists.
  * {@link PluginRegistry} creates one per plugin (so a throwing plugin's partial contributions can be
- * discarded independently) and reads {@link #tools()} / {@link #hooks()} back after a successful
+ * discarded independently) and reads {@link #tools()} / {@link #middlewares()} back after a successful
  * {@code register}.
  */
 public final class CollectingPluginContext implements PluginContext {
 
     private final ToolContext toolContext;
     private final List<Object> tools = new ArrayList<>();
-    private final List<Hook> hooks = new ArrayList<>();
+    private final List<MiddlewareBase> middlewares = new ArrayList<>();
 
     public CollectingPluginContext(ToolContext toolContext) {
         this.toolContext = toolContext;
@@ -47,18 +47,18 @@ public final class CollectingPluginContext implements PluginContext {
     }
 
     @Override
-    public PluginContext addHook(Hook hook) {
-        if (hook != null) {
-            hooks.add(hook);
+    public PluginContext addMiddleware(MiddlewareBase middleware) {
+        if (middleware != null) {
+            middlewares.add(middleware);
         }
         return this;
     }
 
     @Override
-    public PluginContext addHooks(Collection<? extends Hook> hooksToAdd) {
-        if (hooksToAdd != null) {
-            for (Hook hook : hooksToAdd) {
-                addHook(hook);
+    public PluginContext addMiddlewares(Collection<? extends MiddlewareBase> middlewaresToAdd) {
+        if (middlewaresToAdd != null) {
+            for (MiddlewareBase middleware : middlewaresToAdd) {
+                addMiddleware(middleware);
             }
         }
         return this;
@@ -69,8 +69,8 @@ public final class CollectingPluginContext implements PluginContext {
         return tools;
     }
 
-    /** The hooks contributed so far (live order preserved). */
-    public List<Hook> hooks() {
-        return hooks;
+    /** The middlewares contributed so far (live order preserved). */
+    public List<MiddlewareBase> middlewares() {
+        return middlewares;
     }
 }

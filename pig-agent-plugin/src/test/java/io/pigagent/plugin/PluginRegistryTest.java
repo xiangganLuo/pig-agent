@@ -1,23 +1,21 @@
 package io.pigagent.plugin;
 
-import io.agentscope.core.hook.Hook;
-import io.agentscope.core.hook.HookEvent;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.tool.spi.ToolContext;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link PluginRegistry}: a plugin contributes tools/hooks via one {@code register}
- * entrypoint; plugin tools compose with the existing {@code ToolRegistrar} de-dup (built-in wins a
- * name collision, first-wins); a throwing plugin is isolated (fail-safe) and its partial
- * contributions discarded; discovery de-duplicates by id and isolates a failing source; and with no
- * plugins the toolkit/hooks are unchanged (backward-compat).
+ * Unit tests for {@link PluginRegistry}: a plugin contributes tools/middlewares via one
+ * {@code register} entrypoint; plugin tools compose with the existing {@code ToolRegistrar} de-dup
+ * (built-in wins a name collision, first-wins); a throwing plugin is isolated (fail-safe) and its
+ * partial contributions discarded; discovery de-duplicates by id and isolates a failing source; and
+ * with no plugins the toolkit/middlewares are unchanged (backward-compat).
  */
 class PluginRegistryTest {
 
@@ -25,14 +23,14 @@ class PluginRegistryTest {
         return new ToolContext(null, null);
     }
 
-    // --- happy path: single entrypoint contributes tools + hooks ---
+    // --- happy path: single entrypoint contributes tools + middlewares ---
 
     @Test
-    void plugin_contributesToolIntoToolkit_andHookIsCollected() {
+    void plugin_contributesToolIntoToolkit_andMiddlewareIsCollected() {
         // Arrange
         Toolkit toolkit = new Toolkit();
-        NoopHook hook = new NoopHook();
-        Plugin plugin = ctx -> ctx.addTool(new EchoTool()).addHook(hook);
+        NoopMiddleware middleware = new NoopMiddleware();
+        Plugin plugin = ctx -> ctx.addTool(new EchoTool()).addMiddleware(middleware);
 
         // Act
         PluginRegistry.Result result = PluginRegistry.loadAndRegister(
@@ -43,7 +41,7 @@ class PluginRegistryTest {
         assertThat(result.loaded).hasSize(1);
         assertThat(result.toolsRegistered).contains("pluginEcho");
         assertThat(toolkit.getToolNames()).contains("pluginEcho");
-        assertThat(result.hooks).containsExactly(hook);
+        assertThat(result.middlewares).containsExactly(middleware);
         assertThat(result.toolInstances).hasSize(1);
     }
 
@@ -127,7 +125,7 @@ class PluginRegistryTest {
     // --- backward-compat: no plugins → no change ---
 
     @Test
-    void noPlugins_leavesToolkitAndHooksUnchanged() {
+    void noPlugins_leavesToolkitAndMiddlewaresUnchanged() {
         // Arrange
         Toolkit toolkit = new Toolkit();
 
@@ -138,7 +136,7 @@ class PluginRegistryTest {
         assertThat(result.discovered).isZero();
         assertThat(result.loaded).isEmpty();
         assertThat(result.toolsRegistered).isEmpty();
-        assertThat(result.hooks).isEmpty();
+        assertThat(result.middlewares).isEmpty();
         assertThat(toolkit.getToolNames()).isEmpty();
     }
 
@@ -198,11 +196,8 @@ class PluginRegistryTest {
         }
     }
 
-    static final class NoopHook implements Hook {
-        @Override
-        public <T extends HookEvent> Mono<T> onEvent(T event) {
-            return Mono.just(event);
-        }
+    /** A do-nothing middleware fixture (all MiddlewareBase hooks default). */
+    static final class NoopMiddleware implements MiddlewareBase {
     }
 
     /** A plugin with a fixed id, contributing one tool. */

@@ -17,7 +17,7 @@ import java.util.Objects;
  * nonsensical policy: {@code windowSize ≥ 1}, {@code warnThreshold ≥ 1},
  * {@code stopThreshold ≥ warnThreshold}. {@link #reset()} clears the window at turn/conversation
  * boundaries so counts never leak across unrelated turns. This class holds no AgentScope types; the
- * hook adapter ({@code LoopDetectionHook}) translates decisions into events.
+ * middleware adapter ({@code LoopDetectionMiddleware}) translates decisions into acting/reasoning phases.
  *
  * <p>Thread-safety: {@code observe} and {@code reset} are {@code synchronized} because a hook may be
  * invoked on reactive scheduler threads.

@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@link ReasoningInput} is handed to {@code next}, while the incoming message list (which is
  * {@code AgentState.getContext()} at runtime) is never mutated — and that
  * {@code onSystemPrompt} is identity, keeping the system prompt byte-stable (prefix-cache friendly).
- * This is the forward-path replacement for the 1.x {@code EphemeralMemoryContextHook}.
+ * This is the AgentScope 2.0 replacement for the deleted 1.x ephemeral-memory hook.
  */
 class EphemeralMemoryMiddlewareTest {
 

@@ -3,10 +3,10 @@ package io.pigagent.core.agent;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
-import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionMode;
@@ -15,7 +15,7 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.core.memory.ConversationMemory;
-import io.pigagent.core.memory.EphemeralMemoryContextHook;
+import io.pigagent.core.memory.EphemeralMemoryMiddleware;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
@@ -43,7 +43,7 @@ import java.util.Objects;
  *       {@code streamEvents(Msg)} returning {@code Flux<AgentEvent>} (the deprecated
  *       {@code Flux<io.agentscope.core.agent.Event>} stream is retired).</li>
  *   <li>Long-term memory is still injected on the user side, ephemerally, via our own hook — NOT
- *       through AgentScope wiring (see {@link EphemeralMemoryContextHook}). The forward path for
+ *       through AgentScope wiring (see {@link EphemeralMemoryMiddleware}). The forward path for
  *       this hook is a {@code MiddlewareBase#onReasoning} (deferred to Phase 4).</li>
  * </ul>
  */
@@ -202,7 +202,7 @@ public final class PigAgent {
         private String sysPrompt = "You are a helpful AI assistant.";
         private Model model;
         private Toolkit toolkit;
-        private List<Hook> hooks;
+        private List<MiddlewareBase> middlewares;
         private LongTermMemory longTermMemory;
         private AgentStateStore stateStore;
         private PermissionContextState permissionContext;
@@ -232,8 +232,15 @@ public final class PigAgent {
             return this;
         }
 
-        public Builder hooks(List<Hook> hooks) {
-            this.hooks = hooks;
+        /**
+         * The native {@link MiddlewareBase}s installed on the underlying {@code ReActAgent}
+         * (av2 Phase 5a — the 2.0 replacement for the removed {@code hooks(List&lt;Hook&gt;)}). Loop
+         * detection + logging come in here; ephemeral long-term-memory injection/record is added
+         * automatically from {@link #longTermMemory(LongTermMemory)} (appended last, so it injects
+         * closest to the model). List order is onion order (first = outermost).
+         */
+        public Builder middlewares(List<MiddlewareBase> middlewares) {
+            this.middlewares = middlewares;
             return this;
         }
 
@@ -315,22 +322,24 @@ public final class PigAgent {
                 reactBuilder.permissionContext(permissionContext);
             }
 
-            // Long-term memory is injected on the user side, ephemerally, via our own hook — NOT
+            // Long-term memory is injected on the user side, ephemerally, via our own middleware — NOT
             // through AgentScope's long-term-memory wiring, whose injection is persisted into the
-            // conversation and accumulates every turn. See EphemeralMemoryContextHook.
-            List<Hook> effectiveHooks = new ArrayList<>();
-            if (hooks != null) {
-                effectiveHooks.addAll(hooks);
+            // conversation and accumulates every turn. See EphemeralMemoryMiddleware. It is appended
+            // LAST so it is the innermost reasoning middleware (memory injected closest to the model,
+            // after e.g. loop-detection has counted the raw user messages).
+            List<MiddlewareBase> effectiveMiddlewares = new ArrayList<>();
+            if (middlewares != null) {
+                effectiveMiddlewares.addAll(middlewares);
             }
             if (longTermMemory != null) {
-                effectiveHooks.add(new EphemeralMemoryContextHook(longTermMemory));
+                effectiveMiddlewares.add(new EphemeralMemoryMiddleware(longTermMemory));
             }
 
             if (toolkit != null) {
                 reactBuilder.toolkit(toolkit);
             }
-            if (!effectiveHooks.isEmpty()) {
-                reactBuilder.hooks(effectiveHooks);
+            if (!effectiveMiddlewares.isEmpty()) {
+                reactBuilder.middlewares(effectiveMiddlewares);
             }
 
             ReActAgent reactAgent = reactBuilder.build();

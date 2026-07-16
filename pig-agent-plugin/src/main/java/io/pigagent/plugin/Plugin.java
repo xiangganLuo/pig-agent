@@ -2,9 +2,10 @@ package io.pigagent.plugin;
 
 /**
  * SPI for an external extension bundle (borrowing Hermes' plugin model). A plugin contributes tools
- * and/or hooks through a single {@link #register(PluginContext)} entrypoint, composing the existing
- * tool ({@code io.pigagent.tool.spi.ToolProvider}) and hook ({@code io.agentscope.core.hook.Hook})
- * plumbing rather than replacing it.
+ * and/or middlewares through a single {@link #register(PluginContext)} entrypoint, composing the
+ * existing tool ({@code io.pigagent.tool.spi.ToolProvider}) and middleware
+ * ({@code io.agentscope.core.middleware.MiddlewareBase}) plumbing rather than replacing it (av2
+ * Phase 5a — the 1.x {@code io.agentscope.core.hook.Hook} contribution is gone).
  *
  * <p>Implementations are discovered by a {@link PluginSource} — declared in
  * {@code META-INF/services/io.pigagent.plugin.Plugin} on the classpath, or packaged in a jar under
@@ -23,8 +24,8 @@ public interface Plugin {
     }
 
     /**
-     * Contribute tools/hooks via the context. Called once at startup. Any exception thrown here is
-     * caught by {@link PluginRegistry}, logged, and the plugin's partial contributions are discarded.
+     * Contribute tools/middlewares via the context. Called once at startup. Any exception thrown here
+     * is caught by {@link PluginRegistry}, logged, and the plugin's partial contributions are discarded.
      */
     void register(PluginContext ctx);
 }

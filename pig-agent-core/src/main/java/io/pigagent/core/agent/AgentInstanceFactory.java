@@ -1,7 +1,7 @@
 package io.pigagent.core.agent;
 
-import io.agentscope.core.hook.Hook;
 import io.agentscope.core.memory.LongTermMemory;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
@@ -20,8 +20,8 @@ import java.util.Objects;
  *       fallback to the default model (implemented over {@code ModelStore}/{@code ProtocolRegistry}).</li>
  *   <li>{@link ToolkitProvider} — builds a fresh {@link Toolkit} registering only the tools named
  *       in {@code spec.toolNames} (empty = all).</li>
- *   <li>{@link HooksProvider} — builds this agent's hooks, incl. a permission hook honoring
- *       {@code spec.permissionMode}.</li>
+ *   <li>{@link MiddlewareProvider} — builds this agent's middlewares (loop detection, logging, …);
+ *       permission is native (the {@link PermissionContextProvider}), not a middleware.</li>
  * </ul>
  * Short-term memory is per-agent automatically ({@link PigAgent} builds its own); long-term
  * memory is shared and passed through.
@@ -39,8 +39,8 @@ public final class AgentInstanceFactory {
     }
 
     @FunctionalInterface
-    public interface HooksProvider {
-        List<Hook> hooksFor(AgentSpec spec);
+    public interface MiddlewareProvider {
+        List<MiddlewareBase> middlewaresFor(AgentSpec spec);
     }
 
     /**
@@ -56,28 +56,28 @@ public final class AgentInstanceFactory {
 
     private final ModelResolver models;
     private final ToolkitProvider toolkits;
-    private final HooksProvider hooks;
+    private final MiddlewareProvider middlewares;
     private final LongTermMemory longTermMemory;
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
     private final PermissionContextProvider permissionContexts; // nullable → no native context
     private final int maxRetries; // <= 0 = keep AgentScope's default (av2 Phase 5a native retry)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                HooksProvider hooks, LongTermMemory longTermMemory) {
-        this(models, toolkits, hooks, longTermMemory, null, null, 0);
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory) {
+        this(models, toolkits, middlewares, longTermMemory, null, null, 0);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore) {
-        this(models, toolkits, hooks, longTermMemory, stateStore, null, 0);
+        this(models, toolkits, middlewares, longTermMemory, stateStore, null, 0);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts) {
-        this(models, toolkits, hooks, longTermMemory, stateStore, permissionContexts, 0);
+        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, 0);
     }
 
     /**
@@ -91,13 +91,13 @@ public final class AgentInstanceFactory {
      *        keeps AgentScope's default, {@code 1} effectively disables retry.
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                HooksProvider hooks, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
-        this.hooks = Objects.requireNonNull(hooks, "hooks");
+        this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
         this.longTermMemory = longTermMemory; // may be null (no long-term memory)
         this.stateStore = stateStore;
         this.permissionContexts = permissionContexts;
@@ -112,7 +112,7 @@ public final class AgentInstanceFactory {
                 .sysPrompt(spec.sysPrompt())
                 .model(models.resolve(spec))
                 .toolkit(toolkit)
-                .hooks(hooks.hooksFor(spec))
+                .middlewares(middlewares.middlewaresFor(spec))
                 .longTermMemory(longTermMemory)
                 .maxIters(spec.maxIters())
                 .maxRetries(maxRetries)

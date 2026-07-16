@@ -1,6 +1,6 @@
 package io.pigagent.cli;
 
-import io.agentscope.core.hook.Hook;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
@@ -23,9 +23,9 @@ import io.pigagent.core.compression.BudgetRatios;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.compression.EngineeringOptions;
 import io.pigagent.core.interrupt.InterruptController;
-import io.pigagent.core.hook.LoggingHook;
-import io.pigagent.core.hook.ToolCallLoggingHook;
-import io.pigagent.core.loop.LoopDetectionHook;
+import io.pigagent.core.middleware.LoggingMiddleware;
+import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
+import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.CompositeLongTermMemory;
 import io.pigagent.core.memory.FileSystemLongTermMemory;
@@ -399,20 +399,21 @@ public final class AgentBootstrap {
         // longer decorated. Autonomous/channel tracks don't share it (their turns aren't kernel-driven).
         InterruptController interruptController = new InterruptController();
 
-        // Interactive agent hooks: the fixed pig hooks + any hooks contributed by plugins
-        // (change plugin-system). av2 Phase 4: permission is NO LONGER a hook — it is the native
-        // PermissionContextState on the builder (interactivePermCtx above). Loop-detection +
-        // ephemeral-memory stay on the legacy hook bridge (Phase-5 migrates them to middleware).
-        List<Hook> interactiveHooks = new ArrayList<>();
-        // Loop detection (loop-detection): its own detector instance (per-agent), reset per turn by
-        // the hook; STOP rewrites the call to the loop sentinel, WARN reuses the ephemeral injection.
-        interactiveHooks.add(newLoopDetectionHook(configManager));
-        interactiveHooks.add(new LoggingHook());
-        interactiveHooks.add(new ToolCallLoggingHook());
-        interactiveHooks.addAll(pluginResult.hooks);
+        // Interactive agent middlewares (av2 Phase 5a: native MiddlewareBase, no more legacy hooks):
+        // the fixed pig middlewares + any middlewares contributed by plugins (change plugin-system).
+        // Permission is NOT a middleware — it is the native PermissionContextState on the builder
+        // (interactivePermCtx above). Loop-detection MUST come before the ephemeral-memory middleware
+        // (appended last inside PigAgent.build) so it counts raw user messages before memory injection.
+        List<MiddlewareBase> interactiveMiddlewares = new ArrayList<>();
+        // Loop detection (loop-detection): its own detector instance (per-agent), reset per turn by the
+        // middleware; STOP rewrites the acting call to the loop sentinel, WARN reuses ephemeral injection.
+        interactiveMiddlewares.add(newLoopDetectionMiddleware(configManager));
+        interactiveMiddlewares.add(new LoggingMiddleware());
+        interactiveMiddlewares.add(new ToolCallLoggingMiddleware());
+        interactiveMiddlewares.addAll(pluginResult.middlewares);
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                interactiveHooks, memory,
+                interactiveMiddlewares, memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
@@ -429,8 +430,9 @@ public final class AgentBootstrap {
                 // (maxRetries below; ReActAgent.interrupt driven by the kernel). No Model decorators.
                 spec -> modelManager.modelFor(spec.modelId()),
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
-                // av2 Phase 4: permission is native (context provider below), no longer a per-agent hook.
-                spec -> List.of(new LoggingHook(), new ToolCallLoggingHook()),
+                // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
+                // are logging-only (loop detection is instance-stateful → interactive/channel tracks).
+                spec -> List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware()),
                 memory,
                 stateStore,
                 // Per-agent native permission context: the agent's permissionMode override (else the
@@ -471,7 +473,7 @@ public final class AgentBootstrap {
                     .name(spec.name()).sysPrompt(spec.sysPrompt())
                     .model(runModel)
                     .toolkit(runToolkit)
-                    .hooks(List.of(new LoggingHook(), new ToolCallLoggingHook()))
+                    .middlewares(List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware()))
                     .maxIters(spec.maxIters())
                     .maxRetries(maxRetries)
                     .permissionContext(autoCtx)
@@ -504,8 +506,8 @@ public final class AgentBootstrap {
         // one state store — channel conversations live in their own (pig, "channel:<id>") slots.
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(newLoopDetectionHook(configManager),
-                        new LoggingHook(), new ToolCallLoggingHook()), memory,
+                List.of(newLoopDetectionMiddleware(configManager),
+                        new LoggingMiddleware(), new ToolCallLoggingMiddleware()), memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx);
         AgentHolder channelAgentHolder = new AgentHolder(
@@ -579,22 +581,23 @@ public final class AgentBootstrap {
     }
 
     /**
-     * Build a fresh {@link LoopDetectionHook} (with its own {@link LoopDetector} instance, so each
-     * agent's window is independent). Thresholds are read from config once here; {@code enabled} is
-     * read live via a supplier so {@code loop-detection.enabled=false} bypasses without a restart.
+     * Build a fresh {@link LoopDetectionMiddleware} (with its own {@link LoopDetector} instance, so
+     * each agent's window is independent). Thresholds are read from config once here; {@code enabled}
+     * is read live via a supplier so {@code loop-detection.enabled=false} bypasses without a restart.
      * The ignore set holds the loop-detection sentinel so looped calls are never re-counted.
      *
-     * <p>av2 Phase 4: the {@code PermissionDeniedTool.TOOL_NAME} sentinel is gone (native permission
-     * denies before execution, no sentinel tool call), so only the loop sentinel remains in the set.
+     * <p>av2 Phase 5a: ported from the legacy hook to a native {@code onActing}/{@code onReasoning}
+     * middleware. The permission-denied sentinel is gone (native permission denies before execution),
+     * so only the loop sentinel remains in the ignore set.
      */
-    static LoopDetectionHook newLoopDetectionHook(ConfigurationManager configManager) {
+    static LoopDetectionMiddleware newLoopDetectionMiddleware(ConfigurationManager configManager) {
         PigAgentConfig.LoopDetectionConfig lc = configManager.getConfig().getLoopDetection();
         LoopDetector detector = new LoopDetector(
                 lc.getWindowSize(), lc.getWarnThreshold(), lc.getStopThreshold());
-        return new LoopDetectionHook(
+        return new LoopDetectionMiddleware(
                 detector,
                 () -> configManager.getConfig().getLoopDetection().isEnabled(),
-                Set.of(LoopDetectionHook.SENTINEL_TOOL_NAME));
+                Set.of(LoopDetectionMiddleware.SENTINEL_TOOL_NAME));
     }
 
     /**
