@@ -46,6 +46,8 @@ public final class ToolRiskClassifier {
             // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）
             Map.entry("webSearch", ToolRisk.NETWORK),
             Map.entry("fetchUrl", ToolRisk.NETWORK),
+            // 主动外呼：经渠道给用户发通知（proactive-outreach）
+            Map.entry("notifyUser", ToolRisk.NETWORK),
             // MCP 自助管理
             Map.entry("addMcpServer", ToolRisk.MCP_ADMIN),
             Map.entry("removeMcpServer", ToolRisk.MCP_ADMIN));

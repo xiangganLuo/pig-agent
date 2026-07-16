@@ -10,6 +10,12 @@ import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
+import io.pigagent.channel.ChannelRegistry;
+import io.pigagent.channel.outreach.ChannelNotificationService;
+import io.pigagent.channel.outreach.NotificationReportWriter;
+import io.pigagent.channel.outreach.OutboundChannel;
+import io.pigagent.channel.outreach.OutreachScheduler;
+import io.pigagent.channel.outreach.ScheduledOutreach;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentFactory;
@@ -23,7 +29,13 @@ import io.pigagent.core.agent.AgentSpecSubagentMapper;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
+import io.pigagent.core.agent.runner.CompositeReportWriter;
 import io.pigagent.core.agent.runner.FileReportWriter;
+import io.pigagent.core.outreach.Notification;
+import io.pigagent.core.outreach.NotificationType;
+import io.pigagent.core.outreach.OutreachGate;
+import io.pigagent.core.outreach.OutreachPolicy;
+import io.pigagent.core.outreach.Severity;
 import io.pigagent.core.compression.BudgetRatios;
 import io.pigagent.core.compression.CompressionService;
 import io.pigagent.core.compression.EngineeringOptions;
@@ -162,6 +174,10 @@ public final class AgentBootstrap {
         public final CompressionService compressionService;
         public final ToolAvailabilityReport availabilityReport;
         public final AtomicReference<LineReader> readerRef;
+        /** Proactive-outreach notification router (shared by the tool, /notify, triggers). */
+        public final ChannelNotificationService notificationService;
+        /** Mutable registry of started channels, populated by the CLI so outreach can find outbound channels. */
+        public final ChannelRegistry outreachRegistry;
         private final TaskScheduler taskScheduler;
         /** Debounce scheduler for memory extraction; null when extraction is disabled. */
         private final AutoCloseable memoryExtractionScheduler;
@@ -172,6 +188,7 @@ public final class AgentBootstrap {
                          AgentKernel agentKernel, SessionManager sessionManager,
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
+                         ChannelNotificationService notificationService, ChannelRegistry outreachRegistry,
                          TaskScheduler taskScheduler,
                          AutoCloseable memoryExtractionScheduler) {
             this.workspace = workspace;
@@ -188,6 +205,8 @@ public final class AgentBootstrap {
             this.compressionService = compressionService;
             this.availabilityReport = availabilityReport;
             this.readerRef = readerRef;
+            this.notificationService = notificationService;
+            this.outreachRegistry = outreachRegistry;
             this.taskScheduler = taskScheduler;
             this.memoryExtractionScheduler = memoryExtractionScheduler;
         }
@@ -254,6 +273,23 @@ public final class AgentBootstrap {
         TaskScheduler taskScheduler = new TaskScheduler(taskManager);
         taskScheduler.scheduleAll();
 
+        // Proactive outreach (proactive-outreach): the anti-nag gate + notification router. The channel
+        // lookup reads a mutable registry the CLI populates AFTER starting channels (D9 — AgentBootstrap
+        // runs before channels start), so a target is resolved lazily at notify time. The policy is read
+        // live from config, so runtime edits + the default disabled state (gate → DISABLED, no-op) apply.
+        PigAgentConfig.OutreachConfig outreachCfg = config.getOutreach();
+        ChannelRegistry outreachRegistry = new ChannelRegistry();
+        OutreachGate outreachGate = new OutreachGate(
+                () -> buildOutreachPolicy(configManager.getConfig().getOutreach()),
+                java.time.Clock.systemDefaultZone());
+        ChannelNotificationService notificationService = new ChannelNotificationService(
+                id -> outreachRegistry.findById(id)
+                        .filter(c -> c instanceof OutboundChannel)
+                        .map(c -> (OutboundChannel) c),
+                outreachGate,
+                () -> configManager.getConfig().getOutreach().getChannel(),
+                () -> configManager.getConfig().getOutreach().getRecipient());
+
         Toolkit toolkit = new Toolkit();
         // Builtin tools are auto-discovered via SPI (ServiceLoader, change tool-autoregister) — a new
         // tool is picked up by "dropping a file", no edit here. Set -Dpigagent.tools.auto-register=false
@@ -266,7 +302,8 @@ public final class AgentBootstrap {
                 execCfg.getMaxOutputBytes(), execCfg.getTimeoutSeconds(),
                 execCfg.getDenylist(), execCfg.getWarnlist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
-                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy);
+                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy,
+                notificationService, () -> configManager.getConfig().getOutreach().isEnabled());
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
@@ -531,9 +568,18 @@ public final class AgentBootstrap {
                     .toolResultEviction(evictionConfig)
                     .build();
         };
+        // Morning report always writes to disk; when outreach + report-push are enabled it ALSO pushes
+        // to the default channel via the notification service (Composite — a push failure never stops
+        // the file write, and vice versa).
+        AgentRunner.ReportWriter reportWriter = new FileReportWriter(workspace.getReportsDir());
+        if (outreachCfg.isEnabled() && outreachCfg.getReportPush().isEnabled()) {
+            reportWriter = new CompositeReportWriter(reportWriter,
+                    new NotificationReportWriter(notificationService));
+            log.info("Outreach report-push enabled");
+        }
         AgentRunner agentRunner = new AgentRunner(
                 autonomousBuilder,
-                new FileReportWriter(workspace.getReportsDir()),
+                reportWriter,
                 (spec, epoch) -> agentRepository.save(spec.withLastRunAtEpochMs(epoch)),
                 null);
         AgentKernel agentKernel = new AgentKernel(
@@ -544,6 +590,17 @@ public final class AgentBootstrap {
                         () -> agentRunner.run(s));
                 log.info("Digital employee scheduled: {} [{}]", s.name(), s.schedule());
             }
+        }
+
+        // Scheduled outreach (proactive-outreach): a cron-driven daily briefing pushed to the default
+        // channel. Armed via the OutreachScheduler seam adapted to the existing TaskScheduler; the fire
+        // resolves the channel lazily (channels are registered by the CLI after build). Default off.
+        if (outreachCfg.isEnabled() && outreachCfg.getBriefing().isEnabled()) {
+            OutreachScheduler scheduler = (id, cron, action) ->
+                    taskScheduler.schedule(id, TaskSchedule.cron(cron), action);
+            new ScheduledOutreach("outreach:briefing", outreachCfg.getBriefing().getCron(),
+                    notificationService, () -> briefingNotification(configManager.getConfig().getOutreach()))
+                    .arm(scheduler);
         }
 
         // A separate channel agent (channel-mode native permission, no confirmer → ASK fail-closed).
@@ -629,7 +686,40 @@ public final class AgentBootstrap {
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
-                availabilityReport, readerRef, taskScheduler, extractionScheduler);
+                availabilityReport, readerRef, notificationService, outreachRegistry,
+                taskScheduler, extractionScheduler);
+    }
+
+    /**
+     * Map the {@code outreach} config block to an immutable {@link OutreachPolicy}. Parse failures on
+     * the quiet-hours times degrade to "no quiet hours" rather than failing the build.
+     */
+    static OutreachPolicy buildOutreachPolicy(PigAgentConfig.OutreachConfig cfg) {
+        if (cfg == null) {
+            return OutreachPolicy.disabled();
+        }
+        PigAgentConfig.QuietHoursConfig q = cfg.getQuietHours();
+        OutreachPolicy.QuietHours quiet;
+        try {
+            quiet = new OutreachPolicy.QuietHours(q.isEnabled(),
+                    java.time.LocalTime.parse(q.getStart()), java.time.LocalTime.parse(q.getEnd()));
+        } catch (Exception e) {
+            log.warn("Invalid outreach quiet-hours times; disabling quiet hours");
+            quiet = OutreachPolicy.QuietHours.disabled();
+        }
+        PigAgentConfig.RateLimitConfig r = cfg.getRateLimit();
+        return new OutreachPolicy(
+                cfg.isEnabled(), quiet, r.getMaxPerWindow(),
+                java.time.Duration.ofMinutes(Math.max(1, r.getWindowMinutes())),
+                java.time.Duration.ofMinutes(Math.max(0, cfg.getDedupWindowMinutes())));
+    }
+
+    /** Build the scheduled daily-briefing notification from config (fresh each fire). */
+    static Notification briefingNotification(PigAgentConfig.OutreachConfig cfg) {
+        PigAgentConfig.BriefingConfig b = cfg.getBriefing();
+        // Distinct per calendar day so a same-day re-fire is de-duped by the guardrail.
+        return Notification.of(NotificationType.BRIEFING, Severity.NORMAL, b.getTitle(), b.getBody())
+                .withDedupKey("briefing:" + java.time.LocalDate.now());
     }
 
     /**

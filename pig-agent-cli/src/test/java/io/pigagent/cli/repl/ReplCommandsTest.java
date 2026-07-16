@@ -77,7 +77,8 @@ class ReplCommandsTest {
                 terminal,
                 running,
                 new AtomicReference<LineReader>(),
-                null); // availabilityReport
+                null, // availabilityReport
+                null); // notificationService
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
         return new Harness(cmd, out, running);
     }
@@ -182,7 +183,7 @@ class ReplCommandsTest {
 
         ReplContext ctx = new ReplContext(
                 agentHolder, null, null, configManager, null, modelManager, null, mcpManager,
-                List.of(), sessionManager, terminal, running, new AtomicReference<LineReader>(), report);
+                List.of(), sessionManager, terminal, running, new AtomicReference<LineReader>(), report, null);
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
 
         int code = cmd.execute("/status");

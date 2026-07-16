@@ -45,6 +45,12 @@ public final class PigAgentCli {
 
         List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());
 
+        // Register started channels into the outreach registry so proactive outreach can find outbound
+        // channels (D9 — resolved lazily at notify time; channels start after AgentBootstrap.build).
+        for (ChannelAgentBridge bridge : bridges) {
+            s.outreachRegistry.register(bridge.getChannel());
+        }
+
         // Optional embedded Web console — another AgentKernel adapter in the same process, sharing
         // the one kernel with the REPL. Default disabled (web.enabled=false); loopback-only.
         PigAgentConfig.WebConfig webCfg = s.config.getWeb();
@@ -66,7 +72,7 @@ public final class PigAgentCli {
         new AgentRepl(s.agentHolder, s.agentKernel, s.workspace.getReportsDir(),
                 s.configManager, s.registry, s.modelManager, s.compressionService,
                 s.mcpManager, bridges, s.sessionManager, s.workspace.getRootPath(), s.readerRef,
-                s.availabilityReport).run();
+                s.availabilityReport, s.notificationService).run();
     }
 
     /** Run a shutdown step, swallowing+logging any error so one failure never aborts the rest. */

@@ -6,3 +6,4 @@ io.pigagent.tool.spi.providers.FileSystemToolsProvider
 io.pigagent.tool.spi.providers.LoopDetectedToolProvider
 io.pigagent.tool.spi.providers.TaskToolProvider
 io.pigagent.tool.spi.providers.SkillsToolProvider
+io.pigagent.tool.spi.providers.NotifyUserToolProvider

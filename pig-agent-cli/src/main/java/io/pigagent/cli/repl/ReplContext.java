@@ -5,6 +5,7 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.core.outreach.NotificationService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
@@ -41,7 +42,8 @@ public record ReplContext(
         Terminal terminal,
         AtomicBoolean running,
         AtomicReference<LineReader> readerRef,
-        ToolAvailabilityReport availabilityReport) {
+        ToolAvailabilityReport availabilityReport,
+        NotificationService notificationService) {
 
     /** Convenience accessor for the current agent. */
     public io.pigagent.core.agent.PigAgent agent() {

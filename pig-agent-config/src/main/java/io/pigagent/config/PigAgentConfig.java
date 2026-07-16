@@ -25,6 +25,7 @@ public final class PigAgentConfig {
     @JsonProperty("subagents") private SubagentsConfig subagents = new SubagentsConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
+    @JsonProperty("outreach") private OutreachConfig outreach = new OutreachConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -44,6 +45,8 @@ public final class PigAgentConfig {
     public WebConfig getWeb() { return web; }
     public MemoryConfig getMemory() { return memory; }
     public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
+    public OutreachConfig getOutreach() { return outreach; }
+    public void setOutreach(OutreachConfig o) { this.outreach = o == null ? new OutreachConfig() : o; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -207,6 +210,87 @@ public final class PigAgentConfig {
         public void setConfidenceThreshold(double t) { this.confidenceThreshold = t; }
         public long getDebounceMs() { return debounceMs; }
         public void setDebounceMs(long ms) { this.debounceMs = ms; }
+    }
+
+    /**
+     * 主动外呼 + 通知（proactive-outreach）。默认 {@code enabled=false} → 不外呼、{@code notifyUser}
+     * 工具隐藏、无定时简报、无晨报推送——零行为变化。启用后：{@code channel}/{@code recipient} 为默认目标；
+     * {@code quiet-hours}/{@code rate-limit}/{@code dedup-window-minutes} 为防打扰护栏（紧急绕行免打扰/限流，
+     * 去重始终生效）；{@code briefing} 为定时简报（cron）；{@code report-push} 为数字员工晨报推渠道。
+     * 全部可选、默认安全、向后兼容；接收人凭据不入日志/回显。
+     */
+    public static final class OutreachConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("channel") private String channel = "";
+        @JsonProperty("recipient") private String recipient = "";
+        @JsonProperty("quiet-hours") private QuietHoursConfig quietHours = new QuietHoursConfig();
+        @JsonProperty("rate-limit") private RateLimitConfig rateLimit = new RateLimitConfig();
+        @JsonProperty("dedup-window-minutes") private int dedupWindowMinutes = 30;
+        @JsonProperty("briefing") private BriefingConfig briefing = new BriefingConfig();
+        @JsonProperty("report-push") private ReportPushConfig reportPush = new ReportPushConfig();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getChannel() { return channel; }
+        public void setChannel(String c) { this.channel = c; }
+        public String getRecipient() { return recipient; }
+        public void setRecipient(String r) { this.recipient = r; }
+        public QuietHoursConfig getQuietHours() { return quietHours; }
+        public void setQuietHours(QuietHoursConfig q) { this.quietHours = q == null ? new QuietHoursConfig() : q; }
+        public RateLimitConfig getRateLimit() { return rateLimit; }
+        public void setRateLimit(RateLimitConfig r) { this.rateLimit = r == null ? new RateLimitConfig() : r; }
+        public int getDedupWindowMinutes() { return dedupWindowMinutes; }
+        public void setDedupWindowMinutes(int m) { this.dedupWindowMinutes = m; }
+        public BriefingConfig getBriefing() { return briefing; }
+        public void setBriefing(BriefingConfig b) { this.briefing = b == null ? new BriefingConfig() : b; }
+        public ReportPushConfig getReportPush() { return reportPush; }
+        public void setReportPush(ReportPushConfig r) { this.reportPush = r == null ? new ReportPushConfig() : r; }
+    }
+
+    /** 免打扰时段（{@code HH:mm} 24 小时制，可跨午夜）。缺省关闭。 */
+    public static final class QuietHoursConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("start") private String start = "22:00";
+        @JsonProperty("end") private String end = "08:00";
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getStart() { return start; }
+        public void setStart(String s) { this.start = s; }
+        public String getEnd() { return end; }
+        public void setEnd(String e) { this.end = e; }
+    }
+
+    /** 外呼限流：{@code window-minutes} 窗口内最多 {@code max-per-window} 条（≤0 不限）。 */
+    public static final class RateLimitConfig {
+        @JsonProperty("max-per-window") private int maxPerWindow = 5;
+        @JsonProperty("window-minutes") private int windowMinutes = 60;
+        public int getMaxPerWindow() { return maxPerWindow; }
+        public void setMaxPerWindow(int m) { this.maxPerWindow = m; }
+        public int getWindowMinutes() { return windowMinutes; }
+        public void setWindowMinutes(int m) { this.windowMinutes = m; }
+    }
+
+    /** 定时简报：到 {@code cron} 时推一条 {@code title}/{@code body} 通知。缺省关闭。 */
+    public static final class BriefingConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("cron") private String cron = "0 9 * * *";
+        @JsonProperty("title") private String title = "每日简报";
+        @JsonProperty("body") private String body = "早上好，这是你的每日简报。";
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getCron() { return cron; }
+        public void setCron(String c) { this.cron = c; }
+        public String getTitle() { return title; }
+        public void setTitle(String t) { this.title = t; }
+        public String getBody() { return body; }
+        public void setBody(String b) { this.body = b; }
+    }
+
+    /** 晨报推送：数字员工晨报除写文件外，是否也推到默认渠道。缺省关闭。 */
+    public static final class ReportPushConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
     }
 
     /**

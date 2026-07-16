@@ -62,7 +62,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, kernel, null, null, null, null, compression, null, null,
-                sessions, null, new AtomicReference<>(), null);
+                sessions, null, new AtomicReference<>(), null, null);
 
         repl.runTurn("hi", terminal);
 
@@ -79,7 +79,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>(), null);
+                null, new AtomicReference<>(), null, null);
 
         AgentEvent delta = new ToolResultTextDeltaEvent("r1", "tc1", "executeCommand", "exit=0");
         AgentEvent end = new ToolResultEndEvent("r1", "tc1", "executeCommand", ToolResultState.SUCCESS);
@@ -95,7 +95,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>(), null);
+                null, new AtomicReference<>(), null, null);
 
         AgentEvent denied = new ToolResultEndEvent("r1", "tc1", "writeFile", ToolResultState.DENIED);
 
@@ -109,7 +109,7 @@ class AgentReplTurnTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Terminal terminal = dumbTerminal(out);
         AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
-                null, new AtomicReference<>(), null);
+                null, new AtomicReference<>(), null, null);
 
         // Parent answer (source == null) vs a forwarded subagent event (source = "main/reviewer").
         AgentEvent parent = new TextBlockDeltaEvent("r1", "b1", "parent says hi\n");

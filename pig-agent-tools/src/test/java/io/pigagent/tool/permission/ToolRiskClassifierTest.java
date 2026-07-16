@@ -21,6 +21,8 @@ class ToolRiskClassifierTest {
         assertThat(ToolRiskClassifier.classify("createChecklist", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("completeItem", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("showChecklist", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+        // proactive-outreach: notifyUser reaches the user over an outbound channel → NETWORK.
+        assertThat(ToolRiskClassifier.classify("notifyUser", Map.of())).isEqualTo(ToolRisk.NETWORK);
         assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
     }
 
