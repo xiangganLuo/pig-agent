@@ -16,6 +16,7 @@ public final class PigAgentConfig {
     @JsonProperty("model") private ModelConfig model = new ModelConfig();
     @JsonProperty("agent") private AgentConfig agent = new AgentConfig();
     @JsonProperty("channels") private Map<String, ChannelConfig> channels = Map.of();
+    @JsonProperty("channel-gateway") private ChannelGatewayConfig channelGateway = new ChannelGatewayConfig();
     @JsonProperty("mcp") private McpConfig mcp = new McpConfig();
     @JsonProperty("compression") private CompressionConfig compression = new CompressionConfig();
     @JsonProperty("loop-detection") private LoopDetectionConfig loopDetection = new LoopDetectionConfig();
@@ -34,6 +35,7 @@ public final class PigAgentConfig {
     public ModelConfig getModel() { return model; }
     public AgentConfig getAgent() { return agent; }
     public Map<String, ChannelConfig> getChannels() { return channels; }
+    public ChannelGatewayConfig getChannelGateway() { return channelGateway; }
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }
     public LoopDetectionConfig getLoopDetection() { return loopDetection; }
@@ -119,6 +121,13 @@ public final class PigAgentConfig {
         @JsonProperty("webhook-url") private String webhookUrl;
         @JsonProperty("sign-secret") private String signSecret;
         @JsonProperty("verification-token") private String verificationToken;
+        // av2 Gateway enhancement: opt this channel into the native AgentScope 2.0 channel adapter
+        // (DingTalk/Feishu/GitHub/GitLab/WeCom) instead of pig's custom adapter. Requires
+        // `channel-gateway.enabled` AND the matching `agentscope-extensions-channel-*` artifact on the
+        // classpath; when the artifact is absent it degrades gracefully to pig's custom channel. The
+        // adapter's platform credentials/settings live under `props` (e.g. appKey/appSecret/robotCode).
+        @JsonProperty("native") private boolean nativeAdapter = false;
+        @JsonProperty("props") private Map<String, String> props = Map.of();
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
         public String getToken() { return token; }
@@ -135,6 +144,27 @@ public final class PigAgentConfig {
         public void setSignSecret(String s) { this.signSecret = s; }
         public String getVerificationToken() { return verificationToken; }
         public void setVerificationToken(String t) { this.verificationToken = t; }
+        public boolean isNative() { return nativeAdapter; }
+        public void setNative(boolean n) { this.nativeAdapter = n; }
+        public Map<String, String> getProps() { return props == null ? Map.of() : props; }
+        public void setProps(Map<String, String> p) { this.props = p; }
+    }
+
+    /**
+     * av2 Gateway enhancement — gate for adopting the native AgentScope 2.0 {@code Gateway}/
+     * {@code ChatUiChannel} channel kernel (session management + single-session concurrency + agent
+     * routing) behind pig's channel layer, plus the native platform adapters. <b>Default off</b> — when
+     * disabled the channel layer behaves exactly as before (pig's custom channels route turns directly
+     * through the channel agent), so this is fully backward compatible. When enabled, channels route
+     * through the native gateway and channels flagged {@code native:true} use the native adapter.
+     */
+    public static final class ChannelGatewayConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("main-agent-id") private String mainAgentId = "default";
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getMainAgentId() { return mainAgentId; }
+        public void setMainAgentId(String id) { this.mainAgentId = id; }
     }
 
     /**

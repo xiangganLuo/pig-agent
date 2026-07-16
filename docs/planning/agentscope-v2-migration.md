@@ -1134,3 +1134,159 @@ The `send` seam stays on **pig's custom channels** — `StrategyHttpChannel.send
 
 ### Acceptance (single-threaded surefire, 2.0)
 `mvn test` — whole reactor GREEN, all 17 modules (BUILD SUCCESS). Total **1093 tests, 0 failures, 0 errors, 5 skipped** (1034 Phase-6b baseline **+59** ported outreach unit tests: core `Notification`/`NotificationResult`/`OutreachGate`/`OutreachPolicy` (22), `channel.outreach` routing/renderer/report-push/scheduled/outbound (19), `CompositeReportWriter` (2), `NotifyUserTool`(+provider) (9), `OutreachConfig` (4), `NotifyCommand` (3)). The ported feat commit's "~61" nets to **+59** because its `ToolRiskClassifierTest` change was an added *assertion*, not a new test method — no test lost to dedup. `mvn -q -pl pig-agent-cli -am compile` green. Credentials/recipients never logged (guardrails + `/notify status` masks the recipient as `(set)`).
+
+## 17. Native Gateway enhancement (branch `av2/20260716-gateway`)
+
+**Base:** `av2/20260716-foundation-main` (whole reactor GREEN on 2.0 after the outreach port, §16). **Not
+merged.** Scope: the deferred **Phase-6c** — adopt the native AgentScope 2.0 **`Gateway`/`ChatUiChannel`
+channel kernel** + the native platform adapters + `expose_to_user`, building pig's channel layer **on**
+the native kernel ("在其上盖房子") while **keeping every working path** (CC-REPL, permission/state/events,
+digital-employee, `/agent`, proactive-outreach, and pig's custom Telegram/Discord/Slack/Webhook/Stdin +
+`StrategyHttpChannel` DingTalk/Feishu channels). **Config-gated, default OFF** → byte-for-byte the prior
+channel behavior unless `channel-gateway.enabled=true`.
+
+### Where the native kernel lives (javap-confirmed) — and what is resolvable offline
+
+The native gateway core is in **`agentscope-harness` (2.0.0), which is already a `pig-agent-core`
+dependency** — so it is fully offline-usable + offline-testable:
+`io.agentscope.harness.agent.gateway.{Gateway, GatewayBootstrap, HarnessGateway, SubagentGatewayBridge}`
+· `…gateway.channel.{Channel, ChannelConfig, InboundMessage, RouteResult, OutboundAddress, Peer}` ·
+`…gateway.channel.chatui.{ChatUiChannel, SendOptions}`. The subagent-expose event
+`io.agentscope.core.event.SubagentExposedEvent` is in `agentscope-core`. **The native platform ADAPTERS
+are NOT resolvable offline** — the local repo (`D:/env/apache-maven-3.9.10/repository/io/agentscope/`)
+has `agentscope-core`/`agentscope-harness`/`agentscope-extensions-model-*` only; **no
+`agentscope-extensions-channel-*`**. So the DingTalk/Feishu/GitHub/GitLab/WeCom adapter classes cannot be
+compiled against or unit-tested by construction — they are loaded **reflectively** and degrade gracefully
+when absent (see the adapter matrix).
+
+**Verified javap signatures used:**
+- `HarnessAgent.channel(T extends Channel):T` (lazily creates the agent's internal gateway, registers the
+  agent, injects the gateway into the channel — the documented `expose_to_user` enabler), `gateway():HarnessGateway`.
+- `Gateway`: `bindMainAgent(HarnessAgent)`, `registerAgent(String, HarnessAgent)` (default),
+  `run(MsgContext, List<Msg>[, OutboundAddress]):Mono<Msg>`, `runStream(...):Flux<AgentEvent>`,
+  `runSubagent(String, List<Msg>)` / `runSubagentStream(...)`.
+- `GatewayBootstrap.builder().agent(id, HarnessAgent) | agent(id, Consumer<HarnessAgent$Builder>) |
+  mainAgent(id) | channel(Channel...) | configureAllAgents(...) | distributedStore(DistributedStore) |
+  build()`; `.gateway()`, `.chatUiChannel([ChannelConfig])`, `.gatewayBridge():SubagentGatewayBridge`,
+  `.start()`, `.stop()`.
+- `ChatUiChannel.create() | create(ChannelConfig) | create(Gateway) | create(Gateway, ChannelConfig) |
+  perPeer()`; `send(SendOptions, String):Mono<Msg>`, `sendStream(SendOptions, String):Flux<AgentEvent>`,
+  `sendToSubagent(String, String):Mono<Msg>`, `sendToSubagentStream(String, String):Flux<AgentEvent>`,
+  `deliver(OutboundAddress, List<Msg>)`, `pollOutbound()`, `dispatch/dispatchStream`, `CHANNEL_ID`.
+- `SendOptions` (record `(userId, sessionId, agentId)`): `userId(String)`, `of(userId, sessionId)`,
+  `withAgentId(String)`.
+- `Channel` (interface): `channelId()`, `config():ChannelConfig`, `init(Gateway)`, `start()`, `stop()`,
+  `dispatch(InboundMessage):Mono<Msg>`, `dispatchStream(...):Flux<AgentEvent>`,
+  `deliver(OutboundAddress, List<Msg>)`, `applyRoutingConfig(ChannelConfig)`.
+- `ChannelConfig.of(id) | of(id, defaultAgentId) | builder(id)` (record `(channelId, defaultAgentId,
+  DmScope, List<ChannelBinding>)`). `OutboundAddress.direct(channelId, to) | withAccount(...)`.
+- `SubagentExposedEvent`: `getSubagentId()`, `getAgentId()`, `getSessionId()`, `getLabel()` (extends
+  `AgentEvent`). `SubagentGatewayBridge.expose(String, String, Agent, OutboundAddress):ExposeResult`;
+  `ExposeResult.subagentId()`.
+
+### Design — the kernel sits BEHIND pig's channel seam (all in `pig-agent-channel`, `io.pigagent.channel.gateway`)
+
+**`GatewayChannelKernel`** is the adoption point. Built over a pig `HarnessAgent`
+(`PigAgent.getHarnessAgent()`) via `mainAgent.channel(ChatUiChannel.create())` — this single native call
+gives (a) the `ChatUiChannel` routing engine (native session management + single-session fair queuing +
+agent routing), (b) the agent's internal `Gateway` (peers registered via `registerAgent`, native adapters
+attached via `Channel.init`/`start`), and (c) the auto-wired subagent-gateway bridge that makes
+`expose_to_user` functional. It exposes `send`/`sendStream` + `sendToSubagent`/`sendToSubagentStream`, all
+threaded by `SendOptions(userId, sessionId, agentId)` — **consistent with the Phase-3 per-`(userId,sessionId)`
+`AgentStateStore`**, so each channel user/session persists in its own slot and single-session concurrency
+is fairly queued by the native gateway (proven offline by `GatewayChannelKernelTest.sendOptionsThreadSessionPerUser`:
+same user continues, different user isolated).
+
+**Behind the façade (frontend seam unchanged).** `ChannelAgentBridge` gained an optional
+`GatewayChannelKernel` constructor arg: with it (opt-in), inbound routes through
+`kernel.sendStream(SendOptions.of("pig", "channel:<id>"), text)` (native routing); without it (default),
+the prior direct `agentHolder.get().stream(msg, sessionId)` path — the answer-delta aggregation +
+outbound delivery is shared, so the bridge/kernel-façade contract is unchanged. `PigAgentCli.startChannels`
+builds the kernel only when `channel-gateway.enabled`, keeping default byte-identical (proven by
+`ChannelAgentBridgeTest`: the existing 3 tests unchanged; a new `gatewayRoutingBypassesTheDirectAgentStream`
+verifies the gateway path bypasses the direct call and delivers the reply).
+
+### Native-vs-custom adapter matrix
+
+| Platform | pig `channels.<id>` | native class (FQCN, needs-verify) | artifact | transport | Spring? | status |
+|---|---|---|---|---|---|---|
+| DingTalk | `dingtalk` | `io.agentscope.extensions.channel.dingtalk.DingTalkChannel` | `agentscope-extensions-channel-dingtalk` | WebSocket Stream | no | **native available, opt-in** — POM add + **live-verify** (artifact absent offline) |
+| Feishu/Lark | `feishu` | `…channel.feishu.FeishuChannel` | `…-channel-feishu` | HTTP callback | yes | **native available, opt-in** — POM add + **live-verify** |
+| GitHub | `github` | `…channel.github.GitHubChannel` | `…-channel-github` | webhook | (likely) | **native available, opt-in** — POM add + **live-verify** |
+| GitLab | `gitlab` | `…channel.gitlab.GitLabChannel` | `…-channel-gitlab` | note hook | (likely) | **native available, opt-in** — POM add + **live-verify** |
+| WeCom | `wecom` | `…channel.wecom.WeComChannel` | `…-channel-wecom` | encrypted callback | yes | **native available, opt-in** — POM add + **live-verify** |
+| Telegram / Discord / Slack / Webhook / Stdin | `telegram`/`discord`/`slack`/`webhook`/`stdin` | *(none)* | — | — | — | **stay pig custom** (no native adapter) |
+
+The FQCN follows the model-extension convention (`io.agentscope.extensions.model.<p>.<P>ChatModel` ⇒
+`io.agentscope.extensions.channel.<platform>.<Platform>Channel`) and the doc-confirmed factory
+`XxxChannel.fromProperties(String id, ChannelConfig config, Map<String,String> props)`; both are
+**documented in `NativeChannelType` and must be verified against the real artifact** (needs a live endpoint
+regardless). `NativeChannelFactory` loads the class reflectively and, when it is not on the classpath
+(**always, offline**), logs "add `<artifact>`" and returns empty → pig falls back to the custom adapter.
+This is why native adapters are **opt-in behind `channels.<id>.native: true`** and the custom channels stay
+the default. Platform credentials live under `channels.<id>.props.<key>` (dingtalk: `appKey`/`appSecret`/
+`robotCode`; feishu: `appId`/`appSecret`; github: `token`/`webhookSecret`; gitlab: `token`; wecom:
+`corpId`/`agentId`/`secret`/`token`/`encodingAesKey`).
+
+### `expose_to_user` — functional + offline-proven (the headline result)
+
+The subagent→user Channel bridge is **not** just a note anymore (Phase-6a left it minimal). Because
+`GatewayChannelKernel` binds the agent via `agent.channel(...)`, the native gateway auto-assembles the
+subagent bridge, so a subagent the model spawns with `expose_to_user=true` (through the existing Phase-6b
+subagent path) is registered as a user-addressable entry point and the gateway emits a
+`SubagentExposedEvent` (carrying a `subagentId`) onto the stream; the client then talks to it directly via
+`GatewayChannelKernel.sendToSubagent(subagentId, …)`, bypassing the parent. **Proven offline** by
+`GatewayExposeToUserTest` (scripted fake model, `@TempDir`): a parent turn through the gateway spawns +
+exposes a `general-purpose` child (log: `Exposed subagent … as subagentId=sub-…`, tool result
+`status: exposed`), the `SubagentExposedEvent` is captured off `sendStream`, and a `sendToSubagent(id,
+"FOLLOWUP …")` reaches the exposed child which answers — all without a live model. This composes with the
+Phase-6b pig-enforced subagent permission inheritance (the exposed child is still built under the derived
+fail-closed context).
+
+### Proactive-outreach send-seam retargeted onto the native kernel (§16 follow-up)
+
+`GatewayOutboundChannel` adapts pig's `OutboundChannel` (the thin "push an unsolicited `Notification`"
+seam) onto a native `Channel.deliver(OutboundAddress, List<Msg>)`, realizing the "native lacks proactive
+push, pig fills it" story against the native kernel. The routing/guardrail/trigger stack above
+(`ChannelNotificationService`/`OutreachGate`/`ScheduledOutreach`) is unchanged — only the terminal
+transport moves. It is also an outbound-only pig `Channel`, so it slots into the existing outreach registry
++ notification-service lookup (`instanceof OutboundChannel`) with **no change to that routing**; when the
+gateway path is enabled, `startChannels` registers one per attached native adapter. pig's custom
+`StrategyHttpChannel.send` (DingTalk/Feishu webhooks) stays the default target. Contract-faithful: never
+throws, returns `false` on transport failure, never echoes the recipient (proven by
+`GatewayOutboundChannelTest`).
+
+### Config
+
+New `channels.<id>.native` (bool, default false) + `channels.<id>.props` (map) opt a channel into its
+native adapter; new top-level `channel-gateway.{enabled (default false), main-agent-id (default "default")}`
+gates adopting the native gateway kernel at all. All optional/default-safe → **default off = today's custom
+channels, byte-for-byte** (unknown-field-tolerant loader unaffected).
+
+### Honest limitations / live-verification-required
+
+- **Native adapters cannot be exercised offline** (artifacts absent). Enabling one requires adding the
+  `agentscope-extensions-channel-*` dependency to a POM (channel or cli) **and** a real platform endpoint;
+  `NativeChannelFactory`'s FQCN + `fromProperties` signature are the doc-convention and **must be confirmed
+  against the real jar**. `NativeChannelFactoryTest` covers the opt-in gate, the graceful-degradation
+  (artifact-absent) path, and the pure props mapping — the only offline-observable behavior.
+- **Model-switch rebinding:** the native gateway binds the `HarnessAgent` at kernel-build time; a runtime
+  model switch that rebuilds the channel agent leaves the kernel on the old vehicle. The opt-in path does
+  not auto-rebind yet (documented; a `bindMainAgent(...)` refresh on model switch is a follow-up).
+- **REPL expose UX:** the `expose_to_user` plumbing + send-path are functional/tested, but the REPL still
+  drives the interactive agent via `AgentKernel.chat` (not the `ChatUiChannel`); surfacing an exposed
+  subagent as an addressable target in the REPL (e.g. a `/subagent` command) is a follow-up — the kernel
+  seam for it is in place.
+
+### Acceptance (single-threaded surefire, 2.0)
+`mvn -o test` — **whole reactor GREEN, all 17 modules (BUILD SUCCESS). Total 1109 tests, 0 failures, 0
+errors, 5 skipped** (1093 §16 baseline **+16**: `pig-agent-channel` 116→**132** — `GatewayChannelKernelTest`
+4, `GatewayExposeToUserTest` 1, `GatewayOutboundChannelTest` 3, `NativeChannelFactoryTest` 7,
+`ChannelAgentBridgeTest` +1 gateway-routing). `mvn -o -q -pl pig-agent-cli -am compile` green. New/changed
+tests + why: the four new gateway test classes prove routing wiring / `SendOptions` session threading /
+`expose_to_user`→`SubagentExposedEvent`→`sendToSubagent` (fake model) / native-adapter opt-in +
+graceful-degradation + props mapping; the `ChannelAgentBridgeTest` addition proves the native-gateway route
+bypasses the direct path while the three pre-existing tests (unchanged) prove the custom-channel default is
+unchanged. Files: `pig-agent-channel` `gateway/{GatewayChannelKernel, NativeChannelType, NativeChannelFactory,
+GatewayOutboundChannel}` + modified `ChannelAgentBridge`; `pig-agent-config` `PigAgentConfig.{ChannelConfig
+.native/.props, ChannelGatewayConfig}`; `pig-agent-cli` `PigAgentCli.startChannels` (gateway-aware, gated).
