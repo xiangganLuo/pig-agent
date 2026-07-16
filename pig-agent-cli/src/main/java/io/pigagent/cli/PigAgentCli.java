@@ -2,6 +2,10 @@ package io.pigagent.cli;
 
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.channel.ChannelFactory;
+import io.pigagent.channel.ChannelRegistry;
+import io.pigagent.channel.gateway.GatewayChannelKernel;
+import io.pigagent.channel.gateway.GatewayOutboundChannel;
+import io.pigagent.channel.gateway.NativeChannelFactory;
 import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
@@ -43,7 +47,8 @@ public final class PigAgentCli {
         // Shared runtime (agent, kernel, managers). The CLI is the REPL frontend on top of it.
         AgentBootstrap.Services s = AgentBootstrap.build(true);
 
-        List<ChannelAgentBridge> bridges = startChannels(s.channelAgentHolder, s.agentKernel, s.config.getChannels());
+        ChannelStartup channels = startChannels(s.channelAgentHolder, s.agentKernel, s.config, s.outreachRegistry);
+        List<ChannelAgentBridge> bridges = channels.bridges();
 
         // Register started channels into the outreach registry so proactive outreach can find outbound
         // channels (D9 — resolved lazily at notify time; channels start after AgentBootstrap.build).
@@ -66,6 +71,9 @@ public final class PigAgentCli {
             for (ChannelAgentBridge bridge : bridges) {
                 runQuietly(bridge::stop);
             }
+            if (channels.kernel() != null) {
+                runQuietly(channels.kernel()::stop);
+            }
             runQuietly(s::shutdownCommon);
         }));
 
@@ -84,20 +92,83 @@ public final class PigAgentCli {
         }
     }
 
-    private static List<ChannelAgentBridge> startChannels(AgentHolder agentHolder, AgentKernel agentKernel,
-                                                          Map<String, PigAgentConfig.ChannelConfig> channelConfigs) {
-        List<ChannelAgentBridge> bridges = new ArrayList<>();
+    /** The started channel bridges plus the (optional) native gateway kernel, for shutdown. */
+    record ChannelStartup(List<ChannelAgentBridge> bridges, GatewayChannelKernel kernel) {
+    }
+
+    /**
+     * Start the configured channels. Two paths, gated by {@code channel-gateway.enabled}:
+     * <ul>
+     *   <li><b>Default (disabled):</b> each enabled, known channel is a pig custom adapter bridged
+     *       directly to the channel agent — <em>exactly the prior behavior</em> (backward compatible).</li>
+     *   <li><b>Native gateway (enabled):</b> a {@link GatewayChannelKernel} over the channel agent's
+     *       {@code HarnessAgent} becomes the routing engine (native session/concurrency/routing).
+     *       Channels flagged {@code native:true} whose {@code agentscope-extensions-channel-*} artifact
+     *       is on the classpath are attached as native adapters (and registered as outreach outbound
+     *       targets); every other channel stays a pig custom adapter but is <em>routed through the
+     *       native gateway</em>. When a native artifact is absent it degrades gracefully to the custom
+     *       adapter (this is always the case in the offline build — see {@link NativeChannelFactory}).</li>
+     * </ul>
+     */
+    private static ChannelStartup startChannels(AgentHolder agentHolder, AgentKernel agentKernel,
+                                                PigAgentConfig config, ChannelRegistry outreachRegistry) {
+        Map<String, PigAgentConfig.ChannelConfig> channelConfigs = config.getChannels();
         ChannelFactory factory = new ChannelFactory();
-        // Construction + enable gating live in ChannelFactory (unit-tested); adding a new adapter
-        // needs no edit here. Each enabled, known channel is bridged to the live agent and started.
+
+        if (!config.getChannelGateway().isEnabled()) {
+            // Default path (unchanged): custom adapters bridged directly to the channel agent.
+            List<ChannelAgentBridge> bridges = new ArrayList<>();
+            for (var entry : channelConfigs.entrySet()) {
+                factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
+                    ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
+                    bridge.start();
+                    bridges.add(bridge);
+                    log.info("Channel started: {}", channel.displayName());
+                });
+            }
+            return new ChannelStartup(bridges, null);
+        }
+
+        // Native gateway path (opt-in): adopt the native Gateway/ChatUiChannel as the routing kernel.
+        String mainAgentId = config.getChannelGateway().getMainAgentId();
+        NativeChannelFactory nativeFactory = new NativeChannelFactory(mainAgentId);
+        GatewayChannelKernel.Builder kernelBuilder =
+                GatewayChannelKernel.builder(agentHolder.get().getHarnessAgent());
+
+        // Resolve native adapters (native:true + artifact present); the rest are custom adapters.
+        List<io.agentscope.harness.agent.gateway.channel.Channel> natives = new ArrayList<>();
+        List<Map.Entry<String, PigAgentConfig.ChannelConfig>> customEntries = new ArrayList<>();
         for (var entry : channelConfigs.entrySet()) {
+            Optional<io.agentscope.harness.agent.gateway.channel.Channel> nativeCh =
+                    nativeFactory.create(entry.getKey(), entry.getValue());
+            if (nativeCh.isPresent()) {
+                natives.add(nativeCh.get());
+                kernelBuilder.nativeChannel(nativeCh.get());
+            } else if (entry.getValue() != null && entry.getValue().isEnabled()) {
+                customEntries.add(entry);
+            }
+        }
+
+        GatewayChannelKernel kernel = kernelBuilder.build();
+        kernel.start(); // inits + starts native adapters on the gateway
+        log.info("Native channel gateway enabled (main agent '{}', {} native adapter(s))",
+                mainAgentId, natives.size());
+
+        // Native adapters are outbound targets for proactive outreach (part 4 — the send-seam retarget).
+        for (io.agentscope.harness.agent.gateway.channel.Channel nativeCh : natives) {
+            outreachRegistry.register(new GatewayOutboundChannel(nativeCh));
+        }
+
+        // Custom adapters keep their pig inbound transport but route turns through the native gateway.
+        List<ChannelAgentBridge> bridges = new ArrayList<>();
+        for (var entry : customEntries) {
             factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
-                ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
+                ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel, kernel);
                 bridge.start();
                 bridges.add(bridge);
-                log.info("Channel started: {}", channel.displayName());
+                log.info("Channel started (native gateway routing): {}", channel.displayName());
             });
         }
-        return bridges;
+        return new ChannelStartup(bridges, kernel);
     }
 }
