@@ -17,32 +17,32 @@
 
 ## ADDED Requirements
 
-### Requirement: 移除 per-tool ASK 遮蔽，改依模式默认兜底
-为使「始终允许」写入的 ALLOW 规则不被同名 ASK 规则遮蔽（原生优先级 `deny>ask>allow`），系统在构建会话权限上下文时 MUST NOT 为「判定为 ASK」的工具发出 per-tool ASK 规则（把既有对 `executeCommand` 的 M-1 豁免推广到所有 ASK 判定的工具），改由 native **模式默认**兜底。此改动 MUST 保全既有安全语义：交互回合（`DEFAULT`/`ACCEPT_EDITS`，有人工 confirmer）对无匹配规则的可变工具 MUST 仍触发人工确认（HITL `RequireUserConfirmEvent`）；非交互回合（渠道/自主，`DONT_ASK` 基线、无 confirmer）对无匹配规则的可变工具 MUST 仍 fail-closed 拒绝；`plan`（EXPLORE）下的 DENY 规则与只读语义 MUST 不受影响；`bypass` 的 ALLOW 与 allowlist 命中的 ALLOW MUST 照常发出；deny 规则与危险路径的不可绕过性 MUST 不被削弱。
+### Requirement: 会话级逐工具 ASK→ALLOW 置换（PermissionContextFactory 不变）
+「始终允许」的运行时免确认 MUST 通过在**当前会话槽的权限上下文**中对**被选中的那一个工具**做 **ASK→ALLOW 置换**实现——删除该工具的 per-tool ASK 规则并加入一条该工具的 ALLOW 规则（原生优先级 `deny>ask>allow`：若保留 ASK 规则则 ALLOW 被遮蔽，故置换 MUST 同时删 ASK、加 ALLOW）。系统 MUST NOT 通过全局停止发出 per-tool ASK 规则（即 MUST NOT 依赖 native 模式默认来对无规则工具兜底确认）来实现免确认——因为 agent 的推理循环对**纯模式默认 ASK 不弹人工确认、会直接执行工具**（只有显式 ASK 规则或工具内建 ASK 检查才触发暂停），全局移除将使可变工具无确认执行（安全回归）。因此风险分级→per-tool ASK 规则的映射（`PermissionContextFactory`）MUST 保持不变：所有工具的首次调用仍受各自的 ASK 规则把关；仅被用户显式选 `a` 的工具、仅在其所在会话槽解除该工具的确认。
 
-#### Scenario: 交互 ASK 工具移除显式规则后仍弹确认
-- **WHEN** `mode=ask`（交互、有 confirmer），agent 调用一个判定为 ASK 的可变工具，且该工具无 allowlist 命中、无 deny/ask 规则
-- **THEN** 请求经模式默认到达 ASK，仍弹出人工确认（HITL），行为与移除显式 ASK 规则前一致
+#### Scenario: 全局 ASK 规则保持不变，其它工具仍确认
+- **WHEN** 用户对工具 A 选择 `a` 后，同会话 agent 调用**另一个**未被选 `a` 的可变工具 B
+- **THEN** 工具 B 仍触发人工确认（其 ASK 规则未被改动；置换只作用于工具 A）
 
-#### Scenario: 非交互 ASK 工具移除显式规则后仍 fail-closed
-- **WHEN** 渠道/自主回合（`DONT_ASK` 基线、无 confirmer），触发一个判定为 ASK 的可变工具且无匹配放行规则
-- **THEN** 请求经 `DONT_ASK` 模式默认被拒绝（fail-closed），工具不执行、无副作用
+#### Scenario: 置换必须同时删 ASK、加 ALLOW
+- **WHEN** 对某工具执行「始终允许」置换
+- **THEN** 该会话槽上下文中该工具的 ASK 规则被删除、并新增一条该工具的 ALLOW 规则；仅加 ALLOW 而不删 ASK MUST NOT 被视为完成（否则 `deny>ask>allow` 使其仍被确认）
 
-#### Scenario: plan 只读与 deny 不受影响
-- **WHEN** `mode=plan`（EXPLORE）时 agent 调用可变工具，或存在一条 deny 规则的工具在任意模式被调用
-- **THEN** plan 下可变工具仍被否决（DENY 规则照发、只读语义不变），deny 规则仍不可绕过（含 `bypass`）
+#### Scenario: 不得全局移除 ASK 规则
+- **WHEN** 实现「始终允许」
+- **THEN** MUST NOT 通过停止发出 per-tool ASK 规则（改依模式默认）来实现——该路径会使可变工具无确认直接执行；`PermissionContextFactory` 的风险→规则映射保持不变
 
 ### Requirement: 跨回合持久化「始终允许」到会话权限上下文
-系统 SHALL 提供一个能力：当用户对某工具选择 `a`（始终允许）时，把一条 `ALLOW` 规则写入**当前会话槽 `(userId, sessionId)` 的持久权限上下文**（`AgentState.permissionContext`），使该会话**下一回合**从该槽重建的权限引擎仍放行该工具。写入 MUST 持久到会话状态存储（`saveAgentState(userId, sessionId)`），使其对后续回合可见。该运行时「始终允许」作用域 MUST 为**本会话**（不隐式泛化到其它会话；跨会话/跨重启的持久由写入配置 allowlist 在下次 agent 重建时生效承担）。写入 MUST 幂等（重复选 `a` 不产生重复放行副作用），且 MUST NOT 放松同一槽已有的 deny 规则或降低其它工具的把关级别。
+系统 SHALL 提供一个能力：当用户对某工具选择 `a`（始终允许）时，把上述 ASK→ALLOW 置换后的权限上下文写入**当前会话槽 `(userId, sessionId)` 的持久权限上下文**（`AgentState.permissionContext`）、刷新该会话槽的权限引擎缓存并保存（`saveAgentState(userId, sessionId)`），使该会话**下一回合**从该槽取用/重建的权限引擎放行该工具。该运行时「始终允许」作用域 MUST 为**本会话**（不隐式泛化到其它会话；跨会话/跨重启的持久由写入配置 allowlist 在下次 agent 重建时生效承担）。写入 MUST 幂等（重复选 `a` 不产生重复放行副作用或规则堆叠），且 MUST NOT 放松同一槽已有的 deny 规则或降低其它工具的把关级别。
 
 #### Scenario: 选 a 后下一回合引擎放行
-- **WHEN** 用户在某会话对工具 T 选择 `a`，系统把 T 的 ALLOW 规则写入该会话槽的权限上下文并保存
-- **THEN** 该会话下一回合从该槽重建的权限引擎对 T 判定为 ALLOW，不再弹确认
+- **WHEN** 用户在某会话对工具 T 选择 `a`，系统把 T 的 ASK→ALLOW 置换写入该会话槽的权限上下文、刷新引擎缓存并保存
+- **THEN** 该会话下一回合的权限引擎对 T 判定为 ALLOW，不再弹确认
 
 #### Scenario: 始终允许按会话隔离
-- **WHEN** 会话 A 对工具 T 选择 `a`（未写入配置 allowlist 生效前），随后切到会话 B 且 B 的槽尚无 T 的 ALLOW 规则
+- **WHEN** 会话 A 对工具 T 选择 `a`（未写入配置 allowlist 生效前），随后切到会话 B 且 B 的槽尚无 T 的置换
 - **THEN** 会话 B 首次调用 T 仍按其风险与模式判定（可能仍弹确认）——运行时「始终允许」不隐式跨到会话 B
 
 #### Scenario: 重复选 a 幂等
 - **WHEN** 用户在同一会话对同一工具多次选择 `a`
-- **THEN** 会话槽权限上下文对该工具至多产生一条等效 ALLOW 放行，不产生重复或冲突规则
+- **THEN** 会话槽权限上下文对该工具至多产生一条等效 ALLOW 放行、不残留 ASK 规则，不产生重复或冲突规则

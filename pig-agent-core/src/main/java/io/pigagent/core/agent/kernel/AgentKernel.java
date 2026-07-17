@@ -140,6 +140,21 @@ public final class AgentKernel {
         });
     }
 
+    /**
+     * Persist an "always allow" (user picked {@code a} at an ASK prompt) for one tool on the given
+     * session's slot so the <em>next</em> turn of that session auto-allows it — the façade entry point
+     * for the REPL confirm loop's {@code a} branch (change {@code permission-always-allow-persist}).
+     * Routes to the target agent (or the active one if {@code agentId} is not a known id). No-op when
+     * no agent is available. Frontends MUST call this rather than touching the agent directly.
+     */
+    public void allowToolForSession(String agentId, String sessionId, String toolName) {
+        AgentInstance instance = registry.get(agentId).orElse(registry.active().orElse(null));
+        if (instance == null) {
+            return;
+        }
+        instance.agent().allowToolForSession(sessionId, toolName);
+    }
+
     /** Trigger one autonomous run of an agent now; emits RUN_STARTED/RUN_FINISHED/REPORT. */
     public Optional<AgentReport> runNow(String agentId) {
         if (runner == null) {

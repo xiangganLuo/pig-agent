@@ -20,6 +20,8 @@ import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.ToolUseBlock;
+import io.agentscope.core.permission.PermissionBehavior;
+import io.agentscope.core.permission.PermissionRule;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.render.StreamingMarkdownPrinter;
 import io.pigagent.cli.render.SubagentEventRenderer;
@@ -480,8 +482,19 @@ public final class AgentRepl {
             String ans = reader.readLine(Ansi.warn(prompt));
             String s = ans == null ? "" : ans.strip().toLowerCase();
             if (s.equals("a")) {
-                rememberTool(call.getName());
-                results.add(new ConfirmResult(true, call));
+                // "always allow" (change permission-always-allow-persist): make the choice actually
+                // stick, in three layers. (1) Attach an ALLOW rule to the ConfirmResult so the rest of
+                // THIS invocation auto-allows (native applyConfirmResults). (2) Persist a session-scoped
+                // ASK→ALLOW swap so the NEXT turn of this session auto-allows — via the kernel façade
+                // (the frontend depends only on it); only this tool, only this session is touched.
+                // (3) rememberTool writes the config allowlist for cross-restart. confirm() runs while
+                // the turn is paused between streams, so the write-back is race-free.
+                String toolName = call.getName();
+                rememberTool(toolName);
+                String sid = sessionManager == null ? null : sessionManager.getCurrentSessionId();
+                agentKernel.allowToolForSession(agentKernel.activeId(), sid, toolName);
+                results.add(new ConfirmResult(true, call,
+                        List.of(new PermissionRule(toolName, null, PermissionBehavior.ALLOW, "user:always"))));
             } else {
                 results.add(new ConfirmResult(s.equals("y"), call));
             }
