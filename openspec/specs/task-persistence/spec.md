@@ -2,7 +2,6 @@
 
 ## Purpose
 文件任务仓库的容错读取（坏文件跳过不崩）与无损往返（schedule 全字段 + 时间戳 + 描述），使 CRON/DELAYED 任务跨重启存活并被 `scheduleAll` 正确重排。
-
 ## Requirements
 ### Requirement: 任务仓库容错读取
 文件任务仓库在读取任务时，单个任务 `.md` 解析失败（文件损坏、缺字段、非法状态枚举等）MUST 被跳过并记 warn，MUST NOT 让 `findAll`/`findByStatus`/`findById` 抛异常或中断遍历。启动路径的任务调度（`scheduleAll`）MUST NOT 因单个坏任务文件而崩溃。容错遵循既有 `JsonModelStore`/`JsonMcpStore` 的"坏条目跳过、其余照常"范式，MUST NOT 用占位错误任务污染任务列表。
@@ -29,3 +28,32 @@
 #### Scenario: 旧格式容错降级
 - **WHEN** 读取一个旧格式 `.md`（Schedule 行仅有类型、无 cron/delay 值）
 - **THEN** 该任务被读为 `ONCE`、不抛异常
+
+### Requirement: 可选任务执行器 seam + 诚实的提醒-标记语义
+
+`TaskScheduler` SHALL 暴露一个**可选**的任务执行器 seam：`setTaskExecutor(Consumer<Task>)`。设置后，一个定时任务触发时 `executeTask` MUST 把真实工作委托给该执行器（执行器抛异常时任务 MUST 被标记回 `TODO` 以便重试，否则标记 `COMPLETED`）。**未设置执行器（默认）**时，一个定时任务 MUST 被当作**提醒/标记**——不执行任何工作，并以日志如实反映其为提醒-标记（非自主运行），同时保留既有的 `TODO→IN_PROGRESS→COMPLETED` 状态翻转（行为中立）。seam 未接线时，调度器行为 MUST 与本能力引入前一致（既有任务测试保持绿）。
+
+#### Scenario: 执行器已设置则被调用
+- **WHEN** 已 `setTaskExecutor(...)`，一个定时任务触发
+- **THEN** 执行器被以该任务调用（真实工作），任务随后被标记 `COMPLETED`
+
+#### Scenario: 执行器抛异常则回退 TODO
+- **WHEN** 已设置的执行器在处理任务时抛异常
+- **THEN** 任务被标记回 `TODO`（可重试），MUST NOT 被标记 `COMPLETED`
+
+#### Scenario: 未设置执行器则为提醒-标记
+- **WHEN** 未设置执行器，一个定时任务触发
+- **THEN** 不执行任何工作，任务仍走 `IN_PROGRESS`→`COMPLETED` 状态翻转（行为中立），并有一条如实的「提醒-标记、无执行器」日志
+
+### Requirement: 5 段 cron 校验器（供 REPL 校验调度）
+
+`TaskScheduler` SHALL 提供一个 public static 的 cron 校验器 `isValidCron(String)`，当且仅当入参是合法的标准 UNIX 5 段 cron 表达式时返回真。遗留的每-N-秒（`*/N`）与 `@macro` 简写 MUST NOT 被视为合法 cron（它们映射到粗粒度固定间隔，不应作为真实 cron 调度提供）。null/空白 MUST 返回假。
+
+#### Scenario: 接受 5 段 cron
+- **WHEN** 传入 `"0 2 * * *"`
+- **THEN** 返回真
+
+#### Scenario: 拒绝非 cron 与遗留简写
+- **WHEN** 传入 `"garbage"`、`"*/30"`、`null` 或空白
+- **THEN** 均返回假
+
