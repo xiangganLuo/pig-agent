@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Executes scheduled work on a background thread pool. Supports DELAYED (delayed one-shot) and
@@ -33,8 +34,29 @@ public final class TaskScheduler {
     private final TaskManager taskManager;
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
 
+    /**
+     * Optional real-work seam (nullable). When set, {@link #executeTask(Task)} delegates the actual
+     * work of a fired {@link Task} to it (e.g. dispatch the task to an agent). When {@code null}
+     * (the default), a scheduled task is a reminder/marker only — it flips its status through the
+     * lifecycle without performing any work. Wiring a real executor is a caller responsibility
+     * (e.g. {@code AgentBootstrap}); see {@link #setTaskExecutor(Consumer)}.
+     */
+    private volatile Consumer<Task> taskExecutor;
+
     public TaskScheduler(TaskManager taskManager) {
         this.taskManager = taskManager;
+    }
+
+    /**
+     * Wire the optional task executor that does the real work when a scheduled {@link Task} fires.
+     * Pass {@code null} to clear it (back to reminder-only markers). Idempotent and thread-safe.
+     *
+     * <p>Contract: the executor is invoked on a scheduler thread with the fired task; if it throws,
+     * the task is marked {@link TaskStatus#TODO} again (so it can be retried), otherwise it is marked
+     * {@link TaskStatus#COMPLETED}. Keep the work bounded — a long-running executor holds a pool thread.
+     */
+    public void setTaskExecutor(Consumer<Task> taskExecutor) {
+        this.taskExecutor = taskExecutor;
     }
 
     /** Schedule any runnable under an id. ONCE/null is ignored. Re-scheduling an id cancels first. */
@@ -122,14 +144,45 @@ public final class TaskScheduler {
     }
 
     private void executeTask(Task task) {
-        log.info("Executing task: {}", task.title());
+        Consumer<Task> exec = this.taskExecutor;
+        if (exec == null) {
+            // No executor wired → this scheduled task is a reminder/marker only, NOT an autonomous
+            // run: it performs no work. Kept honest here (vs the digital-employee path, which really
+            // invokes the agent). Status still flips TODO→IN_PROGRESS→COMPLETED (behavior-neutral).
+            log.info("Task fired (reminder-only marker, no executor wired): {}", task.title());
+            taskManager.updateStatus(task.id(), TaskStatus.IN_PROGRESS);
+            taskManager.updateStatus(task.id(), TaskStatus.COMPLETED);
+            return;
+        }
+        log.info("Executing task via executor: {}", task.title());
         taskManager.updateStatus(task.id(), TaskStatus.IN_PROGRESS);
         try {
+            exec.accept(task);
             taskManager.updateStatus(task.id(), TaskStatus.COMPLETED);
             log.info("Completed task: {}", task.title());
         } catch (Exception e) {
             log.error("Task failed: {} - {}", task.title(), e.getMessage(), e);
             taskManager.updateStatus(task.id(), TaskStatus.TODO);
+        }
+    }
+
+    /**
+     * True if {@code expr} is a valid standard 5-field (UNIX) cron expression (e.g. {@code
+     * "0 2 * * *"}). Used to validate a schedule before it is accepted (the legacy every-N-seconds /
+     * {@code @macro} fallbacks are intentionally NOT treated as valid here — they map to a coarse
+     * fixed interval and should not be offered as a real cron schedule).
+     */
+    public static boolean isValidCron(String expr) {
+        if (expr == null || expr.isBlank()) {
+            return false;
+        }
+        try {
+            CronParser parser = new CronParser(
+                    CronDefinitionBuilder.instanceDefinitionFor(CronType.UNIX));
+            parser.parse(expr.trim()).validate();
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 

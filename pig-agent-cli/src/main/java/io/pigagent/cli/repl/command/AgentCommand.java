@@ -6,9 +6,11 @@ import io.pigagent.core.agent.AgentInstance;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.model.StoredModel;
+import io.pigagent.task.TaskScheduler;
 import org.fusesource.jansi.Ansi.Color;
 import org.jline.terminal.Terminal;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.util.Arrays;
@@ -30,6 +32,18 @@ public final class AgentCommand implements Runnable {
 
     @Parameters(index = "1..*", paramLabel = "<args>")
     String[] args;
+
+    @Option(names = "--mandate", paramLabel = "<text>",
+            description = "with 'new': the mandate the agent runs unattended (makes it a digital employee)")
+    String mandate;
+
+    @Option(names = "--schedule", paramLabel = "<cron>",
+            description = "with 'new': a 5-field cron (e.g. \"0 2 * * *\"); requires --mandate")
+    String schedule;
+
+    @Option(names = "--allow", paramLabel = "<cmd1,cmd2>",
+            description = "with 'new': comma-separated command allowlist for unattended runs")
+    String allow;
 
     public AgentCommand(ReplContext ctx) {
         this.ctx = ctx;
@@ -86,7 +100,8 @@ public final class AgentCommand implements Runnable {
 
     private void create(Terminal t) {
         if (args == null || args.length < 2) {
-            Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name...> [modelId]"));
+            Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name...> [modelId]"
+                    + " [--mandate \"<text>\"] [--schedule \"<cron>\"] [--allow \"<cmd1,cmd2>\"]"));
             return;
         }
         String id = args[0];
@@ -108,11 +123,42 @@ public final class AgentCommand implements Runnable {
             Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name...> [modelId]"));
             return;
         }
+
+        boolean hasMandate = mandate != null && !mandate.isBlank();
+        boolean hasSchedule = schedule != null && !schedule.isBlank();
+        if (hasSchedule && !TaskScheduler.isValidCron(schedule.trim())) {
+            Ansi.println(t, Ansi.error("Invalid cron schedule: \"" + schedule.trim()
+                    + "\" — expected a 5-field cron, e.g. \"0 2 * * *\"."));
+            return;
+        }
+        if (hasSchedule && !hasMandate) {
+            Ansi.println(t, Ansi.error(
+                    "A scheduled agent needs work to do; add --mandate \"<what it should do>\"."));
+            return;
+        }
+
         AgentSpec spec = AgentSpec.create(id, name).withModelId(modelId);
+        if (hasMandate) {
+            spec = spec.withMandate(mandate.trim());
+        }
+        if (hasSchedule) {
+            spec = spec.withSchedule(schedule.trim());
+        }
+        if (allow != null && !allow.isBlank()) {
+            List<String> cmds = Arrays.stream(allow.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty()).toList();
+            spec = spec.withCommandAllowlist(cmds);
+        }
         try {
             ctx.agentKernel().createAgent(spec);
+            String kind = spec.isAutonomous() ? "  (digital employee ⏰" + spec.schedule() + ")" : "";
             Ansi.println(t, Ansi.success("Created agent: ")
-                    + Ansi.info(name + " [" + id + "]" + (modelId == null ? "" : " model=" + modelId)));
+                    + Ansi.info(name + " [" + id + "]"
+                    + (modelId == null ? "" : " model=" + modelId) + kind));
+            if (spec.isAutonomous()) {
+                Ansi.println(t, Ansi.dim("Scheduled runs begin on next launch; use '/agent run "
+                        + id + "' to run it now."));
+            }
         } catch (Exception e) {
             Ansi.println(t, Ansi.error("Failed to create agent: " + e.getMessage()));
         }
@@ -212,6 +258,9 @@ public final class AgentCommand implements Runnable {
         Ansi.println(t, Ansi.dim("  use <id>                   switch the active agent"));
         Ansi.println(t, Ansi.dim("  new <id> <name...> [model] create an agent (name may be multi-word; "
                 + "a trailing saved model id is used as its model)"));
+        Ansi.println(t, Ansi.dim("      [--mandate \"<text>\"]    autonomous mandate → makes it a digital employee"));
+        Ansi.println(t, Ansi.dim("      [--schedule \"<cron>\"]   5-field cron, e.g. \"0 2 * * *\" (needs --mandate)"));
+        Ansi.println(t, Ansi.dim("      [--allow \"<c1,c2>\"]     command allowlist for unattended runs"));
         Ansi.println(t, Ansi.dim("  model <id> <modelId>       change an agent's model (must be a saved id)"));
         Ansi.println(t, Ansi.dim("  run <id>                   run a digital-employee mandate now"));
         Ansi.println(t, Ansi.dim("  report                     list recent morning reports"));
