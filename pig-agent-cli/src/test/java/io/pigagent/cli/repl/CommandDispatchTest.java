@@ -42,7 +42,7 @@ class CommandDispatchTest {
         AtomicBoolean running = new AtomicBoolean(true);
         ReplContext ctx = new ReplContext(
                 null, null, null, null, null, null, null, null, null, null,
-                terminal, running, new AtomicReference<LineReader>(), null, null);
+                terminal, running, new AtomicReference<LineReader>(), null, null, null);
 
         DefaultParser parser = AgentRepl.replParser();
         PicocliCommandsFactory factory = new PicocliCommandsFactory();

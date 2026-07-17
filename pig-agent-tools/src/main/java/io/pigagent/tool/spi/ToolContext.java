@@ -3,6 +3,7 @@ package io.pigagent.tool.spi;
 import io.pigagent.core.outreach.NotificationService;
 import io.pigagent.task.TaskManager;
 import io.pigagent.tool.sandbox.SandboxPolicy;
+import io.pigagent.tool.skills.authoring.SkillStagingArea;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -22,6 +23,8 @@ public final class ToolContext {
     private final SandboxPolicy sandboxPolicy;
     private final NotificationService notificationService;
     private final BooleanSupplier outreachEnabled;
+    private final SkillStagingArea skillStaging;
+    private final BooleanSupplier autonomousSkillsEnabled;
 
     public ToolContext(TaskManager taskManager, Path skillsDir) {
         this(taskManager, skillsDir, null, null);
@@ -40,6 +43,14 @@ public final class ToolContext {
     public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
                        List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
                        NotificationService notificationService, BooleanSupplier outreachEnabled) {
+        this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, sandboxPolicy,
+                notificationService, outreachEnabled, null, null);
+    }
+
+    public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
+                       List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
+                       NotificationService notificationService, BooleanSupplier outreachEnabled,
+                       SkillStagingArea skillStaging, BooleanSupplier autonomousSkillsEnabled) {
         this.taskManager = taskManager;
         this.skillsDir = skillsDir;
         this.workspaceRoot = workspaceRoot;
@@ -47,6 +58,8 @@ public final class ToolContext {
         this.sandboxPolicy = sandboxPolicy;
         this.notificationService = notificationService;
         this.outreachEnabled = outreachEnabled == null ? () -> false : outreachEnabled;
+        this.skillStaging = skillStaging;
+        this.autonomousSkillsEnabled = autonomousSkillsEnabled == null ? () -> false : autonomousSkillsEnabled;
     }
 
     /** The task manager (for the task tool); may be {@code null} in contexts that don't need it. */
@@ -97,5 +110,21 @@ public final class ToolContext {
      */
     public BooleanSupplier outreachEnabled() {
         return outreachEnabled;
+    }
+
+    /**
+     * The autonomous-skills staging area (for the {@code proposeSkill}/{@code skillManage} tools);
+     * {@code null} when autonomous skills are not wired, in which case the provider registers no tool.
+     */
+    public SkillStagingArea skillStaging() {
+        return skillStaging;
+    }
+
+    /**
+     * Whether autonomous skills are enabled — read live (a supplier) so the {@code proposeSkill}/
+     * {@code skillManage} tools' availability tracks config. Never {@code null}; defaults to {@code false}.
+     */
+    public BooleanSupplier autonomousSkillsEnabled() {
+        return autonomousSkillsEnabled;
     }
 }

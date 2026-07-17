@@ -35,6 +35,7 @@ import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.SessionManager;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
+import io.pigagent.tool.skills.authoring.SkillGate;
 import org.jline.console.SystemRegistry;
 import org.jline.console.impl.SystemRegistryImpl;
 import org.jline.reader.EndOfFileException;
@@ -44,6 +45,8 @@ import org.jline.reader.UserInterruptException;
 import org.jline.reader.impl.DefaultParser;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.shell.jline3.PicocliCommands;
 import picocli.shell.jline3.PicocliCommands.PicocliCommandsFactory;
@@ -78,6 +81,8 @@ import java.util.function.Supplier;
  */
 public final class AgentRepl {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentRepl.class);
+
     private final AgentHolder agentHolder;
     private final AgentKernel agentKernel;
     private final Path reportsDir;
@@ -92,13 +97,14 @@ public final class AgentRepl {
     private final AtomicReference<LineReader> readerRef;
     private final ToolAvailabilityReport availabilityReport;
     private final NotificationService notificationService;
+    private final SkillGate skillGate;
 
     public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
                      AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport,
-                     NotificationService notificationService) {
+                     NotificationService notificationService, SkillGate skillGate) {
         this.agentHolder = agentHolder;
         this.agentKernel = agentKernel;
         this.reportsDir = reportsDir;
@@ -113,6 +119,7 @@ public final class AgentRepl {
         this.readerRef = readerRef;
         this.availabilityReport = availabilityReport;
         this.notificationService = notificationService;
+        this.skillGate = skillGate;
     }
 
     public void run() throws IOException {
@@ -125,7 +132,7 @@ public final class AgentRepl {
             ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
                     configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
-                    availabilityReport, notificationService);
+                    availabilityReport, notificationService, skillGate);
 
             DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
@@ -235,6 +242,28 @@ public final class AgentRepl {
                 .content(TextBlock.builder().text(input).build()).build();
         renderTurn(userMsg, sessionId, terminal);
         sessionManager.saveCurrent();
+        maybeAutoPromoteSkills(terminal);
+    }
+
+    /**
+     * Opt-in interactive auto-promotion: when {@code skills.autonomous.auto-promote} is on, promote any
+     * staged skill drafts (each still scanned + deduped by the gate) at the end of an interactive turn.
+     * This runs ONLY on the REPL turn path, so channel/autonomous tracks (no turn hook) never
+     * auto-promote — fail-closed. Default off → no-op. Any failure is swallowed (never breaks a turn).
+     */
+    private void maybeAutoPromoteSkills(Terminal terminal) {
+        if (skillGate == null || configManager == null
+                || !configManager.getConfig().getSkills().getAutonomous().isAutoPromote()) {
+            return;
+        }
+        try {
+            List<String> promoted = skillGate.autoPromotePending();
+            for (String name : promoted) {
+                Ansi.println(terminal, Ansi.success("[auto-promoted skill '" + name + "']"));
+            }
+        } catch (RuntimeException e) {
+            log.warn("Auto-promote of staged skills failed: {}", e.toString());
+        }
     }
 
     /**

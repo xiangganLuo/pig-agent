@@ -88,7 +88,15 @@ import io.pigagent.tool.permission.CommandPermissionTool;
 import io.pigagent.tool.permission.PermissionContextFactory;
 import io.pigagent.tool.sandbox.SandboxPolicy;
 import io.pigagent.tool.shell.ShellTools;
+import io.pigagent.tool.skills.ClasspathSkillSource;
+import io.pigagent.tool.skills.SkillLimits;
+import io.pigagent.tool.skills.SkillRegistry;
 import io.pigagent.tool.skills.SkillsTool;
+import io.pigagent.tool.skills.WorkspaceSkillSource;
+import io.pigagent.tool.skills.authoring.DefaultSkillContentScanner;
+import io.pigagent.tool.skills.authoring.SkillContentScanner;
+import io.pigagent.tool.skills.authoring.SkillGate;
+import io.pigagent.tool.skills.authoring.SkillStagingArea;
 import io.pigagent.tool.spi.ToolContext;
 import io.pigagent.tool.spi.ToolRegistrar;
 import io.pigagent.tool.availability.ToolAvailabilityGate;
@@ -169,6 +177,8 @@ public final class AgentBootstrap {
         public final ChannelNotificationService notificationService;
         /** Mutable registry of started channels, populated by the CLI so outreach can find outbound channels. */
         public final ChannelRegistry outreachRegistry;
+        /** Autonomous-skills gate: scan + dedup + atomic promote for the /skill human gate + auto-promote. */
+        public final SkillGate skillGate;
         private final TaskScheduler taskScheduler;
 
         private Services(WorkspaceManager workspace, ConfigurationManager configManager, PigAgentConfig config,
@@ -178,7 +188,7 @@ public final class AgentBootstrap {
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
                          ChannelNotificationService notificationService, ChannelRegistry outreachRegistry,
-                         TaskScheduler taskScheduler) {
+                         SkillGate skillGate, TaskScheduler taskScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
             this.config = config;
@@ -195,6 +205,7 @@ public final class AgentBootstrap {
             this.readerRef = readerRef;
             this.notificationService = notificationService;
             this.outreachRegistry = outreachRegistry;
+            this.skillGate = skillGate;
             this.taskScheduler = taskScheduler;
         }
 
@@ -274,9 +285,23 @@ public final class AgentBootstrap {
         SandboxPolicy sandboxPolicy = new SandboxPolicy(
                 execCfg.getMaxOutputBytes(), execCfg.getTimeoutSeconds(),
                 execCfg.getDenylist(), execCfg.getWarnlist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
+        // Autonomous skills (autonomous-skills): the agent stages SKILL.md drafts here; promotion is
+        // human-gated (/skill) or opt-in interactive auto-promote. The staging area + a live enabled
+        // flag flow into the write tools via ToolContext; the SkillGate (scan + dedup + atomic promote)
+        // is CLI-side (the tools never hold it → fail-closed). Default off → no write tools, no change.
+        PigAgentConfig.AutonomousSkillsConfig autoSkillsCfg = config.getSkills().getAutonomous();
+        SkillStagingArea skillStaging = new SkillStagingArea(
+                workspace.getSkillsDir(), autoSkillsCfg.getStagingDir(), SkillLimits.defaults());
+        SkillContentScanner skillScanner = new DefaultSkillContentScanner();
+        SkillGate skillGate = new SkillGate(skillStaging, skillScanner,
+                new SkillRegistry(List.of(
+                        new WorkspaceSkillSource(workspace.getSkillsDir()),
+                        new ClasspathSkillSource())),
+                new WorkspaceSkillSource(workspace.getSkillsDir()));
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
                 workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy,
-                notificationService, () -> configManager.getConfig().getOutreach().isEnabled());
+                notificationService, () -> configManager.getConfig().getOutreach().isEnabled(),
+                skillStaging, () -> configManager.getConfig().getSkills().getAutonomous().isEnabled());
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
@@ -669,7 +694,7 @@ public final class AgentBootstrap {
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
                 availabilityReport, readerRef, notificationService, outreachRegistry,
-                taskScheduler);
+                skillGate, taskScheduler);
     }
 
     /**

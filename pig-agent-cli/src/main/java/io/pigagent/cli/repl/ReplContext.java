@@ -11,6 +11,7 @@ import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.SessionManager;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
+import io.pigagent.tool.skills.authoring.SkillGate;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
 
@@ -43,7 +44,8 @@ public record ReplContext(
         AtomicBoolean running,
         AtomicReference<LineReader> readerRef,
         ToolAvailabilityReport availabilityReport,
-        NotificationService notificationService) {
+        NotificationService notificationService,
+        SkillGate skillGate) {
 
     /** Convenience accessor for the current agent. */
     public io.pigagent.core.agent.PigAgent agent() {

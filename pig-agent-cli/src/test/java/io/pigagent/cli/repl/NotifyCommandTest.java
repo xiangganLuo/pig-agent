@@ -48,7 +48,7 @@ class NotifyCommandTest {
                 .build();
         ReplContext ctx = new ReplContext(
                 null, null, null, cfg, null, null, null, null, null, null,
-                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, svc);
+                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, svc, null);
         return ReplCommands.build(ctx, CommandLine.defaultFactory());
     }
 

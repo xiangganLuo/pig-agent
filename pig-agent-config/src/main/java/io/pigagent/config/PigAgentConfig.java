@@ -27,6 +27,7 @@ public final class PigAgentConfig {
     @JsonProperty("plan-mode") private PlanModeConfig planMode = new PlanModeConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
+    @JsonProperty("skills") private SkillsConfig skills = new SkillsConfig();
     @JsonProperty("outreach") private OutreachConfig outreach = new OutreachConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
@@ -50,6 +51,8 @@ public final class PigAgentConfig {
     public WebConfig getWeb() { return web; }
     public MemoryConfig getMemory() { return memory; }
     public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
+    public SkillsConfig getSkills() { return skills; }
+    public void setSkills(SkillsConfig s) { this.skills = s == null ? new SkillsConfig() : s; }
     public OutreachConfig getOutreach() { return outreach; }
     public void setOutreach(OutreachConfig o) { this.outreach = o == null ? new OutreachConfig() : o; }
     public String getCurrentSessionId() { return currentSessionId; }
@@ -248,6 +251,39 @@ public final class PigAgentConfig {
         public void setConsolidationMaxTokens(int t) { this.consolidationMaxTokens = t; }
         public String getModelId() { return modelId; }
         public void setModelId(String id) { this.modelId = id == null ? "" : id; }
+    }
+
+    /**
+     * 自主沉淀 skills（autonomous-skills）。默认 {@code enabled=false} → 不注册 {@code proposeSkill}/
+     * {@code skillManage} 写工具（经 availability 门从模型 schema 隐藏），行为逐字节等价引入本能力前
+     * （只读技能栈不变、无写路径）。启用后：agent 可把「解过的非平凡任务/工作流」蒸馏成 {@code SKILL.md}
+     * 草稿写入暂存区 {@code workspace/skills/<staging-dir>/<name>/}（{@code staging-dir} 默认 {@code .pending}），
+     * <b>默认人工门</b>（{@code /skill review|approve|reject}）审批后经安全扫描 + 去重原子提升到
+     * {@code workspace/skills/<name>/}。{@code auto-promote} 默认 false = 纯人工门；为 true 时交互 REPL 一轮结束后
+     * 对暂存草稿自动跑扫描 + 去重 + 提升（渠道/自主轨道无此 hook → 永不自动提升，fail-closed）。全部可选、
+     * 默认安全、向后兼容。
+     */
+    public static final class SkillsConfig {
+        @JsonProperty("autonomous") private AutonomousSkillsConfig autonomous = new AutonomousSkillsConfig();
+        public AutonomousSkillsConfig getAutonomous() { return autonomous; }
+        public void setAutonomous(AutonomousSkillsConfig a) {
+            this.autonomous = a == null ? new AutonomousSkillsConfig() : a;
+        }
+    }
+
+    /** {@code skills.autonomous} 子块。缺省全安全（关闭 + {@code .pending} 暂存 + 不自动提升）。 */
+    public static final class AutonomousSkillsConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("staging-dir") private String stagingDir = ".pending";
+        @JsonProperty("auto-promote") private boolean autoPromote = false;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getStagingDir() { return stagingDir; }
+        public void setStagingDir(String d) {
+            this.stagingDir = (d == null || d.isBlank()) ? ".pending" : d;
+        }
+        public boolean isAutoPromote() { return autoPromote; }
+        public void setAutoPromote(boolean a) { this.autoPromote = a; }
     }
 
     /**

@@ -80,7 +80,7 @@ public final class PigAgentCli {
         new AgentRepl(s.agentHolder, s.agentKernel, s.workspace.getReportsDir(),
                 s.configManager, s.registry, s.modelManager, s.compressionService,
                 s.mcpManager, bridges, s.sessionManager, s.workspace.getRootPath(), s.readerRef,
-                s.availabilityReport, s.notificationService).run();
+                s.availabilityReport, s.notificationService, s.skillGate).run();
     }
 
     /** Run a shutdown step, swallowing+logging any error so one failure never aborts the rest. */

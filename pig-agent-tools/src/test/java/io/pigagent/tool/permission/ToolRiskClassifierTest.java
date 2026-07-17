@@ -23,6 +23,9 @@ class ToolRiskClassifierTest {
         assertThat(ToolRiskClassifier.classify("showChecklist", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
         // proactive-outreach: notifyUser reaches the user over an outbound channel → NETWORK.
         assertThat(ToolRiskClassifier.classify("notifyUser", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        // autonomous-skills: proposeSkill/skillManage write staged drafts → WRITE (permission-governed).
+        assertThat(ToolRiskClassifier.classify("proposeSkill", Map.of())).isEqualTo(ToolRisk.WRITE);
+        assertThat(ToolRiskClassifier.classify("skillManage", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
     }
 

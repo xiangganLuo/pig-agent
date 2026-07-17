@@ -70,7 +70,7 @@ class PlanCommandTest {
         when(sessions.getCurrentSessionId()).thenReturn(SID);
         ReplContext ctx = new ReplContext(
                 new AgentHolder(agent), null, null, cfg, null, null, null, null, null, sessions,
-                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null);
+                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
         return ReplCommands.build(ctx, CommandLine.defaultFactory());
     }
 
