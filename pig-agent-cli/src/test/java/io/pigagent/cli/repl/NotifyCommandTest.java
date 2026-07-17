@@ -159,6 +159,9 @@ class NotifyCommandTest {
         cfg.updateConfig(c -> {
             c.getOutreach().setEnabled(true);
             c.getOutreach().setChannel("webhook");
+            // Recipient set so the inbound-only refusal (not the missing-recipient pre-check) is what
+            // stops the send — this test isolates the inbound-only path on a fully-configured outreach.
+            c.getOutreach().setRecipient("r");
         });
         RecordingService svc = new RecordingService();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
