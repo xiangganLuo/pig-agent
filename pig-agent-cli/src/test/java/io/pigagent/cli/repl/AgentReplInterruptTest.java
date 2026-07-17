@@ -62,6 +62,6 @@ class AgentReplInterruptTest {
 
         assertThat(turn.isAlive()).as("turn returned to prompt").isFalse();
         verify(kernel, atLeastOnce()).interruptCurrent();
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("[interrupted]");
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("[已中断]");
     }
 }

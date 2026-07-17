@@ -3,6 +3,7 @@ package io.pigagent.cli.repl;
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
 import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.Msg;
@@ -102,6 +103,93 @@ class AgentReplTurnTest {
         repl.renderStream(Flux.just(denied), terminal);
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("writeFile").contains("denied");
+    }
+
+    @Test
+    void renderStream_flushesBufferedAnswerBeforeToolBlock() throws IOException {
+        // A partial answer line (no trailing newline) buffered by the printer must be flushed BEFORE a
+        // mid-stream tool block renders — else it would print after the tool line and merge/garble (#3).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null, null, null);
+
+        AgentEvent partial = new TextBlockDeltaEvent("r1", "b1", "working on it");
+        AgentEvent toolDelta = new ToolResultTextDeltaEvent("r1", "tc1", "executeCommand", "exit=0");
+        AgentEvent toolEnd = new ToolResultEndEvent("r1", "tc1", "executeCommand", ToolResultState.SUCCESS);
+
+        repl.renderStream(Flux.just(partial, toolDelta, toolEnd), terminal);
+
+        String printed = out.toString(StandardCharsets.UTF_8);
+        assertThat(printed).contains("working on it").contains("executeCommand");
+        assertThat(printed.indexOf("working on it"))
+                .as("buffered answer flushed before the tool block")
+                .isLessThan(printed.indexOf("executeCommand"));
+    }
+
+    @Test
+    void renderStream_printsToolHeadOnStartEvent() throws IOException {
+        // The ⏺ head must appear as soon as the tool call starts (so a long command isn't silent) (#4).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null, null, null);
+
+        AgentEvent start = new ToolCallStartEvent("r1", "tc1", "executeCommand");
+
+        repl.renderStream(Flux.just(start), terminal);
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("⏺").contains("executeCommand");
+    }
+
+    @Test
+    void renderStream_headPrintedOnceAcrossStartAndEnd() throws IOException {
+        // Head on start + body on end → the head must not be printed twice for one call id (#4).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null, null, null);
+
+        AgentEvent start = new ToolCallStartEvent("r1", "tc1", "readFile");
+        AgentEvent delta = new ToolResultTextDeltaEvent("r1", "tc1", "readFile", "42 lines");
+        AgentEvent end = new ToolResultEndEvent("r1", "tc1", "readFile", ToolResultState.SUCCESS);
+
+        repl.renderStream(Flux.just(start, delta, end), terminal);
+
+        String printed = out.toString(StandardCharsets.UTF_8);
+        int heads = printed.split("readFile", -1).length - 1;
+        assertThat(heads).as("readFile head printed once, body carries no name").isEqualTo(1);
+        assertThat(printed).contains("└").contains("42 lines");
+    }
+
+    @Test
+    void renderStream_rendersErrorToolResultDistinctly() throws IOException {
+        // A failed (ERROR) tool result renders with the ✗ error marker, distinct from a success (#5).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null, null, null);
+
+        AgentEvent delta = new ToolResultTextDeltaEvent("r1", "tc1", "webSearch", "network down");
+        AgentEvent end = new ToolResultEndEvent("r1", "tc1", "webSearch", ToolResultState.ERROR);
+
+        repl.renderStream(Flux.just(delta, end), terminal);
+
+        String printed = out.toString(StandardCharsets.UTF_8);
+        assertThat(printed).contains("webSearch").contains("network down").contains("✗");
+    }
+
+    @Test
+    void renderStream_emitsNoOutputMarkerWhenTurnRendersNothing() throws IOException {
+        // A turn that produces no answer/tool/child output shows a dim [无输出] marker (LOW).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = dumbTerminal(out);
+        AgentRepl repl = new AgentRepl(null, null, null, null, null, null, null, null, null, null,
+                null, new AtomicReference<>(), null, null, null);
+
+        repl.renderStream(Flux.just(new AgentEndEvent("r1", "assistant", "")), terminal);
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("[无输出]");
     }
 
     @Test

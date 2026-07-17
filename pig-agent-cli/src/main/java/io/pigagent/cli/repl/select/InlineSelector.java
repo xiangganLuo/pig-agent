@@ -89,20 +89,74 @@ public final class InlineSelector {
 
     /** Draw the option list; when {@code redraw}, first move the cursor back up over it. */
     private static void render(Terminal terminal, List<String> options, int cursor, boolean redraw) {
+        int width = terminal.getWidth();
         StringBuilder sb = new StringBuilder();
         if (redraw) {
             sb.append(ESC).append('[').append(options.size()).append('A'); // cursor up N lines
         }
         for (int i = 0; i < options.size(); i++) {
             sb.append('\r').append(ESC).append("[2K"); // carriage return + clear entire line
+            // Truncate to the terminal width (minus the 2-col "❯ "/"  " prefix) so a wide label can't
+            // wrap to a second row — that would break the cursor-up redraw math and corrupt the list.
+            String opt = width > 2 ? truncateToWidth(options.get(i), width - 2) : options.get(i);
             if (i == cursor) {
-                sb.append(ansi().fg(Color.CYAN).a("❯ ").bold().a(options.get(i)).reset().toString());
+                sb.append(ansi().fg(Color.CYAN).a("❯ ").bold().a(opt).reset().toString());
             } else {
-                sb.append("  ").append(options.get(i));
+                sb.append("  ").append(opt);
             }
             sb.append('\n');
         }
         terminal.writer().print(sb);
         terminal.flush();
+    }
+
+    /**
+     * Truncate {@code option} to at most {@code maxColumns} <em>visible</em> columns, preserving ANSI
+     * escape sequences (which take no columns) and never splitting a surrogate pair (code-point safe).
+     * When truncated it appends {@code …} and an ANSI reset so styling from a cut span can't bleed.
+     * Package-private + pure for unit testing.
+     */
+    static String truncateToWidth(String option, int maxColumns) {
+        if (option == null || maxColumns <= 0) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        int cols = 0;
+        int i = 0;
+        int n = option.length();
+        boolean truncated = false;
+        while (i < n) {
+            char c = option.charAt(i);
+            if (c == '') { // ANSI escape: copy through its terminator, count no columns
+                int j = i + 1;
+                if (j < n && option.charAt(j) == '[') {
+                    j++;
+                    while (j < n && !Character.isLetter(option.charAt(j))) {
+                        j++;
+                    }
+                    if (j < n) {
+                        j++; // include the final command letter
+                    }
+                } else if (j < n) {
+                    j++; // a simple two-char escape
+                }
+                out.append(option, i, j);
+                i = j;
+                continue;
+            }
+            if (cols >= maxColumns) {
+                truncated = true;
+                break;
+            }
+            int cp = option.codePointAt(i);
+            int cc = Character.charCount(cp);
+            out.append(option, i, i + cc);
+            i += cc;
+            cols++;
+        }
+        if (truncated) {
+            out.append('…').append("[0m");
+        }
+        return out.toString();
     }
 }

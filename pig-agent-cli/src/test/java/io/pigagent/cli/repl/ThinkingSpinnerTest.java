@@ -155,4 +155,56 @@ class ThinkingSpinnerTest {
     void frameContent_formatsGlyphLabelAndElapsed() {
         assertThat(ThinkingSpinner.frameContent("⠹", 12)).isEqualTo("⠹ thinking… (12s)");
     }
+
+    @Test
+    void labelFor_flipsToRetryLabelAfterThreshold_whenEnabled() {
+        assertThat(ThinkingSpinner.labelFor(0, true, "thinking…")).isEqualTo("thinking…");
+        assertThat(ThinkingSpinner.labelFor(ThinkingSpinner.RETRY_LABEL_AFTER_SECONDS - 1, true, "thinking…"))
+                .isEqualTo("thinking…");
+        assertThat(ThinkingSpinner.labelFor(ThinkingSpinner.RETRY_LABEL_AFTER_SECONDS, true, "thinking…"))
+                .contains("重试");
+    }
+
+    @Test
+    void labelFor_neverFlips_whenRetrySwitchOff() {
+        assertThat(ThinkingSpinner.labelFor(30, false, "运行中…")).isEqualTo("运行中…");
+    }
+
+    @Test
+    void tick_afterRetryThreshold_paintsRetryLabel() {
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        when(scheduler.scheduleAtFixedRate(any(), anyLong(), anyLong(), any())).thenReturn(future());
+        AtomicLong now = new AtomicLong(0);
+        List<String> sink = new ArrayList<>();
+
+        ThinkingSpinner spinner = new ThinkingSpinner(scheduler, now::get, sink::add, true);
+        spinner.start(); // reasoning phase → retry switch on
+
+        ArgumentCaptor<Runnable> repaint = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).scheduleAtFixedRate(repaint.capture(), anyLong(), anyLong(), any());
+
+        now.set(7 * SEC);
+        repaint.getValue().run();
+
+        assertThat(sink.get(sink.size() - 1)).contains("重试中").contains("(7s)");
+    }
+
+    @Test
+    void toolPhaseStart_neverShowsRetryLabel() {
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        when(scheduler.scheduleAtFixedRate(any(), anyLong(), anyLong(), any())).thenReturn(future());
+        AtomicLong now = new AtomicLong(0);
+        List<String> sink = new ArrayList<>();
+
+        ThinkingSpinner spinner = new ThinkingSpinner(scheduler, now::get, sink::add, true);
+        spinner.start("运行中…", false); // tool-execution phase → no retry flip
+
+        ArgumentCaptor<Runnable> repaint = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).scheduleAtFixedRate(repaint.capture(), anyLong(), anyLong(), any());
+
+        now.set(30 * SEC);
+        repaint.getValue().run();
+
+        assertThat(sink.get(sink.size() - 1)).contains("运行中").doesNotContain("重试");
+    }
 }

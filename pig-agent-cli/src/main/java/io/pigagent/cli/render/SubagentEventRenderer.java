@@ -55,7 +55,7 @@ public final class SubagentEventRenderer {
         String oneLine = text.strip().replaceAll("\\s*\\R\\s*", " ");
         String redacted = ToolCallFormatter.redact(oneLine);
         if (redacted.length() > MAX_SUMMARY) {
-            redacted = redacted.substring(0, MAX_SUMMARY) + "…";
+            redacted = ToolCallFormatter.codePointSafeSubstring(redacted, MAX_SUMMARY) + "…";
         }
         return redacted;
     }

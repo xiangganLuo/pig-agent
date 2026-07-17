@@ -14,6 +14,7 @@ import io.agentscope.core.event.TextBlockEndEvent;
 import io.agentscope.core.event.ThinkingBlockStartEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
 import io.agentscope.core.event.ToolResultEndEvent;
+import io.agentscope.core.event.ToolResultStartEvent;
 import io.agentscope.core.event.ToolResultTextDeltaEvent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -29,6 +30,7 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.compression.CompressionService;
+import io.pigagent.core.model.ModelErrorMessages;
 import io.pigagent.core.outreach.NotificationService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
@@ -56,9 +58,11 @@ import reactor.core.publisher.Flux;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -200,7 +204,10 @@ public final class AgentRepl {
                     // Ctrl-D: exit the REPL.
                     break;
                 } catch (Exception e) {
-                    systemRegistry.trace(e);
+                    // A slash-command failure prints a one-line message (credential-redacted); the full
+                    // stack goes to the log file only — never a raw dump to the terminal (fix #9).
+                    Ansi.println(terminal, Ansi.error("命令执行失败：" + ToolCallFormatter.redact(shortMessage(e))));
+                    log.warn("Slash command failed", e);
                 }
             }
         } finally {
@@ -223,6 +230,9 @@ public final class AgentRepl {
 
     /** Bound on HITL confirm/resume rounds within a single turn (defence against a loop). */
     private static final int MAX_CONFIRM_ROUNDS = 20;
+
+    /** Cap on the rendered model-error one-liner (the friendly message is already short). */
+    private static final int MAX_ERROR_CHARS = 300;
 
     /** Native Plan Mode's exit tool (its {@code checkPermissions} returns ASK → surfaces as HITL). */
     private static final String PLAN_EXIT_TOOL = "plan_exit";
@@ -313,33 +323,28 @@ public final class AgentRepl {
      * the previous INT handler is restored in {@code finally}. Package-private for the tests.
      */
     RequireUserConfirmEvent renderStream(Flux<AgentEvent> stream, Terminal terminal) {
-        StreamingMarkdownPrinter printer = new StreamingMarkdownPrinter();
-        ThinkingSpinner spinner = newSpinner(terminal);
+        TurnRender r = new TurnRender(newSpinner(terminal));
         AtomicBoolean interrupted = new AtomicBoolean(false);
         AtomicReference<Throwable> error = new AtomicReference<>();
-        AtomicReference<RequireUserConfirmEvent> confirm = new AtomicReference<>();
-        Map<String, StringBuilder> toolResults = new LinkedHashMap<>();
-        // av2 Phase 6a: forwarded subagent (child) text, accumulated per source path ("main/reviewer")
-        // and flushed as a dim nested "└ [reviewer] …" line — distinct from the parent's answer.
-        Map<String, StringBuilder> childText = new LinkedHashMap<>();
         CountDownLatch done = new CountDownLatch(1);
 
         Ansi.println(terminal, "");
 
         Disposable sub = stream.subscribe(
-                event -> onEvent(event, terminal, printer, spinner, toolResults, childText, confirm),
+                event -> onEvent(event, terminal, r),
                 err -> {
                     error.set(err);
                     done.countDown();
                 },
                 () -> {
-                    spinner.stop();
-                    printer.flush(line -> Ansi.println(terminal, line));
-                    flushAllChildText(terminal, childText);
+                    r.spinner.stop();
+                    flushPrinter(r.printer, terminal);
+                    flushAllChildText(terminal, r.childText);
                     done.countDown();
                 });
 
         Terminal.SignalHandler prev = terminal.handle(Terminal.Signal.INT, s -> {
+            // Mark interrupted BEFORE disposing so a racing onComplete flush can't beat the notice.
             interrupted.set(true);
             if (agentKernel != null) {
                 agentKernel.interruptCurrent();
@@ -356,65 +361,122 @@ public final class AgentRepl {
             sub.dispose();
         }
 
-        spinner.stop();
+        r.spinner.stop();
         if (interrupted.get()) {
-            Ansi.println(terminal, Ansi.warn("[interrupted]"));
+            Ansi.println(terminal, Ansi.warn("[已中断]"));
             return null;
         }
         if (error.get() != null) {
-            Ansi.println(terminal, Ansi.error("Error: " + error.get().getMessage()));
+            // Friendly, localized, credential-redacted, length-capped model error (fix #2 / F1b).
+            Ansi.println(terminal, Ansi.error(friendlyError(error.get())));
             return null;
         }
+        RequireUserConfirmEvent pending = r.confirm.get();
+        if (pending == null && !r.anyOutput()) {
+            Ansi.println(terminal, Ansi.dim("[无输出]"));
+        }
         Ansi.println(terminal, "");
-        return confirm.get();
+        return pending;
     }
 
-    private void onEvent(AgentEvent event, Terminal terminal, StreamingMarkdownPrinter printer,
-                         ThinkingSpinner spinner, Map<String, StringBuilder> toolResults,
-                         Map<String, StringBuilder> childText,
-                         AtomicReference<RequireUserConfirmEvent> confirm) {
+    /** Map a turn-stream error to a friendly, localized, redacted, length-capped one-liner. */
+    private static String friendlyError(Throwable err) {
+        String msg = ToolCallFormatter.redact(ModelErrorMessages.friendly(err));
+        if (msg.length() > MAX_ERROR_CHARS) {
+            int end = MAX_ERROR_CHARS;
+            if (Character.isHighSurrogate(msg.charAt(end - 1))) {
+                end--; // never split a surrogate pair when capping
+            }
+            msg = msg.substring(0, end) + "…";
+        }
+        return msg;
+    }
+
+    private void onEvent(AgentEvent event, Terminal terminal, TurnRender r) {
         // av2 Phase 6a: a non-null source means this event was FORWARDED from a synchronous subagent
         // (child) — render it nested + dim, distinct from the parent (source == null). Background
         // (async) tasks are not forwarded; their completion arrives as a <system-reminder> the parent
         // reasons over, surfacing naturally as parent answer text on the next step.
         String source = event.getSource();
         if (source != null && !source.isBlank()) {
-            onChildEvent(event, source, terminal, spinner, childText);
+            onChildEvent(event, source, terminal, r);
             return;
         }
         if (event instanceof SubagentExposedEvent exposed) {
             // Phase 6b will bridge expose_to_user to a Channel (chat.sendToSubagent); for now, note it
             // (never a credential) so the operator sees a subagent was exposed. Graceful no-op otherwise.
-            spinner.stop();
+            r.spinner.stop();
             String who = exposed.getLabel() != null ? exposed.getLabel() : exposed.getAgentId();
             Ansi.println(terminal, Ansi.dim("[subagent exposed: " + who + "]"));
-            return;
-        }
-        if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
-            spinner.start();
+            r.produced = true;
+        } else if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
+            r.spinner.start();
         } else if (event instanceof TextBlockDeltaEvent delta) {
-            spinner.stop();
-            printer.accept(delta.getDelta(), line -> Ansi.println(terminal, line));
-        } else if (event instanceof ToolCallStartEvent) {
-            spinner.stop();
+            r.spinner.stop();
+            r.printer.accept(delta.getDelta(), line -> Ansi.println(terminal, line));
+        } else if (event instanceof TextBlockEndEvent) {
+            // Flush any buffered partial answer line now, so a following tool block / next reasoning
+            // phase never merges onto a stale partial line (fix #3).
+            r.spinner.stop();
+            flushPrinter(r.printer, terminal);
+        } else if (event instanceof ToolCallStartEvent s) {
+            onToolStart(terminal, r, key(s.getToolCallId()), toolLabel(s.getToolCallName()));
+        } else if (event instanceof ToolResultStartEvent s) {
+            onToolStart(terminal, r, key(s.getToolCallId()), toolLabel(s.getToolCallName()));
         } else if (event instanceof ToolResultTextDeltaEvent d) {
-            toolResults.computeIfAbsent(key(d.getToolCallId()), k -> new StringBuilder()).append(d.getDelta());
+            r.toolResults.computeIfAbsent(key(d.getToolCallId()), k -> new StringBuilder()).append(d.getDelta());
         } else if (event instanceof ToolResultEndEvent end) {
-            spinner.stop();
-            Ansi.println(terminal, ToolCallFormatter.format(
-                    toolLabel(end.getToolCallName()), toolSummary(end, toolResults)));
+            onToolEnd(terminal, r, end);
         } else if (event instanceof ExceedMaxItersEvent) {
-            spinner.stop();
-            Ansi.println(terminal, Ansi.warn("[reached max reasoning iterations]"));
+            r.spinner.stop();
+            flushPrinter(r.printer, terminal);
+            Ansi.println(terminal, Ansi.warn("[已达最大推理轮次]"));
+            r.produced = true;
         } else if (event instanceof AllToolsDeniedEvent) {
-            spinner.stop();
-            Ansi.println(terminal, Ansi.warn("[all tool calls denied by permission policy]"));
+            r.spinner.stop();
+            flushPrinter(r.printer, terminal);
+            Ansi.println(terminal, Ansi.warn("[所有工具调用被权限策略拒绝]"));
+            r.produced = true;
         } else if (event instanceof RequireUserConfirmEvent ask) {
-            spinner.stop();
-            confirm.set(ask);
+            r.spinner.stop();
+            flushPrinter(r.printer, terminal);
+            r.confirm.set(ask);
         } else if (event instanceof AgentEndEvent) {
-            spinner.stop();
+            r.spinner.stop();
         }
+    }
+
+    /**
+     * Announce a starting tool call: flush any buffered answer text, print the {@code ⏺ name} head
+     * immediately (once per call id) so a long-running tool isn't silent, then keep a spinner running
+     * during execution (fix #4). The {@code └ result} body is appended later at {@link #onToolEnd}.
+     */
+    private void onToolStart(Terminal terminal, TurnRender r, String id, String label) {
+        r.spinner.stop();
+        flushPrinter(r.printer, terminal);
+        if (r.headsPrinted.add(id)) {
+            Ansi.println(terminal, ToolCallFormatter.head(label));
+            r.produced = true;
+        }
+        r.spinner.start("运行中…", false); // an activity indicator during execution — not a "retry"
+    }
+
+    /**
+     * Render a finished tool call: print the head first if it wasn't already emitted at start, then the
+     * result body — a red {@code ✗} error line for a failed ({@link ToolResultState#ERROR}) result,
+     * else the dim success body (fix #3/#4/#5).
+     */
+    private void onToolEnd(Terminal terminal, TurnRender r, ToolResultEndEvent end) {
+        r.spinner.stop();
+        flushPrinter(r.printer, terminal);
+        String id = key(end.getToolCallId());
+        if (!r.headsPrinted.remove(id)) {
+            Ansi.println(terminal, ToolCallFormatter.head(toolLabel(end.getToolCallName())));
+        }
+        String summary = toolSummary(end, r.toolResults);
+        boolean isError = end.getState() == ToolResultState.ERROR;
+        Ansi.println(terminal, isError ? ToolCallFormatter.errorBody(summary) : ToolCallFormatter.body(summary));
+        r.produced = true;
     }
 
     /**
@@ -423,19 +485,25 @@ public final class AgentRepl {
      * tool call surfaces immediately as a nested dim line. Kept distinct from the parent's streamed
      * answer so it's clear which agent produced what.
      */
-    private void onChildEvent(AgentEvent event, String source, Terminal terminal,
-                              ThinkingSpinner spinner, Map<String, StringBuilder> childText) {
+    private void onChildEvent(AgentEvent event, String source, Terminal terminal, TurnRender r) {
         if (event instanceof TextBlockDeltaEvent delta) {
-            childText.computeIfAbsent(source, k -> new StringBuilder()).append(delta.getDelta());
+            r.childText.computeIfAbsent(source, k -> new StringBuilder()).append(delta.getDelta());
         } else if (event instanceof TextBlockEndEvent || event instanceof AgentEndEvent) {
-            flushChildText(terminal, source, childText);
+            flushChildText(terminal, source, r.childText);
+            r.produced = true;
         } else if (event instanceof ToolResultEndEvent end) {
-            spinner.stop();
+            r.spinner.stop();
             Ansi.println(terminal, SubagentEventRenderer.format(
                     source, "⏺ " + toolLabel(end.getToolCallName())));
+            r.produced = true;
         } else if (event instanceof AgentStartEvent) {
-            spinner.stop();
+            r.spinner.stop();
         }
+    }
+
+    /** Flush any buffered partial answer line through the terminal. Idempotent (no-op if empty). */
+    private static void flushPrinter(StreamingMarkdownPrinter printer, Terminal terminal) {
+        printer.flush(line -> Ansi.println(terminal, line));
     }
 
     /** Flush one source's accumulated child text as a single dim nested line, then clear it. */
@@ -548,5 +616,37 @@ public final class AgentRepl {
             return "tool";
         }
         return n;
+    }
+
+    /** A short, non-null message for a throwable (its message, else its simple class name). */
+    private static String shortMessage(Throwable e) {
+        String m = e.getMessage();
+        return (m == null || m.isBlank()) ? e.getClass().getSimpleName() : m.strip();
+    }
+
+    /**
+     * Mutable per-turn render state, threaded through the event handlers so their signatures stay small.
+     * Holds the streaming answer printer, the animated spinner, the per-call tool-result accumulators,
+     * the forwarded-subagent text buffers, the set of tool heads already printed (so a head isn't
+     * repeated at start+end), the captured HITL confirm event, and whether any tool/child line was
+     * printed (answer text is tracked via {@code printer.hasOutput()}).
+     */
+    private static final class TurnRender {
+        final StreamingMarkdownPrinter printer = new StreamingMarkdownPrinter();
+        final Map<String, StringBuilder> toolResults = new LinkedHashMap<>();
+        final Map<String, StringBuilder> childText = new LinkedHashMap<>();
+        final Set<String> headsPrinted = new HashSet<>();
+        final AtomicReference<RequireUserConfirmEvent> confirm = new AtomicReference<>();
+        final ThinkingSpinner spinner;
+        boolean produced;
+
+        TurnRender(ThinkingSpinner spinner) {
+            this.spinner = spinner;
+        }
+
+        /** True when the turn rendered any answer text, tool line or child line. */
+        boolean anyOutput() {
+            return printer.hasOutput() || produced;
+        }
     }
 }
