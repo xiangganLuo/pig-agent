@@ -41,4 +41,4 @@
 - [x] 7.2 `mvn -q -pl pig-agent-cli -am compile` 绿。
 - [x] 7.3 更新 `CLAUDE.md` builtin-skills 段落（自主沉淀 skills：propose→gate→scan→promote + 人工门 + fail-closed + 安全 + 去重 + 配置默认关）。
 - [x] 7.4 提交 `feat: 自主沉淀 skills（proposeSkill/skillManage + 人工门 + 安全扫描 + 去重 + 原子提升）`。
-- [ ] 7.5 归档：同步主 spec → `openspec/specs/autonomous-skills/`，change 移 `openspec/changes/archive/2026-07-17-autonomous-skills/`，提交归档。
+- [x] 7.5 归档：同步主 spec → `openspec/specs/autonomous-skills/`，change 移 `openspec/changes/archive/2026-07-17-autonomous-skills/`，提交归档。
