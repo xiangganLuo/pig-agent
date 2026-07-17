@@ -60,6 +60,11 @@ public final class StatusLine {
     }
 
     private static String blankTo(String value, String fallback) {
-        return (value == null || value.isBlank()) ? fallback : value.strip();
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        // Strip control chars from user-supplied values (session name / model label) so a stray ESC /
+        // CR can't inject ANSI or corrupt the one-line status.
+        return value.strip().replaceAll("\\p{Cc}", "");
     }
 }

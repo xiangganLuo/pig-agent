@@ -15,15 +15,20 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Regression guard: when the turn stream errors (e.g. an upstream 502), the REPL must print
- * the error exactly ONCE. Previously both {@code doOnError} and a surrounding {@code catch}
- * printed it, yielding duplicated "Error:" lines.
+ * Regression guard: when the turn stream errors (e.g. an upstream 502), the REPL must print the error
+ * exactly ONCE (previously both {@code doOnError} and a surrounding {@code catch} printed it, yielding
+ * duplicated lines). The error is now rendered as a friendly, localized, credential-redacted one-liner
+ * (fix #2 / F1b) rather than a raw {@code Error: <message>} dump — so the once-only invariant is
+ * asserted against that friendly text, and the raw upstream detail must NOT be shown.
  */
 class AgentReplErrorPrintTest {
 
+    /** Stable substring of the 5xx/overloaded friendly message (see ModelErrorMessages). */
+    private static final String FRIENDLY_5XX = "模型服务暂时不可用";
+
     @Test
-    void streamError_printsErrorExactlyOnce() throws IOException {
-        // Arrange — a turn stream that fails, and a REPL to render it.
+    void streamError_printsFriendlyErrorExactlyOnce() throws IOException {
+        // Arrange — a turn stream that fails with an upstream 502, and a REPL to render it.
         Flux<AgentEvent> stream = Flux.error(new RuntimeException("502: upstream_error"));
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -38,10 +43,10 @@ class AgentReplErrorPrintTest {
         // Act
         repl.renderStream(stream, terminal);
 
-        // Assert — exactly one "Error:" line, carrying the upstream message.
+        // Assert — exactly one friendly error line; raw upstream detail is not surfaced.
         String printed = out.toString(StandardCharsets.UTF_8);
-        int occurrences = printed.split("Error:", -1).length - 1;
+        int occurrences = printed.split(FRIENDLY_5XX, -1).length - 1;
         assertThat(occurrences).isEqualTo(1);
-        assertThat(printed).contains("502: upstream_error");
+        assertThat(printed).doesNotContain("upstream_error");
     }
 }

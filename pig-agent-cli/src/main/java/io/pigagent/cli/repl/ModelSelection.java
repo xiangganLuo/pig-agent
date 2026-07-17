@@ -21,6 +21,11 @@ public final class ModelSelection {
     private ModelSelection() {
     }
 
+    /** Remove control chars from a user-supplied label/id so it can't inject ANSI or corrupt a row. */
+    private static String sanitize(String s) {
+        return s == null ? "" : s.replaceAll("\\p{Cc}", "");
+    }
+
     /**
      * No-arg {@code /model}: pick a model with the arrow-key selector (numeric fallback on a
      * non-interactive terminal) and activate it for the current session.
@@ -34,8 +39,11 @@ public final class ModelSelection {
             return;
         }
         String cur = mm.getCurrentModelId();
+        // Strip control chars from the user-supplied label/id so a stray ESC/CR can't corrupt the
+        // in-place list rendering (the picker also truncates each row to the terminal width).
         List<String> labels = models.stream()
-                .map(m -> m.label() + (m.id().equals(cur) ? " *" : "") + Ansi.dim(" [" + m.id() + "]"))
+                .map(m -> sanitize(m.label()) + (m.id().equals(cur) ? " *" : "")
+                        + Ansi.dim(" [" + sanitize(m.id()) + "]"))
                 .toList();
 
         OptionalInt picked = InlineSelector.isInteractive(t)

@@ -71,4 +71,75 @@ class ToolCallFormatterTest {
 
         assertThat(out).doesNotContain("abcdef123456789012345");
     }
+
+    @Test
+    void redactsBareGoogleApiKeyEvenInUrl() {
+        String out = ToolCallFormatter.format("fetchUrl",
+                "GET https://x/v1?key=AIzaSyA1234567890abcdefgh_1234567 failed");
+
+        assertThat(out).doesNotContain("AIzaSyA1234567890abcdefgh_1234567");
+        assertThat(out).contains("***");
+    }
+
+    @Test
+    void redactsBareGithubToken() {
+        String out = ToolCallFormatter.format("mcp",
+                "auth failed with ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+
+        assertThat(out).doesNotContain("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+        assertThat(out).contains("***");
+    }
+
+    @Test
+    void redactsBareSlackTokens() {
+        String bot = ToolCallFormatter.format("slack", "using xoxb-1234567890-abcdefghijkl now");
+        assertThat(bot).doesNotContain("xoxb-1234567890-abcdefghijkl").contains("***");
+
+        String app = ToolCallFormatter.format("slack", "using xapp-1-A012-abcdefghijkl now");
+        assertThat(app).doesNotContain("xapp-1-A012-abcdefghijkl").contains("***");
+    }
+
+    @Test
+    void redactsBareJwt() {
+        String out = ToolCallFormatter.format("http",
+                "denied token eyJhbGciOi.eyJzdWIiOiIx.SflKxwRJSMeKKF2QT");
+
+        assertThat(out).doesNotContain("eyJhbGciOi.eyJzdWIiOiIx.SflKxwRJSMeKKF2QT");
+        assertThat(out).contains("***");
+    }
+
+    @Test
+    void errorBodyIsDistinctFromSuccessBody() {
+        String ok = ToolCallFormatter.body("done");
+        String err = ToolCallFormatter.errorBody("boom");
+
+        assertThat(err).contains("✗").contains("boom");
+        assertThat(ok).doesNotContain("✗");
+    }
+
+    @Test
+    void headAndBodyComposeToTheFullFormat() {
+        String full = ToolCallFormatter.format("readFile", "42 lines");
+
+        assertThat(full).isEqualTo(ToolCallFormatter.head("readFile") + "\n"
+                + ToolCallFormatter.body("42 lines"));
+    }
+
+    @Test
+    void truncationNeverSplitsASurrogatePair() {
+        // 🙂 is a surrogate pair; a run of them padded past MAX_SUMMARY must truncate cleanly.
+        String emoji = "🙂".repeat(300);
+        String out = ToolCallFormatter.format("tool", emoji);
+
+        String summary = out.split("\n", -1)[1];
+        assertThat(summary).doesNotContain("�"); // no replacement char from a broken pair
+        // Every emoji code point kept intact: no lone high/low surrogate in the summary.
+        for (int i = 0; i < summary.length(); i++) {
+            char c = summary.charAt(i);
+            if (Character.isHighSurrogate(c)) {
+                assertThat(i + 1 < summary.length() && Character.isLowSurrogate(summary.charAt(i + 1)))
+                        .as("high surrogate at %d is paired", i).isTrue();
+            }
+        }
+    }
 }

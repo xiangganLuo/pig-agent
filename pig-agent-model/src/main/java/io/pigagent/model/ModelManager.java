@@ -7,6 +7,7 @@ import io.agentscope.core.model.Model;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.model.ModelErrorMessages;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
 import io.pigagent.core.agent.AgentModelSwitcher;
@@ -16,6 +17,13 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Global model management + runtime switching. Saves/loads model configs via {@link ModelStore},
@@ -144,20 +152,59 @@ public final class ModelManager implements AgentModelSwitcher {
         return protocol.createModel(new ModelSpec(m.protocolId(), m.apiKey(), m.baseUrl(), m.modelName()));
     }
 
-    /** Lightweight connectivity test: build the model and issue a tiny probe request. */
+    /** Bounded wait for the connectivity probe so onboarding / {@code /model add} can't hang forever. */
+    static final long PROBE_TIMEOUT_SECONDS = 25L;
+
+    /**
+     * Lightweight connectivity test: build the model and issue a tiny probe request, bounded by a
+     * {@value #PROBE_TIMEOUT_SECONDS}s timeout. A failure returns a friendly, credential-redacted
+     * message (shared taxonomy via {@link ModelErrorMessages}) rather than the raw exception text, so
+     * every caller ({@code OnboardingWizard}, {@code /model add|edit}) displays the same clear reason.
+     */
     public TestResult test(StoredModel m) {
+        final Model model;
         try {
-            Model model = buildModel(m);
+            model = buildModel(m);
+        } catch (Exception e) {
+            return TestResult.failure(ModelErrorMessages.friendly(e));
+        }
+        return runProbe(() -> {
             PigAgent probe = PigAgent.builder()
                     .name("probe")
                     .sysPrompt("Connectivity test. Reply with: OK")
                     .model(model)
                     .build();
-            Msg reply = probe.call(Msg.builder().name("user").role(MsgRole.USER)
+            return probe.call(Msg.builder().name("user").role(MsgRole.USER)
                     .content(TextBlock.builder().text("ping").build()).build());
-            return reply != null ? TestResult.success() : TestResult.failure("No response from model");
-        } catch (Exception e) {
-            return TestResult.failure(e.getMessage() == null ? e.toString() : e.getMessage());
+        }, PROBE_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Run a connectivity probe on a daemon worker with a bounded timeout, mapping the outcome to a
+     * {@link TestResult}: a reply → success; null → no-response; a timeout → a clear "连接超时" reason;
+     * any other failure → the friendly {@link ModelErrorMessages} taxonomy. Package-private + injectable
+     * probe/timeout so the timeout + mapping paths are unit-testable without touching the network.
+     */
+    static TestResult runProbe(Callable<Msg> probe, long timeoutSeconds) {
+        ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "pig-model-probe");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            Future<Msg> future = exec.submit(probe);
+            Msg reply = future.get(timeoutSeconds, TimeUnit.SECONDS);
+            return reply != null ? TestResult.success() : TestResult.failure("模型无响应，请稍后再试。");
+        } catch (TimeoutException te) {
+            return TestResult.failure("连接超时（检查 base URL / 网络）。");
+        } catch (ExecutionException ee) {
+            Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+            return TestResult.failure(ModelErrorMessages.friendly(cause));
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return TestResult.failure("连接测试被中断。");
+        } finally {
+            exec.shutdownNow();
         }
     }
 
