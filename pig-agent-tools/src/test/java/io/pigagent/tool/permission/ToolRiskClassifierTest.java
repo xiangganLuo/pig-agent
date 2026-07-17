@@ -26,6 +26,8 @@ class ToolRiskClassifierTest {
         // autonomous-skills: proposeSkill/skillManage write staged drafts → WRITE (permission-governed).
         assertThat(ToolRiskClassifier.classify("proposeSkill", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("skillManage", Map.of())).isEqualTo(ToolRisk.WRITE);
+        // user-profile: updateProfile writes a field to USER.md → WRITE.
+        assertThat(ToolRiskClassifier.classify("updateProfile", Map.of())).isEqualTo(ToolRisk.WRITE);
         assertThat(ToolRiskClassifier.classify("addMcpServer", Map.of())).isEqualTo(ToolRisk.MCP_ADMIN);
     }
 

@@ -25,6 +25,8 @@ public final class ToolContext {
     private final BooleanSupplier outreachEnabled;
     private final SkillStagingArea skillStaging;
     private final BooleanSupplier autonomousSkillsEnabled;
+    private final Path userProfileFile;
+    private final BooleanSupplier userProfileEnabled;
 
     public ToolContext(TaskManager taskManager, Path skillsDir) {
         this(taskManager, skillsDir, null, null);
@@ -44,13 +46,14 @@ public final class ToolContext {
                        List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
                        NotificationService notificationService, BooleanSupplier outreachEnabled) {
         this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, sandboxPolicy,
-                notificationService, outreachEnabled, null, null);
+                notificationService, outreachEnabled, null, null, null, null);
     }
 
     public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
                        List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
                        NotificationService notificationService, BooleanSupplier outreachEnabled,
-                       SkillStagingArea skillStaging, BooleanSupplier autonomousSkillsEnabled) {
+                       SkillStagingArea skillStaging, BooleanSupplier autonomousSkillsEnabled,
+                       Path userProfileFile, BooleanSupplier userProfileEnabled) {
         this.taskManager = taskManager;
         this.skillsDir = skillsDir;
         this.workspaceRoot = workspaceRoot;
@@ -60,6 +63,8 @@ public final class ToolContext {
         this.outreachEnabled = outreachEnabled == null ? () -> false : outreachEnabled;
         this.skillStaging = skillStaging;
         this.autonomousSkillsEnabled = autonomousSkillsEnabled == null ? () -> false : autonomousSkillsEnabled;
+        this.userProfileFile = userProfileFile;
+        this.userProfileEnabled = userProfileEnabled == null ? () -> false : userProfileEnabled;
     }
 
     /** The task manager (for the task tool); may be {@code null} in contexts that don't need it. */
@@ -126,5 +131,22 @@ public final class ToolContext {
      */
     public BooleanSupplier autonomousSkillsEnabled() {
         return autonomousSkillsEnabled;
+    }
+
+    /**
+     * The curated user-profile file ({@code USER.md}) for the {@code updateProfile} tool
+     * ({@code user-profile}); {@code null} when profile is not wired, in which case the provider
+     * registers no tool.
+     */
+    public Path userProfileFile() {
+        return userProfileFile;
+    }
+
+    /**
+     * Whether the user profile is enabled — read live (a supplier) so the {@code updateProfile} tool's
+     * availability tracks config. Never {@code null}; defaults to {@code false}.
+     */
+    public BooleanSupplier userProfileEnabled() {
+        return userProfileEnabled;
     }
 }
