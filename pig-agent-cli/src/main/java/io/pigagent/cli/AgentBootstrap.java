@@ -47,6 +47,12 @@ import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.MemoryMigration;
+import io.pigagent.core.memory.search.Embedder;
+import io.pigagent.core.memory.search.InMemoryVectorStore;
+import io.pigagent.core.memory.search.MemoryCorpusLoader;
+import io.pigagent.core.memory.search.MemorySearchConfig;
+import io.pigagent.core.memory.search.MemorySearchIndex;
+import io.pigagent.core.memory.search.OpenAiCompatibleEmbedder;
 import io.pigagent.core.profile.ModelProfileDistiller;
 import io.pigagent.core.profile.ProfileConsolidationService;
 import io.pigagent.core.profile.UserProfileContextMiddleware;
@@ -85,6 +91,7 @@ import io.pigagent.tool.deferred.ToolInfo;
 import io.pigagent.tool.deferred.ToolSearchTool;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
+import io.pigagent.tool.memory.HybridMemorySearchTool;
 import io.pigagent.tool.mcp.McpConfirmer;
 import io.pigagent.tool.mcp.McpTool;
 import io.pigagent.tool.permission.CommandKeys;
@@ -398,6 +405,23 @@ public final class AgentBootstrap {
             toolkit.registration().agentTool(new CommandPermissionTool(execBase, allowedCommands)).apply();
             log.info("Command-granular allowlist wired for {} (honors permissions.allowlist.commands)",
                     CommandKeys.COMMAND_TOOL_NAME);
+        }
+
+        // hybrid-memory-search: when memory.search.hybrid-enabled, register pig's hybrid `memory_search`
+        // (BM25 + optional vector over MEMORY.md + memory/*.md + USER.md) into the toolkit. It keeps the
+        // native @Tool name, and PigAgent.Builder disables the native memory TOOLS when this one is
+        // present (flush/consolidation HOOKS stay on → MEMORY.md still written), so it supersedes the
+        // native keyword-only scan. Default off → not registered → native keyword search unchanged
+        // (byte-identical to before). Registered BEFORE the contract guard so it is guarded too.
+        PigAgentConfig.SearchConfig searchCfg = config.getMemory().getSearch();
+        if (searchCfg.isHybridEnabled()) {
+            MemorySearchIndex memoryIndex =
+                    buildMemorySearchIndex(searchCfg, workspace, userProfileFile, modelManager);
+            toolkit.registration().tool(new HybridMemorySearchTool(memoryIndex, searchCfg.getTopK())).apply();
+            log.info("Hybrid memory search enabled (bm25 {}, vector {}, embedder {})",
+                    searchCfg.getBm25Weight(), searchCfg.getVectorWeight(),
+                    searchCfg.getEmbedderModelId().isBlank()
+                            ? "none (BM25-only)" : searchCfg.getEmbedderModelId());
         }
 
         // Dispatch-layer contract guard (tool-json-contract): wrap every built-in tool so any
@@ -794,6 +818,45 @@ public final class AgentBootstrap {
             }
         }
         return b.build();
+    }
+
+    /**
+     * Build the {@link MemorySearchIndex} for hybrid memory search ({@code hybrid-memory-search}) from
+     * the {@code memory.search} config: corpus = workspace {@code MEMORY.md} + {@code memory/} ledger +
+     * {@code USER.md}; a pure-Java {@link InMemoryVectorStore}; and an optional real embedder resolved
+     * from {@code embedder-model-id} (blank/unresolvable → {@code null} → BM25-only). Called only when
+     * hybrid search is enabled.
+     */
+    static MemorySearchIndex buildMemorySearchIndex(PigAgentConfig.SearchConfig cfg,
+            WorkspaceManager workspace, java.nio.file.Path userProfileFile, ModelManager modelManager) {
+        java.nio.file.Path root = workspace.getRootPath();
+        MemoryCorpusLoader loader = new MemoryCorpusLoader(
+                root.resolve("MEMORY.md"), root.resolve("memory"), userProfileFile);
+        Embedder embedder = resolveEmbedder(cfg.getEmbedderModelId(), modelManager);
+        MemorySearchConfig settings = new MemorySearchConfig(
+                cfg.getBm25Weight(), cfg.getVectorWeight(), cfg.getCandidateMultiplier(),
+                cfg.getMinScore(), cfg.getTopK(), cfg.getRebuildThrottleSeconds() * 1000L);
+        return new MemorySearchIndex(loader, new InMemoryVectorStore(), embedder, settings);
+    }
+
+    /**
+     * Resolve a real {@link Embedder} from a stored model id (an OpenAI-compatible {@code /embeddings}
+     * endpoint via {@link OpenAiCompatibleEmbedder}); {@code null} (→ BM25-only) when the id is blank or
+     * unresolvable. The live embedding round-trip is verified under {@code /ls:itest}, not offline.
+     */
+    static Embedder resolveEmbedder(String embedderModelId, ModelManager modelManager) {
+        if (embedderModelId == null || embedderModelId.isBlank()) {
+            return null;
+        }
+        try {
+            return modelManager.resolveStoredModel(embedderModelId)
+                    .<Embedder>map(m -> new OpenAiCompatibleEmbedder(m.baseUrl(), m.apiKey(), m.modelName()))
+                    .orElse(null);
+        } catch (Exception e) {
+            log.warn("Embedder model '{}' not resolvable — hybrid memory search runs BM25-only: {}",
+                    embedderModelId, e.getMessage());
+            return null;
+        }
     }
 
     /**

@@ -243,6 +243,7 @@ public final class PigAgentConfig {
         @JsonProperty("consolidation-min-gap-minutes") private int consolidationMinGapMinutes = 30;
         @JsonProperty("consolidation-max-tokens") private int consolidationMaxTokens = 4000;
         @JsonProperty("model-id") private String modelId = "";
+        @JsonProperty("search") private SearchConfig search = new SearchConfig();
 
         public String getFlush() { return flush; }
         public void setFlush(String f) { this.flush = f == null || f.isBlank() ? "always" : f; }
@@ -254,6 +255,51 @@ public final class PigAgentConfig {
         public void setConsolidationMaxTokens(int t) { this.consolidationMaxTokens = t; }
         public String getModelId() { return modelId; }
         public void setModelId(String id) { this.modelId = id == null ? "" : id; }
+        public SearchConfig getSearch() { return search; }
+        public void setSearch(SearchConfig s) { this.search = s == null ? new SearchConfig() : s; }
+    }
+
+    /**
+     * 混合记忆检索（{@code memory.search}，能力 {@code hybrid-memory-search}）——在记忆库
+     * （{@code MEMORY.md} + {@code memory/*.md} + {@code USER.md}）上叠加 BM25+向量混合检索
+     * （OpenClaw 蓝本）。<b>默认 {@code hybrid-enabled=false}</b>：关闭时不注册 pig {@code memory_search}、
+     * 保留 2.0 原生纯关键词检索——逐字节等于本能力引入前（保守：真实嵌入器未经 live 验证前不改默认检索行为）。
+     * <ul>
+     *   <li>{@code bm25-weight}/{@code vector-weight}：混合权重（各成分归一化后加权，默认 {@code 0.7}/{@code 0.3}）。</li>
+     *   <li>{@code embedder-model-id}：向量嵌入用的 OpenAI-compatible 模型 id（空 → 无嵌入器 → BM25-only）。</li>
+     *   <li>{@code candidate-multiplier}：混合前取 {@code top-k × 该值} 个向量候选（默认 4）。</li>
+     *   <li>{@code min-score}：融合分低于此阈值的命中丢弃（默认 0.0=不过滤）。</li>
+     *   <li>{@code top-k}：返回命中上限（默认 8）。</li>
+     *   <li>{@code rebuild-throttle-seconds}：增量重建最小间隔秒（默认 5）。</li>
+     * </ul>
+     * 全部可选、默认安全。
+     */
+    public static final class SearchConfig {
+        @JsonProperty("hybrid-enabled") private boolean hybridEnabled = false;
+        @JsonProperty("bm25-weight") private double bm25Weight = 0.7;
+        @JsonProperty("vector-weight") private double vectorWeight = 0.3;
+        @JsonProperty("embedder-model-id") private String embedderModelId = "";
+        @JsonProperty("candidate-multiplier") private int candidateMultiplier = 4;
+        @JsonProperty("min-score") private double minScore = 0.0;
+        @JsonProperty("top-k") private int topK = 8;
+        @JsonProperty("rebuild-throttle-seconds") private int rebuildThrottleSeconds = 5;
+
+        public boolean isHybridEnabled() { return hybridEnabled; }
+        public void setHybridEnabled(boolean e) { this.hybridEnabled = e; }
+        public double getBm25Weight() { return bm25Weight; }
+        public void setBm25Weight(double w) { this.bm25Weight = w; }
+        public double getVectorWeight() { return vectorWeight; }
+        public void setVectorWeight(double w) { this.vectorWeight = w; }
+        public String getEmbedderModelId() { return embedderModelId; }
+        public void setEmbedderModelId(String id) { this.embedderModelId = id == null ? "" : id; }
+        public int getCandidateMultiplier() { return candidateMultiplier; }
+        public void setCandidateMultiplier(int m) { this.candidateMultiplier = m; }
+        public double getMinScore() { return minScore; }
+        public void setMinScore(double s) { this.minScore = s; }
+        public int getTopK() { return topK; }
+        public void setTopK(int k) { this.topK = k; }
+        public int getRebuildThrottleSeconds() { return rebuildThrottleSeconds; }
+        public void setRebuildThrottleSeconds(int s) { this.rebuildThrottleSeconds = s; }
     }
 
     /**
