@@ -24,6 +24,7 @@ import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionRule;
 import io.pigagent.cli.Ansi;
+import io.pigagent.cli.render.SessionReplay;
 import io.pigagent.cli.render.StreamingMarkdownPrinter;
 import io.pigagent.cli.render.SubagentEventRenderer;
 import io.pigagent.cli.render.ToolCallFormatter;
@@ -37,6 +38,7 @@ import io.pigagent.core.outreach.NotificationService;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.ModelManager;
 import io.pigagent.provider.registry.ProtocolRegistry;
+import io.pigagent.session.Session;
 import io.pigagent.session.SessionManager;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.skills.authoring.SkillGate;
@@ -181,6 +183,10 @@ public final class AgentRepl {
             Ansi.println(terminal, Ansi.success("Agent ready.")
                     + Ansi.dim(" Type your message or /help for commands.\n"));
 
+            // F2: the native state store reloaded the current session's conversation, but the screen is
+            // blank — replay its recent tail so a resumed populated session doesn't look empty.
+            maybeReplayCurrentSession(terminal);
+
             String prompt = Ansi.prompt("❯ ");
             while (running.get()) {
                 try {
@@ -239,6 +245,13 @@ public final class AgentRepl {
     /** Native Plan Mode's exit tool (its {@code checkPermissions} returns ASK → surfaces as HITL). */
     private static final String PLAN_EXIT_TOOL = "plan_exit";
 
+    /** Native tool that creates a subagent; a {@code timeout_seconds=0} call dispatches it in background. */
+    private static final String AGENT_SPAWN_TOOL = "agent_spawn";
+
+    /** Matches a {@code task_id} (any separator/quoting) in a background-spawn result → its id value. */
+    private static final java.util.regex.Pattern TASK_ID =
+            java.util.regex.Pattern.compile("(?i)task[_-]?id[\"'\\s]*[:=]?[\"'\\s]*([A-Za-z0-9][\\w:.-]*)");
+
     /**
      * Whether native Plan Mode is active for the current session (drives the {@code ⏸ PLAN} status
      * badge). Reads through the active agent; any failure degrades to {@code false} so a status read
@@ -254,6 +267,34 @@ public final class AgentRepl {
             return agent.isPlanModeActive(sid);
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * F2 session-entry replay: render the current session's recent conversation tail so a resumed,
+     * populated session isn't a blank screen. The conversation is read through the active agent's
+     * {@code (pig, sessionId)} memory view ({@code getMemory(sessionId)}); the render is bounded to the
+     * last few messages, credential-redacted and truncated by {@link SessionReplay}. Best-effort:
+     * any failure is logged at debug and swallowed — a replay must never break startup. Package-private
+     * so the wiring can be unit-tested without the JLine read loop.
+     */
+    void maybeReplayCurrentSession(Terminal terminal) {
+        try {
+            if (agentHolder == null || sessionManager == null) {
+                return;
+            }
+            var agent = agentHolder.get();
+            String sessionId = sessionManager.getCurrentSessionId();
+            if (agent == null || sessionId == null) {
+                return;
+            }
+            List<Msg> messages = agent.getMemory(sessionId).getMessages();
+            String name = sessionManager.getCurrentSession().map(Session::name).orElse(sessionId);
+            for (String line : SessionReplay.resumeLines(name, messages, SessionReplay.DEFAULT_MAX_MESSAGES)) {
+                Ansi.println(terminal, line);
+            }
+        } catch (Exception e) {
+            log.debug("Session-entry replay skipped: {}", e.toString());
         }
     }
 
@@ -476,6 +517,14 @@ public final class AgentRepl {
             Ansi.println(terminal, ToolCallFormatter.head(toolLabel(end.getToolCallName())));
         }
         String summary = toolSummary(end, r.toolResults);
+        // F3: a background (async) agent_spawn returns a task_id and the child keeps running — the raw
+        // JSON is useless to the user and it looks like a hang. Render a clear "dispatched, will report"
+        // notice instead; the eventual completion still surfaces as parent answer text (not suppressed).
+        if (isBackgroundSpawn(end.getToolCallName(), summary)) {
+            Ansi.println(terminal, ToolCallFormatter.body(backgroundNotice(summary)));
+            r.produced = true;
+            return;
+        }
         boolean isError = end.getState() == ToolResultState.ERROR;
         Ansi.println(terminal, isError ? ToolCallFormatter.errorBody(summary) : ToolCallFormatter.body(summary));
         r.produced = true;
@@ -542,6 +591,39 @@ public final class AgentRepl {
             return "interrupted";
         }
         return text;
+    }
+
+    /**
+     * True when a finished tool call is a <em>background</em> {@code agent_spawn} — one that returned a
+     * {@code task_id} (and often a {@code timeout_promoted} status) with the child still running. Such a
+     * result must be surfaced as a running-notice rather than a raw JSON dump (F3).
+     */
+    private static boolean isBackgroundSpawn(String toolName, String resultText) {
+        if (!AGENT_SPAWN_TOOL.equalsIgnoreCase(toolLabel(toolName)) || resultText == null) {
+            return false;
+        }
+        String lower = resultText.toLowerCase();
+        return lower.contains("task_id") || lower.contains("taskid") || lower.contains("timeout_promoted");
+    }
+
+    /** The short (first-8-char) task id parsed from a background-spawn result, else empty. */
+    static String backgroundTaskId(String resultText) {
+        if (resultText == null) {
+            return "";
+        }
+        java.util.regex.Matcher m = TASK_ID.matcher(resultText);
+        if (!m.find()) {
+            return "";
+        }
+        String id = m.group(1);
+        return id.length() > 8 ? id.substring(0, 8) : id; // task ids are ASCII → no surrogate risk
+    }
+
+    /** The one-line, credential-safe running-notice for a dispatched background subagent (F3). */
+    private static String backgroundNotice(String resultText) {
+        String tid = backgroundTaskId(resultText);
+        String suffix = tid.isEmpty() ? "" : "（task " + tid + "）";
+        return "已派发后台子agent" + suffix + " · 运行中，完成后会回报";
     }
 
     /**

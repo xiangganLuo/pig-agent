@@ -1,6 +1,8 @@
 package io.pigagent.cli.repl;
 
+import io.agentscope.core.message.Msg;
 import io.pigagent.cli.Ansi;
+import io.pigagent.cli.render.SessionReplay;
 import io.pigagent.cli.repl.command.AgentCommand;
 import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.NotifyCommand;
@@ -696,6 +698,20 @@ public final class ReplCommands {
             sm.activate(id);
             sm.getCurrentSession().ifPresent(s ->
                     Ansi.println(t, Ansi.success("Switched to: ") + Ansi.info(s.name() + " [" + s.id() + "]")));
+            // F2: replay the target session's recent history so a switched-into populated session isn't
+            // blank. Best-effort: any failure is swallowed — a replay must never break the switch.
+            try {
+                var agent = ctx.agent();
+                if (agent != null) {
+                    List<Msg> messages = agent.getMemory(id).getMessages();
+                    String name = sm.getCurrentSession().map(Session::name).orElse(id);
+                    for (String line : SessionReplay.resumeLines(name, messages, SessionReplay.DEFAULT_MAX_MESSAGES)) {
+                        Ansi.println(t, line);
+                    }
+                }
+            } catch (Exception ignored) {
+                // replay is a display convenience; the switch itself already succeeded
+            }
         }
 
         private void renameSession(Terminal t, SessionManager sm) {
