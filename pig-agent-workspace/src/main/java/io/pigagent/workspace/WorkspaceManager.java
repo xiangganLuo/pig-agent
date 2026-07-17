@@ -34,6 +34,12 @@ public final class WorkspaceManager {
         Files.createDirectories(rootPath.resolve("reports"));
         Files.createDirectories(rootPath.resolve("plugins"));
         createIfAbsent(rootPath.resolve("AGENT.md"), defaultAgentMd());
+        // Seed an inert AGENTS.md (plural) alongside AGENT.md (singular). The underlying harness
+        // scans the workspace for AGENTS.md whenever a workspace root is set on the agent builder
+        // (every build + every model-switch / MCP / memory rebuild); pig seeds only AGENT.md, so
+        // that scan otherwise logs a WARN on every (re)build. A minimal file makes the scan find
+        // something and stay silent. pig's editable system prompt remains AGENT.md (see the note).
+        createIfAbsent(rootPath.resolve("AGENTS.md"), defaultAgentsMd());
         createIfAbsent(rootPath.resolve("INFO.md"), defaultInfoMd());
         createIfAbsent(rootPath.resolve("application.yaml"), defaultConfigYaml());
     }
@@ -213,18 +219,117 @@ public final class WorkspaceManager {
                 + "\n- Workspace: " + rootPath.toAbsolutePath() + "\n";
     }
 
+    /**
+     * Minimal {@code AGENTS.md} seed. It exists only so the underlying harness's workspace
+     * {@code AGENTS.md} scan finds a file and stays silent (pig otherwise logs a WARN on every
+     * agent (re)build). PigAgent's editable system prompt is {@code AGENT.md} (singular) — this
+     * plural file is intentionally inert and is never assembled into pig's system prompt.
+     */
+    private String defaultAgentsMd() {
+        return """
+                # AGENTS.md
+
+                PigAgent's editable system prompt lives in **AGENT.md** (singular) — edit that file,
+                not this one. This file exists only to keep the harness's AGENTS.md workspace scan
+                quiet and is not part of PigAgent's assembled system prompt.
+                """;
+    }
+
+    /**
+     * The seeded {@code application.yaml}: a commented, current, full-surface template. Models are
+     * NOT configured here — {@code models.json} (written by the onboarding wizard / {@code /model})
+     * is the source of truth — so the stale {@code model.model-name} stub is gone. Everything below
+     * the active {@code agent:} block is commented out and shows each knob's real default, so the
+     * file documents the config surface without changing any behavior (parsed config = all defaults
+     * except the harmless {@code agent.name}). Written only when absent ({@code createIfAbsent}), so
+     * a user's edited file is never overwritten. Keep in sync with {@code PigAgentConfig}.
+     */
     private String defaultConfigYaml() {
         return """
+                # ============================================================================
                 # Pig Agent Configuration
-
-                model:
-                  provider: anthropic
-                  model-name: mimo-v2.5-pro
+                #
+                # Models are configured interactively (onboarding wizard / `/model`) and stored in
+                # models.json — do NOT set them here. Everything below is commented out and shows the
+                # real default value; uncomment and edit a knob only to change it. See CLAUDE.md for
+                # the full description of each block.
+                # ============================================================================
 
                 agent:
                   name: PigAgent
-                  max-iters: 10
+                  # Max reasoning iterations per interactive/channel turn (autonomous agents: 10).
+                  # max-iters: 40
 
+                # --- Model call resilience -------------------------------------------------
+                # model:
+                #   # Transient-error retry (429/5xx/timeout/IO) with exponential backoff.
+                #   retry:
+                #     enabled: true
+                #     max-retries: 10
+                #   # Optional: id (from models.json) of a saved model to fail over to when the
+                #   # primary model is unavailable. Blank = no fallback (unless a distinct default exists).
+                #   fallback-model-id: ""
+
+                # --- Tool permissions ------------------------------------------------------
+                # permissions:
+                #   mode: ask            # ask | auto | bypass | plan  (interactive default: ask)
+                #   channel-mode: auto   # non-interactive channel default (fail-closed)
+                #   allowlist:
+                #     tools: []
+                #     commands: []       # first-token command allowlist for executeCommand
+
+                # --- Context compression ---------------------------------------------------
+                # compression:
+                #   enabled: true
+                #   max-context-tokens: 32000
+                #   threshold: 0.8       # compress when the estimate exceeds 80% of the window
+                #   keep-recent: 6
+
+                # --- Long-term memory ------------------------------------------------------
+                # memory-enabled: true   # master on/off (also toggled by /memory on|off)
+                # memory:
+                #   flush: always        # always | never | throttled
+                #   consolidation-min-gap-minutes: 30
+                #   model-id: ""         # cheap flush/consolidation model id; blank = primary model
+                #   search:
+                #     hybrid-enabled: false   # BM25 + optional vector over MEMORY.md/memory/*.md/USER.md
+
+                # --- User profile (USER.md) ------------------------------------------------
+                # user-profile:
+                #   enabled: true
+                #   max-chars: 4000
+
+                # --- Command-execution sandbox --------------------------------------------
+                # sandbox:
+                #   exec:
+                #     timeout-seconds: 30
+                #     max-output-bytes: 200000
+                #     scrub-env: true    # strip credential-bearing env vars from child processes
+                #     denylist: []       # extra catastrophic-command regexes (added to the built-in floor)
+                #     warnlist: []       # extra medium-risk regexes (run but flagged)
+
+                # --- Tool-call loop detection ---------------------------------------------
+                # loop-detection:
+                #   enabled: true
+                #   window-size: 20
+                #   warn-threshold: 3
+                #   stop-threshold: 5
+
+                # --- Native subagent delegation -------------------------------------------
+                # subagents:
+                #   enabled: true        # agent_spawn/agent_send/… on interactive tracks
+
+                # --- Plan Mode -------------------------------------------------------------
+                # plan-mode:
+                #   enabled: false       # think read-only -> write PLAN.md -> HITL approve -> execute
+
+                # --- Tool-result eviction --------------------------------------------------
+                # tools:
+                #   result-eviction:
+                #     enabled: true
+                #     threshold: 80000   # spool a single tool result larger than this to disk
+
+                # --- Channels --------------------------------------------------------------
                 channels:
                   telegram:
                     enabled: false
@@ -233,6 +338,20 @@ public final class WorkspaceManager {
                     enabled: false
                     token: ""
 
+                # --- Proactive outreach + notifications -----------------------------------
+                # outreach:
+                #   enabled: false
+                #   channel: ""          # default outbound channel id
+                #   recipient: ""        # default recipient (kept out of logs/output)
+
+                # --- Embedded local Web console -------------------------------------------
+                # web:
+                #   enabled: false
+                #   host: 127.0.0.1
+                #   port: 7317
+
+                # --- MCP servers -----------------------------------------------------------
+                # MCP servers are managed at runtime (/mcp) and persist to mcp.json (source of truth).
                 mcp:
                   servers: {}
                   # Example stdio server:

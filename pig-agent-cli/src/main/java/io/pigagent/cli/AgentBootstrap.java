@@ -120,6 +120,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -227,6 +228,23 @@ public final class AgentBootstrap {
             // AgentStateStore per turn (no JsonSession to close); saveCurrent() flushed the active slot.
             taskScheduler.shutdown();
             mcpManager.closeAll();
+            // Release the HarnessAgent vehicles on graceful exit (they are AutoCloseable). Best-effort:
+            // guarded so an in-flight turn or an already-closed agent never aborts the rest of shutdown.
+            // NB: per-switch close on model/MCP rebuilds is out of scope (owned by ModelManager) — a
+            // documented follow-up; only the two live holders are closed here.
+            closeQuietly(agentHolder);
+            closeQuietly(channelAgentHolder);
+        }
+
+        /** Close an agent holder's current agent, swallowing+logging any error (best-effort). */
+        private static void closeQuietly(AgentHolder holder) {
+            try {
+                if (holder != null && holder.get() != null) {
+                    holder.get().close();
+                }
+            } catch (Throwable t) {
+                log.warn("Agent close failed (ignored): {}", t.toString());
+            }
         }
     }
 
@@ -521,6 +539,13 @@ public final class AgentBootstrap {
         PigAgentConfig.RetryConfig rc = config.getModel().getRetry();
         int maxRetries = rc.isEnabled() ? Math.max(1, rc.getMaxRetries()) : 1;
 
+        // Resilience: wire a native fallback model for the INTERACTIVE + CHANNEL agents so a primary
+        // model outage (after retries) auto-degrades to a working saved model instead of failing the
+        // turn. Resolved from model.fallback-model-id (else the store's default when distinct from the
+        // primary); null when nothing distinct is configured → today's behavior. Peer/autonomous
+        // tracks are a documented follow-up (their build paths still pass no fallback).
+        Model fallbackModel = resolveFallbackModel(config, modelManager, defaultModel);
+
         // One shared interrupt controller, owned by the kernel (av2 Phase 5a). The kernel registers a
         // per-turn handle whose interrupt action calls native ReActAgent.interrupt; the model is no
         // longer decorated. Autonomous/channel tracks don't share it (their turns aren't kernel-driven).
@@ -572,7 +597,7 @@ public final class AgentBootstrap {
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveMiddlewares, memoryConfigSupplier,
-                maxRetries, null, config.getAgent().getMaxIters(),
+                maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
                 subagentsEnabled, peerSubagents, planModeSettings);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
@@ -727,7 +752,7 @@ public final class AgentBootstrap {
                 List.of(newLoopDetectionMiddleware(configManager),
                         new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
                 memoryConfigSupplier,
-                maxRetries, null, config.getAgent().getMaxIters(),
+                maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx, workspaceRoot, evictionConfig);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
@@ -857,6 +882,50 @@ public final class AgentBootstrap {
                     embedderModelId, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Resolve the native fallback model wired into the interactive + channel agents (resilience):
+     * a primary-model outage (after retries) auto-degrades to this saved model. Resolution order:
+     * <ol>
+     *   <li>the configured {@code model.fallback-model-id} when set, resolvable, and distinct from
+     *       the primary;</li>
+     *   <li>otherwise the store's default when it is a distinct saved model from the primary;</li>
+     *   <li>otherwise {@code null} — no fallback (today's behavior).</li>
+     * </ol>
+     * Never throws: an unresolvable configured id degrades to no fallback (logged). Package-private
+     * so the wiring is unit-testable via a real {@link ModelManager} + {@link StoredModel} pair.
+     */
+    static Model resolveFallbackModel(PigAgentConfig config, ModelManager modelManager, StoredModel primary) {
+        String fbId = config.getModel().getFallbackModelId();
+        if (fbId != null && !fbId.isBlank() && !fbId.equals(primary.id())) {
+            try {
+                Optional<StoredModel> fb = modelManager.findById(fbId);
+                if (fb.isPresent()) {
+                    Model m = modelManager.buildModel(fb.get());
+                    log.info("Model fallback wired: primary {} -> configured fallback {}",
+                            primary.label(), fb.get().label());
+                    return m;
+                }
+                log.warn("Configured fallback model id '{}' not found — no model fallback wired", fbId);
+            } catch (Exception e) {
+                log.warn("Configured fallback model '{}' not resolvable — no model fallback wired: {}",
+                        fbId, e.getMessage());
+            }
+        }
+        // Implicit fallback: the store's default, only when it is a DISTINCT saved model.
+        Optional<StoredModel> def = modelManager.getDefault();
+        if (def.isPresent() && !def.get().id().equals(primary.id())) {
+            try {
+                Model m = modelManager.buildModel(def.get());
+                log.info("Model fallback wired: primary {} -> default {}", primary.label(), def.get().label());
+                return m;
+            } catch (Exception e) {
+                log.warn("Default fallback model '{}' not resolvable — no model fallback wired: {}",
+                        def.get().id(), e.getMessage());
+            }
+        }
+        return null;
     }
 
     /**

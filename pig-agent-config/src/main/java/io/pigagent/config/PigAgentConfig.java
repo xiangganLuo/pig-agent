@@ -67,12 +67,18 @@ public final class PigAgentConfig {
         @JsonProperty("provider") private String provider = "anthropic";
         @JsonProperty("model-name") private String modelName = "claude-sonnet-4-6";
         @JsonProperty("retry") private RetryConfig retry = new RetryConfig();
+        // Optional resilience knob: the id (from models.json) of a saved model to fail over to when
+        // the primary model call fails after retries (native fallbackModel). Blank/unset = no
+        // configured fallback (AgentBootstrap may still wire a distinct default). Never a credential.
+        @JsonProperty("fallback-model-id") private String fallbackModelId = "";
         public String getProvider() { return provider; }
         public void setProvider(String p) { this.provider = p; }
         public String getModelName() { return modelName; }
         public void setModelName(String n) { this.modelName = n; }
         public RetryConfig getRetry() { return retry; }
         public void setRetry(RetryConfig r) { this.retry = r; }
+        public String getFallbackModelId() { return fallbackModelId; }
+        public void setFallbackModelId(String id) { this.fallbackModelId = id == null ? "" : id; }
     }
 
     /**
