@@ -49,6 +49,24 @@ public final class ToolContext {
                 notificationService, outreachEnabled, null, null, null, null);
     }
 
+    /** Convenience: autonomous-skills params only (user-profile params default to null/disabled). */
+    public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
+                       List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
+                       NotificationService notificationService, BooleanSupplier outreachEnabled,
+                       SkillStagingArea skillStaging, BooleanSupplier autonomousSkillsEnabled) {
+        this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, sandboxPolicy,
+                notificationService, outreachEnabled, skillStaging, autonomousSkillsEnabled, null, null);
+    }
+
+    /** Convenience: user-profile params only (autonomous-skills params default to null/disabled). */
+    public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
+                       List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
+                       NotificationService notificationService, BooleanSupplier outreachEnabled,
+                       Path userProfileFile, BooleanSupplier userProfileEnabled) {
+        this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, sandboxPolicy,
+                notificationService, outreachEnabled, null, null, userProfileFile, userProfileEnabled);
+    }
+
     public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
                        List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
                        NotificationService notificationService, BooleanSupplier outreachEnabled,
