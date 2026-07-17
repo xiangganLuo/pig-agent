@@ -1,5 +1,9 @@
 # AgentScope Java 1.0.12 → 2.0 Migration Map
 
+> ## ✅ 迁移完成并已提升为主线（2026-07-17）
+> `main` 现在 = 这条 2.0 线（cutover commit `8c2695c`）。v1 完整备份于分支 `v1-stable-20260716` + tag `v1-final-20260716`（切换前 main `0d43ba0`，可回滚）。真模型（Doubao）IT 10/10 绿、整库 ~1122 单测绿、Doubao 权限 DENY 生产路径确证 P0 修复。**未来新需求一律从 `main` 起。** 各阶段审计分支 `av2/20260716-*` + `av2/20260717-plan-mode` 保留。2.0 API 权威参考见 `.claude/skills/agentscope-expert/`。
+
+
 > **Status: Phase 0-redux + Phase 1 + Phase 2 (tools framework + native permission) + Phase 3
 > (session/state rewrite) + Phase 4 (frontends: cli + web + channel) + Phase 5a (delete self-built
 > decorators → native retry/interrupt, hooks → native middleware, drop the 1.x `agentscope` dep)
