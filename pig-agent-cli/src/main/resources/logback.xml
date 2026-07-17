@@ -9,15 +9,19 @@
     <property name="LOG_DIR" value="${user.home}/.pig-agent/workspace/logs"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <!--
+          Keep the interactive TUI clean: only ERROR (and above) ever reach the console; all
+          INFO/WARN startup + rebuild noise (model switches, /mcp + /memory rebuilds, the native
+          AGENTS.md scan, the "忽略未知配置字段" config-drift WARN, …) goes to the FILE appender
+          only. Genuinely user-facing startup facts are printed via Ansi/banner, not the logger,
+          and REPL errors surface via Ansi.error — so nothing user-relevant is lost. %nopex keeps
+          even an ERROR line to one line on the console (the FILE keeps the full stack trace).
+        -->
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
         <encoder>
-            <!--
-              %nopex: NEVER dump exception stack traces to the user's terminal (the TUI). Without it,
-              logback's PatternLayout implicitly appends the full throwable stack whenever a logged event
-              carries one — so an upstream model error (e.g. a 429 RateLimitException logged by
-              AgentScope's ModelUtils retry) vomits ~40 lines of Reactor frames into the REPL. The clean,
-              one-line %msg is kept on console; the FILE appender below keeps the full stack for debugging.
-            -->
-            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n%nopex</pattern>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%nopex%n</pattern>
         </encoder>
     </appender>
 

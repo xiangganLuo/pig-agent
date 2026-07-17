@@ -10,12 +10,14 @@ import io.pigagent.cli.repl.AgentRepl;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.tool.contract.CredentialSanitizer;
 import io.pigagent.web.WebLauncher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -41,9 +43,27 @@ public final class PigAgentCli {
                 \\/_/        \\_/__/               \\_/__/                   \s
             """;
 
-    public static void main(String[] args) throws Exception {
-        System.out.println(Ansi.heading(BANNER));
+    public static void main(String[] args) {
+        // The banner is printed BEFORE JLine builds the terminal (which is what enables VT on a
+        // legacy Windows console), so ANSI escapes would print raw there. Emit it styled only when
+        // VT is clearly supported; otherwise plain. Safe + minimal — no escapes ever reach a
+        // console that can't render them.
+        System.out.println(ansiLikelySupported() ? Ansi.heading(BANNER) : BANNER);
+        try {
+            run(args);
+        } catch (Exception e) {
+            // A bootstrap/onboarding (or REPL) failure should be one readable, credential-safe line
+            // on the console — not a raw Java stack. The full stack goes to the FILE log for triage.
+            Throwable cause = rootCause(e);
+            String msg = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+            System.out.println(Ansi.error("启动失败：" + CredentialSanitizer.sanitize(msg)));
+            log.error("startup failed", e);
+            System.exit(1);
+        }
+    }
 
+    /** The real entry-point body, run under {@link #main}'s top-level error guard. */
+    private static void run(String[] args) throws Exception {
         // Shared runtime (agent, kernel, managers). The CLI is the REPL frontend on top of it.
         AgentBootstrap.Services s = AgentBootstrap.build(true);
 
@@ -90,6 +110,36 @@ public final class PigAgentCli {
         } catch (Throwable t) {
             log.warn("Shutdown step failed: {}", t.toString());
         }
+    }
+
+    /** Unwrap to the root cause so the startup-failure line shows the actual reason, not a wrapper. */
+    private static Throwable rootCause(Throwable t) {
+        Throwable c = t;
+        while (c.getCause() != null && c.getCause() != c) {
+            c = c.getCause();
+        }
+        return c;
+    }
+
+    /**
+     * Best-effort guess whether the current console can render ANSI/VT escapes, used ONLY for the
+     * pre-JLine startup banner (JLine renders escapes itself once its terminal is built). Conservative
+     * on Windows legacy consoles (conhost has no reliable VT before JLine enables it): trust only
+     * known VT-capable terminals; Unix TTYs handle VT; a redirected/piped stdout ({@code System.console()
+     * == null}) gets plain output.
+     */
+    static boolean ansiLikelySupported() {
+        if (System.console() == null) {
+            return false; // piped/redirected or non-interactive → no escapes
+        }
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (!os.contains("win")) {
+            return true; // Unix terminals render VT
+        }
+        // Windows: only known VT-capable terminals (Windows Terminal, ConEmu, xterm-like).
+        return System.getenv("WT_SESSION") != null
+                || System.getenv("ConEmuANSI") != null
+                || "xterm".equalsIgnoreCase(System.getenv("TERM"));
     }
 
     /** The started channel bridges plus the (optional) native gateway kernel, for shutdown. */
