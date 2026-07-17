@@ -41,6 +41,8 @@ public final class WorkspaceManager {
     public Path getRootPath() { return rootPath; }
     public Path getAgentMd() { return rootPath.resolve("AGENT.md"); }
     public Path getInfoMd() { return rootPath.resolve("INFO.md"); }
+    /** The curated user-profile file ({@code USER.md}, capability {@code user-profile}); path is config-overridable. */
+    public Path getUserMd() { return rootPath.resolve("USER.md"); }
     public Path getContextDir() { return rootPath.resolve("context"); }
     public Path getSkillsDir() { return rootPath.resolve("skills"); }
     public Path getTasksDir() { return rootPath.resolve("tasks"); }
@@ -141,6 +143,14 @@ public final class WorkspaceManager {
                 - `addMcpServer` / `removeMcpServer` — request changes to MCP servers. These are governed by a
                   security policy, off by default; an add needs an allowed host and explicit human
                   confirmation. Treat them as privileged.
+
+                ### Knowing the user (user profile)
+                - `updateProfile` — record a **durable** fact about the user into their profile (`USER.md`):
+                  their identity (name / how to address them), a standing preference (reply language, output
+                  style, technology preference) or working style. It sets or replaces one field. Use it only
+                  when the user states something durable about themselves (e.g. "call me Alice", "always reply
+                  in Chinese") — not for transient or task-specific details (those are captured by long-term
+                  memory). The profile is injected into your context so you already know who the user is.
 
                 ## Skills — capability packs to consult
 

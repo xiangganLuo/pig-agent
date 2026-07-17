@@ -27,6 +27,7 @@ public final class PigAgentConfig {
     @JsonProperty("plan-mode") private PlanModeConfig planMode = new PlanModeConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
+    @JsonProperty("user-profile") private UserProfileConfig userProfile = new UserProfileConfig();
     @JsonProperty("outreach") private OutreachConfig outreach = new OutreachConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
@@ -50,6 +51,8 @@ public final class PigAgentConfig {
     public WebConfig getWeb() { return web; }
     public MemoryConfig getMemory() { return memory; }
     public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
+    public UserProfileConfig getUserProfile() { return userProfile; }
+    public void setUserProfile(UserProfileConfig u) { this.userProfile = u == null ? new UserProfileConfig() : u; }
     public OutreachConfig getOutreach() { return outreach; }
     public void setOutreach(OutreachConfig o) { this.outreach = o == null ? new OutreachConfig() : o; }
     public String getCurrentSessionId() { return currentSessionId; }
@@ -246,6 +249,58 @@ public final class PigAgentConfig {
         public void setConsolidationMinGapMinutes(int m) { this.consolidationMinGapMinutes = m; }
         public int getConsolidationMaxTokens() { return consolidationMaxTokens; }
         public void setConsolidationMaxTokens(int t) { this.consolidationMaxTokens = t; }
+        public String getModelId() { return modelId; }
+        public void setModelId(String id) { this.modelId = id == null ? "" : id; }
+    }
+
+    /**
+     * 用户画像配置（{@code user-profile}，Hermes {@code USER.md} 蓝本）——一份**专门的、策展的**用户画像
+     * （身份/长期偏好/工作方式），区别于 {@code pa-memory-native} 的通用事实日志 {@code MEMORY.md}。启用时
+     * 画像文件 {@code USER.md}（工作区级，路径 {@code path}）被有界（{@code max-chars}）、凭据脱敏地注入
+     * system prompt（在 {@code MEMORY.md} 之前），并暴露 {@code updateProfile} 写工具（WRITE，确定性 set/merge）。
+     *
+     * <p><b>默认 {@code enabled=true}</b>——但禁用即今日行为：不注入 {@code USER.md}、不暴露 {@code updateProfile}、
+     * 不蒸馏。全部字段可选、默认安全、向后兼容（缺块 → 启用、默认路径/上限、蒸馏关）。
+     * <ul>
+     *   <li>{@code path}：画像文件的工作区相对路径（默认 {@code USER.md}）。</li>
+     *   <li>{@code max-chars}：注入 system prompt 的画像上限（超出截断；默认 4000）。</li>
+     *   <li>{@code consolidation}：可选的后台画像蒸馏（廉价模型把稳定偏好蒸馏进去重后的 {@code USER.md}），
+     *       <b>默认关</b>（真实蒸馏质量属 live-model 验证）。</li>
+     * </ul>
+     */
+    public static final class UserProfileConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        @JsonProperty("path") private String path = "USER.md";
+        @JsonProperty("max-chars") private int maxChars = 4000;
+        @JsonProperty("consolidation") private ProfileConsolidationConfig consolidation = new ProfileConsolidationConfig();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getPath() { return path; }
+        public void setPath(String p) { this.path = p == null || p.isBlank() ? "USER.md" : p; }
+        public int getMaxChars() { return maxChars; }
+        public void setMaxChars(int c) { this.maxChars = c; }
+        public ProfileConsolidationConfig getConsolidation() { return consolidation; }
+        public void setConsolidation(ProfileConsolidationConfig c) {
+            this.consolidation = c == null ? new ProfileConsolidationConfig() : c;
+        }
+    }
+
+    /**
+     * 后台画像蒸馏配置（{@code user-profile.consolidation}）。<b>默认 {@code enabled=false}</b>（保守——真实
+     * 蒸馏质量属 live-model，交集成测试）。开启时经 {@code TaskScheduler} 后台按 {@code min-gap-minutes}
+     * 触发，用一个廉价模型（{@code model-id}，空 → 记忆廉价模型 → 主推理模型）把 {@code MEMORY.md} 里稳定的
+     * 身份/偏好蒸馏进去重后的 {@code USER.md}；服务自身再节流、容错，不阻塞回合。
+     */
+    public static final class ProfileConsolidationConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("min-gap-minutes") private int minGapMinutes = 60;
+        @JsonProperty("model-id") private String modelId = "";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getMinGapMinutes() { return minGapMinutes; }
+        public void setMinGapMinutes(int m) { this.minGapMinutes = m; }
         public String getModelId() { return modelId; }
         public void setModelId(String id) { this.modelId = id == null ? "" : id; }
     }

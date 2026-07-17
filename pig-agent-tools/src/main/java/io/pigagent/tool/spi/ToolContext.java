@@ -22,6 +22,8 @@ public final class ToolContext {
     private final SandboxPolicy sandboxPolicy;
     private final NotificationService notificationService;
     private final BooleanSupplier outreachEnabled;
+    private final Path userProfileFile;
+    private final BooleanSupplier userProfileEnabled;
 
     public ToolContext(TaskManager taskManager, Path skillsDir) {
         this(taskManager, skillsDir, null, null);
@@ -40,6 +42,14 @@ public final class ToolContext {
     public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
                        List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
                        NotificationService notificationService, BooleanSupplier outreachEnabled) {
+        this(taskManager, skillsDir, workspaceRoot, webAllowedHosts, sandboxPolicy,
+                notificationService, outreachEnabled, null, null);
+    }
+
+    public ToolContext(TaskManager taskManager, Path skillsDir, Path workspaceRoot,
+                       List<String> webAllowedHosts, SandboxPolicy sandboxPolicy,
+                       NotificationService notificationService, BooleanSupplier outreachEnabled,
+                       Path userProfileFile, BooleanSupplier userProfileEnabled) {
         this.taskManager = taskManager;
         this.skillsDir = skillsDir;
         this.workspaceRoot = workspaceRoot;
@@ -47,6 +57,8 @@ public final class ToolContext {
         this.sandboxPolicy = sandboxPolicy;
         this.notificationService = notificationService;
         this.outreachEnabled = outreachEnabled == null ? () -> false : outreachEnabled;
+        this.userProfileFile = userProfileFile;
+        this.userProfileEnabled = userProfileEnabled == null ? () -> false : userProfileEnabled;
     }
 
     /** The task manager (for the task tool); may be {@code null} in contexts that don't need it. */
@@ -97,5 +109,22 @@ public final class ToolContext {
      */
     public BooleanSupplier outreachEnabled() {
         return outreachEnabled;
+    }
+
+    /**
+     * The curated user-profile file ({@code USER.md}) for the {@code updateProfile} tool
+     * ({@code user-profile}); {@code null} when profile is not wired, in which case the provider
+     * registers no tool.
+     */
+    public Path userProfileFile() {
+        return userProfileFile;
+    }
+
+    /**
+     * Whether the user profile is enabled — read live (a supplier) so the {@code updateProfile} tool's
+     * availability tracks config. Never {@code null}; defaults to {@code false}.
+     */
+    public BooleanSupplier userProfileEnabled() {
+        return userProfileEnabled;
     }
 }

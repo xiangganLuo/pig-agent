@@ -47,6 +47,10 @@ import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.MemoryMigration;
+import io.pigagent.core.profile.ModelProfileDistiller;
+import io.pigagent.core.profile.ProfileConsolidationService;
+import io.pigagent.core.profile.UserProfileContextMiddleware;
+import io.pigagent.core.profile.UserProfileStore;
 import io.pigagent.mcp.JsonMcpStore;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.JsonModelStore;
@@ -274,9 +278,22 @@ public final class AgentBootstrap {
         SandboxPolicy sandboxPolicy = new SandboxPolicy(
                 execCfg.getMaxOutputBytes(), execCfg.getTimeoutSeconds(),
                 execCfg.getDenylist(), execCfg.getWarnlist(), execCfg.isScrubEnv(), execCfg.getWorkingDir());
+        // User profile (user-profile): the curated USER.md distinct from MEMORY.md. Resolve its path
+        // (config-overridable), a live enabled supplier (so /config edits + the disabled path apply),
+        // and its injection size cap. The path + enabled flow into ToolContext (updateProfile tool) and
+        // a shared injection middleware below; disabled = no injection + no tool (today's behavior).
+        PigAgentConfig.UserProfileConfig upCfg = config.getUserProfile();
+        java.nio.file.Path userProfileFile = workspace.getRootPath().resolve(upCfg.getPath());
+        java.util.function.BooleanSupplier userProfileEnabled =
+                () -> configManager.getConfig().getUserProfile().isEnabled();
+        UserProfileStore userProfileStore = new UserProfileStore(userProfileFile);
+        UserProfileContextMiddleware userProfileMiddleware = new UserProfileContextMiddleware(
+                userProfileStore, upCfg.getMaxChars(), userProfileEnabled);
+
         ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
                 workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy,
-                notificationService, () -> configManager.getConfig().getOutreach().isEnabled());
+                notificationService, () -> configManager.getConfig().getOutreach().isEnabled(),
+                userProfileFile, userProfileEnabled);
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
@@ -473,6 +490,12 @@ public final class AgentBootstrap {
         interactiveMiddlewares.add(new LoggingMiddleware());
         interactiveMiddlewares.add(new ToolCallLoggingMiddleware());
         interactiveMiddlewares.addAll(pluginResult.middlewares);
+        // User profile (user-profile): inject USER.md into the system prompt. Added to the passed-in
+        // middleware list so it precedes the NativeMemoryContextMiddleware (appended last inside
+        // PigAgent.build) — onSystemPrompt is a left-to-right transformer, so the prompt becomes
+        // base + USER + MEMORY (profile before the fact ledger, Hermes-style). Self-gating on
+        // user-profile.enabled (identity when disabled) and stateless → shared across all tracks.
+        interactiveMiddlewares.add(userProfileMiddleware);
 
         // av2 Phase 6a: native subagent delegation ("orchestration" north-star). Config-gated, default
         // OFF (conservative — see PigAgentConfig.SubagentsConfig: 2.0.0 does NOT propagate the parent's
@@ -519,8 +542,9 @@ public final class AgentBootstrap {
                 spec -> modelManager.modelFor(spec.modelId()),
                 spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
                 // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
-                // are logging-only (loop detection is instance-stateful → interactive/channel tracks).
-                spec -> List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware()),
+                // are logging-only (loop detection is instance-stateful → interactive/channel tracks) +
+                // the shared user-profile injector (user-profile) so peers also "know who you are".
+                spec -> List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
                 memoryConfigSupplier,
                 stateStore,
                 // Per-agent native permission context: the agent's permissionMode override (else the
@@ -592,6 +616,43 @@ public final class AgentBootstrap {
             }
         }
 
+        // Background user-profile consolidation (user-profile), default OFF. When enabled, a throttled,
+        // fault-tolerant service distills durable identity/preferences from MEMORY.md into a deduped
+        // USER.md via a CHEAP model (consolidation.model-id → memory.model-id → the primary model),
+        // reusing the pa-memory-native cheap-model pattern (no second engine). It runs on the existing
+        // TaskScheduler at the min-gap cadence (the service self-throttles too); the model call is
+        // behind the ProfileDistiller seam (offline-mockable). Off = no schedule, no LLM call.
+        if (upCfg.getConsolidation().isEnabled()) {
+            java.util.function.Supplier<Model> profileModel = () -> {
+                String id = upCfg.getConsolidation().getModelId();
+                if (id == null || id.isBlank()) {
+                    id = configManager.getConfig().getMemory().getModelId();
+                }
+                if (id != null && !id.isBlank()) {
+                    try {
+                        Model m = modelManager.modelFor(id);
+                        if (m != null) {
+                            return m;
+                        }
+                    } catch (Exception e) {
+                        log.warn("Profile consolidation model '{}' not resolvable — falling back to primary: {}",
+                                id, e.getMessage());
+                    }
+                }
+                PigAgent active = agentHolder.get();
+                return active == null ? null : active.getModel();
+            };
+            int gapMinutes = Math.max(1, upCfg.getConsolidation().getMinGapMinutes());
+            ProfileConsolidationService profileConsolidation = new ProfileConsolidationService(
+                    userProfileStore, workspaceRoot.resolve("MEMORY.md"),
+                    new ModelProfileDistiller(profileModel), java.time.Duration.ofMinutes(gapMinutes));
+            taskScheduler.schedule("user-profile:consolidation",
+                    TaskSchedule.cron("*/" + (gapMinutes * 60)), profileConsolidation::maybeConsolidate);
+            log.info("User-profile consolidation scheduled (every {}m, model {})",
+                    gapMinutes, upCfg.getConsolidation().getModelId().isBlank()
+                            ? "cheap/primary" : upCfg.getConsolidation().getModelId());
+        }
+
         // Scheduled outreach (proactive-outreach): a cron-driven daily briefing pushed to the default
         // channel. Armed via the OutreachScheduler seam adapted to the existing TaskScheduler; the fire
         // resolves the channel lazily (channels are registered by the CLI after build). Default off.
@@ -616,7 +677,8 @@ public final class AgentBootstrap {
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(newLoopDetectionMiddleware(configManager),
-                        new LoggingMiddleware(), new ToolCallLoggingMiddleware()), memoryConfigSupplier,
+                        new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
+                memoryConfigSupplier,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx, workspaceRoot, evictionConfig);
         AgentHolder channelAgentHolder = new AgentHolder(

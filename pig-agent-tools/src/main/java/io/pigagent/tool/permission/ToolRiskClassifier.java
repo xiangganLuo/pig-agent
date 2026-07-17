@@ -49,6 +49,8 @@ public final class ToolRiskClassifier {
             Map.entry("completeItem", ToolRisk.WRITE),
             // 原生记忆写（pa-memory-native）——memory_save 原子更新 MEMORY.md + 日志层
             Map.entry("memory_save", ToolRisk.WRITE),
+            // 用户画像写（user-profile）——updateProfile 确定性 set/merge 一个画像字段到 USER.md
+            Map.entry("updateProfile", ToolRisk.WRITE),
             // 执行
             Map.entry("executeCommand", ToolRisk.EXEC),
             // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）
