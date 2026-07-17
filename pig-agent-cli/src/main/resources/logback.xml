@@ -10,7 +10,14 @@
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n</pattern>
+            <!--
+              %nopex: NEVER dump exception stack traces to the user's terminal (the TUI). Without it,
+              logback's PatternLayout implicitly appends the full throwable stack whenever a logged event
+              carries one — so an upstream model error (e.g. a 429 RateLimitException logged by
+              AgentScope's ModelUtils retry) vomits ~40 lines of Reactor frames into the REPL. The clean,
+              one-line %msg is kept on console; the FILE appender below keeps the full stack for debugging.
+            -->
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n%nopex</pattern>
         </encoder>
     </appender>
 
