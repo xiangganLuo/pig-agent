@@ -21,9 +21,11 @@ import java.util.stream.Stream;
  * any unreadable entry into a {@code corrupt} {@link Session} rather than failing the whole
  * listing (fault tolerance per the requirements).
  *
- * <p>The same {@code sessions/{id}/} directory also holds AgentScope conversation state and
- * {@code temp-memory.md}; {@link #deleteById(String)} removes the entire directory, which
- * cleans up all three in one shot.
+ * <p>This is the <em>metadata sidecar</em> only. In AgentScope 2.0 the actual conversation state
+ * lives in the native {@code AgentStateStore} under {@code workspace/state/pig/{id}/}, NOT in this
+ * {@code sessions/{id}/} directory (which holds {@code meta.json} + the legacy {@code temp-memory.md}).
+ * {@link #deleteById(String)} therefore removes only the sidecar; the native conversation slot is
+ * deleted separately by {@code SessionManager.delete} via {@code PigAgent.deleteConversation}.
  */
 public final class FileSystemSessionRepository implements SessionRepository {
 

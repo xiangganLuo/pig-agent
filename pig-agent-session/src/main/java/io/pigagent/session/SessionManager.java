@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Coordinates the session lifecycle. The agent is read through an {@link AgentHolder} so that
@@ -44,6 +45,7 @@ public final class SessionManager {
     private final ConfigurationManager configManager;
     private final Path sessionsDir;
     private final Runnable memoryToggleHook;
+    private final Consumer<String> snapshotResetHook;
 
     private String currentSessionId;
 
@@ -67,12 +69,28 @@ public final class SessionManager {
                           ConfigurationManager configManager,
                           Path sessionsDir,
                           Runnable memoryToggleHook) {
+        this(agentHolder, modelSwitcher, repository, configManager, sessionsDir, memoryToggleHook, null);
+    }
+
+    /**
+     * @param snapshotResetHook invoked with the session id when its conversation is cleared
+     *        ({@code /session clear}), so a stateful compression snapshot for that session can be reset
+     *        (wire {@code compressionService::resetSnapshot}). {@code null} = no reset (tests / no wiring).
+     */
+    public SessionManager(AgentHolder agentHolder,
+                          AgentModelSwitcher modelSwitcher,
+                          SessionRepository repository,
+                          ConfigurationManager configManager,
+                          Path sessionsDir,
+                          Runnable memoryToggleHook,
+                          Consumer<String> snapshotResetHook) {
         this.agentHolder = agentHolder;
         this.modelSwitcher = modelSwitcher;
         this.repository = repository;
         this.configManager = configManager;
         this.sessionsDir = sessionsDir;
         this.memoryToggleHook = memoryToggleHook;
+        this.snapshotResetHook = snapshotResetHook;
     }
 
     /** Restore the last active session on startup, or create a default one. */
@@ -176,6 +194,11 @@ public final class SessionManager {
             return;
         }
         agentHolder.get().clearConversation(currentSessionId);
+        // The prior compression snapshot for this session is now stale — reset it so a later
+        // maybeCompress()/status() does not reason over the pre-clear message count.
+        if (snapshotResetHook != null) {
+            snapshotResetHook.accept(currentSessionId);
+        }
         if (withTempMemory) {
             try {
                 Files.deleteIfExists(tempMemoryPath(currentSessionId));
@@ -185,11 +208,18 @@ public final class SessionManager {
         touch(currentSessionId);
     }
 
-    /** Delete the given sessions; if the current one is removed, activate a replacement. */
+    /**
+     * Delete the given sessions; if the current one is removed, activate a replacement. Removes BOTH
+     * the metadata sidecar ({@code repository.deleteById}) AND the native conversation state slot
+     * ({@code (userId="pig", id)} via {@link io.pigagent.core.agent.PigAgent#deleteConversation}) so no
+     * orphaned conversation is left on disk (a privacy/disk leak). Each conversation-slot delete is
+     * fault-tolerant (it logs and continues), so one failure never aborts the batch.
+     */
     public void delete(List<String> ids) {
         boolean currentDeleted = currentSessionId != null && ids.contains(currentSessionId);
         for (String id : ids) {
             repository.deleteById(id);
+            agentHolder.get().deleteConversation(id);
         }
         if (currentDeleted) {
             currentSessionId = null; // avoid saveCurrent() re-creating the deleted directory
@@ -214,8 +244,13 @@ public final class SessionManager {
                 .ifPresent(s -> repository.save(s.withName(name.strip())));
     }
 
-    /** Persist the current conversation and bump its last-active time (autosave per turn). The
-     * native store also auto-saves per turn; this is an explicit flush of the current slot. */
+    /**
+     * Persist the current conversation and bump its last-active time. The native {@code AgentStateStore}
+     * already auto-persists the main agent's {@code (pig, sessionId)} slot at the end of every turn
+     * (chained before the stream completes; atomic temp+move), so this explicit {@code saveTo} is a
+     * belt-and-suspenders <em>immediate flush</em> — redundant but not corrupting — and it is what
+     * updates the metadata sidecar's last-active timestamp on save.
+     */
     public void saveCurrent() {
         if (currentSessionId == null) {
             return;
