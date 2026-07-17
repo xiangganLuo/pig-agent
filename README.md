@@ -331,7 +331,7 @@ permissions:
 sandbox:
   exec:
     timeout-seconds: 30
-    output-cap-bytes: 204800
+    max-output-bytes: 200000
     scrub-env: true
     denylist: []                # 只能扩展内置灾难命令下限
     warnlist: []
@@ -360,7 +360,10 @@ skills:
 outreach:
   enabled: false                # 主动外呼（notifyUser / 晨报推送）
   channel: ""
-  quiet-hours: "22:00-08:00"
+  quiet-hours:
+    enabled: false
+    start: "22:00"
+    end: "08:00"
 
 # —— 循环检测 ——
 loop-detection:
