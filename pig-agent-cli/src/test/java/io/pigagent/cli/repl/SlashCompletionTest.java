@@ -41,7 +41,7 @@ class SlashCompletionTest {
                 .build();
         ReplContext ctx = new ReplContext(
                 null, null, null, null, null, null, null, null, null, null,
-                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null);
+                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
 
         PicocliCommandsFactory factory = new PicocliCommandsFactory();
         factory.setTerminal(terminal);

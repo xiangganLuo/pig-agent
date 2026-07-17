@@ -9,6 +9,7 @@ import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.NotifyCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
 import io.pigagent.cli.repl.command.PlanCommand;
+import io.pigagent.cli.repl.command.SkillCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.protocol.ModelProtocol;
@@ -54,6 +55,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new HelpCommand(ctx));
         cmd.addSubcommand(new TasksCommand(ctx));
         cmd.addSubcommand(new SkillsCommand(ctx));
+        cmd.addSubcommand(new SkillCommand(ctx));
         cmd.addSubcommand(new ConfigCommand(ctx));
         cmd.addSubcommand(new ProtocolsCommand(ctx));
         cmd.addSubcommand(new ModelCommand(ctx));
@@ -95,6 +97,7 @@ public final class ReplCommands {
             entry(t, "/help", "Show this help");
             entry(t, "/tasks", "List all tasks");
             entry(t, "/skills", "List available skills");
+            entry(t, "/skill <action>", "Autonomous-skills gate (review|approve|reject)");
             entry(t, "/config", "Show current configuration");
             entry(t, "/protocols", "List all model protocol types");
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");

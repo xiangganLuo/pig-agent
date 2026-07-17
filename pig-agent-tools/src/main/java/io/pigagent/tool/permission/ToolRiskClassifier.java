@@ -41,6 +41,9 @@ public final class ToolRiskClassifier {
             Map.entry("writeFile", ToolRisk.WRITE),
             Map.entry("createChecklist", ToolRisk.WRITE),
             Map.entry("completeItem", ToolRisk.WRITE),
+            // 自主沉淀 skills（autonomous-skills）——起草 + 管理暂存草稿（永不安装；提升走人工门）
+            Map.entry("proposeSkill", ToolRisk.WRITE),
+            Map.entry("skillManage", ToolRisk.WRITE),
             // 执行
             Map.entry("executeCommand", ToolRisk.EXEC),
             // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）

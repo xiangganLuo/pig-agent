@@ -65,6 +65,12 @@ public final class WorkspaceSkillSource implements SkillSource {
     /** Validate one candidate directory and add it as a skill, skipping (with a warn) on any breach. */
     private void tryAdd(List<Skill> skills, Path root, Path dir) {
         String dirName = String.valueOf(dir.getFileName());
+        // Reserved dot-prefixed directories (e.g. the autonomous-skills staging ".pending" and any
+        // ".archive") are NEVER surfaced as skills — silently skipped so a staged draft can't leak into
+        // listSkills. (Staged drafts also live one level deeper, so they're invisible either way.)
+        if (dirName.startsWith(".")) {
+            return;
+        }
         try {
             if (!SkillSecurity.isDirectChild(root, dir)) {
                 log.warn("Skipping skill '{}': directory escapes the skills root (traversal/symlink)", dirName);

@@ -78,7 +78,8 @@ class ReplCommandsTest {
                 running,
                 new AtomicReference<LineReader>(),
                 null, // availabilityReport
-                null); // notificationService
+                null, // notificationService
+                null); // skillGate
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
         return new Harness(cmd, out, running);
     }
@@ -183,7 +184,7 @@ class ReplCommandsTest {
 
         ReplContext ctx = new ReplContext(
                 agentHolder, null, null, configManager, null, modelManager, null, mcpManager,
-                List.of(), sessionManager, terminal, running, new AtomicReference<LineReader>(), report, null);
+                List.of(), sessionManager, terminal, running, new AtomicReference<LineReader>(), report, null, null);
         CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
 
         int code = cmd.execute("/status");
