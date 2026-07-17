@@ -8,6 +8,7 @@ import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.channel.ChannelRegistry;
@@ -45,17 +46,7 @@ import io.pigagent.core.middleware.LoggingMiddleware;
 import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
-import io.pigagent.core.memory.CompositeLongTermMemory;
-import io.pigagent.core.memory.FileSystemLongTermMemory;
-import io.pigagent.core.memory.extraction.AsyncMemoryExtractionScheduler;
-import io.pigagent.core.memory.extraction.ConfidenceGate;
-import io.pigagent.core.memory.extraction.ExtractingLongTermMemory;
-import io.pigagent.core.memory.extraction.FactMerger;
-import io.pigagent.core.memory.extraction.LlmMemoryExtractor;
-import io.pigagent.core.memory.extraction.MarkdownFactStore;
-import io.pigagent.core.memory.extraction.MemoryExtractionPipeline;
-import io.pigagent.core.memory.extraction.MemoryExtractor;
-import io.pigagent.core.memory.extraction.MemoryNoiseFilter;
+import io.pigagent.core.memory.MemoryMigration;
 import io.pigagent.mcp.JsonMcpStore;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.model.JsonModelStore;
@@ -75,7 +66,6 @@ import io.pigagent.provider.registry.ProtocolRegistry;
 import io.pigagent.session.FileSystemSessionRepository;
 import io.pigagent.session.SessionLineageWriter;
 import io.pigagent.session.SessionManager;
-import io.pigagent.session.SessionMemoryFactory;
 import io.pigagent.session.SessionRepository;
 import io.pigagent.task.FileSystemTaskRepository;
 import io.pigagent.task.TaskManager;
@@ -180,8 +170,6 @@ public final class AgentBootstrap {
         /** Mutable registry of started channels, populated by the CLI so outreach can find outbound channels. */
         public final ChannelRegistry outreachRegistry;
         private final TaskScheduler taskScheduler;
-        /** Debounce scheduler for memory extraction; null when extraction is disabled. */
-        private final AutoCloseable memoryExtractionScheduler;
 
         private Services(WorkspaceManager workspace, ConfigurationManager configManager, PigAgentConfig config,
                          ProtocolRegistry registry, ModelManager modelManager, TaskManager taskManager,
@@ -190,8 +178,7 @@ public final class AgentBootstrap {
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
                          ChannelNotificationService notificationService, ChannelRegistry outreachRegistry,
-                         TaskScheduler taskScheduler,
-                         AutoCloseable memoryExtractionScheduler) {
+                         TaskScheduler taskScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
             this.config = config;
@@ -209,30 +196,15 @@ public final class AgentBootstrap {
             this.notificationService = notificationService;
             this.outreachRegistry = outreachRegistry;
             this.taskScheduler = taskScheduler;
-            this.memoryExtractionScheduler = memoryExtractionScheduler;
         }
 
         /** Release the shared resources — call from the frontend's shutdown hook. */
         public void shutdownCommon() {
             sessionManager.saveCurrent();
-            // Flush + stop the memory-extraction scheduler BEFORE final persistence, so a last
-            // pending extraction lands (no leak, no lost work). No-op when extraction is off.
-            closeMemoryExtractionScheduler();
             // av2 Phase 3/4: conversation state now persists automatically via the native
             // AgentStateStore per turn (no JsonSession to close); saveCurrent() flushed the active slot.
             taskScheduler.shutdown();
             mcpManager.closeAll();
-        }
-
-        private void closeMemoryExtractionScheduler() {
-            if (memoryExtractionScheduler == null) {
-                return;
-            }
-            try {
-                memoryExtractionScheduler.close();
-            } catch (Exception e) {
-                log.warn("Failed to close memory-extraction scheduler: {}", e.getMessage());
-            }
         }
     }
 
@@ -414,10 +386,6 @@ public final class AgentBootstrap {
         // the shell, graceful degradation on denied/unavailable tools, never echo credentials).
         String sysPrompt = workspace.readAgentMd() + "\n\n" + workspace.readInfoMd() + TOOL_GUIDANCE;
 
-        FileSystemLongTermMemory globalMemory = new FileSystemLongTermMemory(
-                workspace.getContextDir().resolve("memory.md"));
-        CompositeLongTermMemory memory = new CompositeLongTermMemory(globalMemory, config.isMemoryEnabled());
-
         // av2 Phase 3/4: ONE shared native state store rooted at workspace/state/ (kept apart from the
         // metadata sidecar under workspace/sessions/{id}/). Passed to every rebuilt agent so per-session
         // conversation survives model switches + restarts (§10 Phase-3 store seam).
@@ -436,6 +404,24 @@ public final class AgentBootstrap {
             log.info("Tool-result eviction enabled (threshold {} chars, dir {})",
                     evictionConfig.getMaxResultChars(), evictionConfig.getEvictionPath());
         }
+
+        // pa-memory-native: AgentScope 2.0 native two-layer long-term memory (flush → memory/YYYY-MM-DD.md,
+        // consolidation → workspace-level MEMORY.md, + memory tools + MEMORY.md system-prompt injection).
+        // The MemoryConfig carries the flush trigger / consolidation cadence and the cheap model (Doubao
+        // lite; config memory.model-id, fallback to the primary reasoning model when blank/unresolvable).
+        // One-time, idempotent, fault-tolerant migration of the retired global memory (context/memory.md
+        // → MEMORY.md) runs on startup (OD9). The supplier is re-evaluated on every agent (re)build so a
+        // /memory toggle rebuild reflects the current memory-enabled flag: enabled → the config; disabled
+        // → null (native memory hooks/tools off, no injection, no flush).
+        MemoryMigration.migrate(workspace.getContextDir().resolve("memory.md"),
+                workspaceRoot.resolve("MEMORY.md"));
+        MemoryConfig memoryConfig = buildMemoryConfig(config.getMemory(), modelManager);
+        Supplier<MemoryConfig> memoryConfigSupplier =
+                () -> configManager.getConfig().isMemoryEnabled() ? memoryConfig : null;
+        log.info("Native long-term memory: {} (flush {}, consolidation min-gap {}m, model {})",
+                config.isMemoryEnabled() ? "enabled" : "disabled", config.getMemory().getFlush(),
+                config.getMemory().getConsolidationMinGapMinutes(),
+                config.getMemory().getModelId().isBlank() ? "primary" : config.getMemory().getModelId());
 
         // av2 native Plan Mode (config-gated, default OFF → no plan tools, exactly today's behavior).
         // Enabled → the INTERACTIVE agent + switchable peers install the plan trio (plan_enter/plan_write/
@@ -514,7 +500,7 @@ public final class AgentBootstrap {
 
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                interactiveMiddlewares, memory,
+                interactiveMiddlewares, memoryConfigSupplier,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
                 subagentsEnabled, peerSubagents, planModeSettings);
@@ -535,7 +521,7 @@ public final class AgentBootstrap {
                 // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
                 // are logging-only (loop detection is instance-stateful → interactive/channel tracks).
                 spec -> List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware()),
-                memory,
+                memoryConfigSupplier,
                 stateStore,
                 // Per-agent native permission context: the agent's permissionMode override (else the
                 // global mode) mapped over its own tool subset. Interactive track → ASK routes to HITL.
@@ -630,7 +616,7 @@ public final class AgentBootstrap {
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 List.of(newLoopDetectionMiddleware(configManager),
-                        new LoggingMiddleware(), new ToolCallLoggingMiddleware()), memory,
+                        new LoggingMiddleware(), new ToolCallLoggingMiddleware()), memoryConfigSupplier,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx, workspaceRoot, evictionConfig);
         AgentHolder channelAgentHolder = new AgentHolder(
@@ -651,39 +637,21 @@ public final class AgentBootstrap {
 
         SessionRepository sessionRepository = new FileSystemSessionRepository(workspace.getSessionsDir());
 
-        // Memory extraction (memory-extraction): when enabled, the per-session temp memory is wrapped
-        // with an ExtractingLongTermMemory decorator that LLM-extracts classified facts off the turn's
-        // critical path (async, debounced). Default off → DEFAULT factory = raw FileSystemLongTermMemory,
-        // no scheduler, byte-for-byte the pre-extraction behavior. Session-tier only; global tier and
-        // the PreReasoning injection half are untouched.
-        PigAgentConfig.MemoryExtractionConfig extractionCfg = config.getMemory().getExtraction();
-        AsyncMemoryExtractionScheduler extractionScheduler = null;
-        SessionMemoryFactory sessionMemoryFactory = SessionMemoryFactory.DEFAULT;
-        if (extractionCfg.isEnabled()) {
-            extractionScheduler = new AsyncMemoryExtractionScheduler(extractionCfg.getDebounceMs());
-            // Shared, stateless collaborators; only the FactStore/pipeline are per-session (path-bound).
-            MemoryExtractor extractor = new LlmMemoryExtractor(() -> agentHolder.get().getModel());
-            MemoryNoiseFilter noiseFilter = new MemoryNoiseFilter();
-            ConfidenceGate gate = new ConfidenceGate();
-            FactMerger merger = new FactMerger();
-            AsyncMemoryExtractionScheduler scheduler = extractionScheduler;
-            java.util.function.BooleanSupplier enabled =
-                    () -> configManager.getConfig().getMemory().getExtraction().isEnabled();
-            java.util.function.DoubleSupplier threshold =
-                    () -> configManager.getConfig().getMemory().getExtraction().getConfidenceThreshold();
-            sessionMemoryFactory = tempFile -> {
-                FileSystemLongTermMemory raw = new FileSystemLongTermMemory(tempFile);
-                MemoryExtractionPipeline pipeline = new MemoryExtractionPipeline(
-                        noiseFilter, extractor, gate, merger, new MarkdownFactStore(tempFile), threshold);
-                return new ExtractingLongTermMemory(raw, pipeline, scheduler, enabled);
-            };
-            log.info("Memory extraction enabled (threshold {}, debounce {}ms)",
-                    extractionCfg.getConfidenceThreshold(), extractionCfg.getDebounceMs());
-        }
+        // pa-memory-native: /memory on|off flips memory-enabled then rebuilds the interactive + channel
+        // agents (same mechanism as an /mcp change) so the memoryConfigSupplier re-evaluates the flag —
+        // enabled → native memory hooks/tools + MEMORY.md injection ON; disabled → all OFF (no injection,
+        // no flush). Rebuild is a no-op when no model is resolvable.
+        Runnable memoryToggleHook = () -> modelManager.getCurrentModel().ifPresent(m -> {
+            Model rebuilt = modelManager.buildModel(m);
+            agentHolder.set(agentFactory.create(rebuilt));
+            channelAgentHolder.set(channelAgentFactory.create(rebuilt));
+            log.info("Rebuilt agents after /memory toggle (native memory {}).",
+                    configManager.getConfig().isMemoryEnabled() ? "on" : "off");
+        });
 
         SessionManager sessionManager = new SessionManager(
-                agentHolder, modelManager, memory, sessionRepository,
-                configManager, workspace.getSessionsDir(), sessionMemoryFactory);
+                agentHolder, modelManager, sessionRepository,
+                configManager, workspace.getSessionsDir(), memoryToggleHook);
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
                 log.info("Session: {} [{}]", s.name(), s.id()));
@@ -701,7 +669,45 @@ public final class AgentBootstrap {
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
                 availabilityReport, readerRef, notificationService, outreachRegistry,
-                taskScheduler, extractionScheduler);
+                taskScheduler);
+    }
+
+    /**
+     * Build the AgentScope 2.0 native {@link MemoryConfig} from the pig {@code memory} config block
+     * ({@code pa-memory-native}): flush trigger (always/never/throttled), consolidation cadence/token
+     * cap, and the cheap flush/consolidation model ({@code memory.model-id} → {@link ModelManager};
+     * blank/unresolvable → the agent's primary reasoning model). All inputs are default-safe.
+     */
+    static MemoryConfig buildMemoryConfig(PigAgentConfig.MemoryConfig cfg, ModelManager modelManager) {
+        MemoryConfig.Builder b = MemoryConfig.builder();
+        // Flush trigger: always (default) | never | throttled(minutes).
+        String flush = cfg.getFlush() == null ? "always" : cfg.getFlush().trim().toLowerCase(java.util.Locale.ROOT);
+        switch (flush) {
+            case "never" -> b.flushTrigger(MemoryConfig.FlushTrigger.never());
+            case "throttled" -> b.flushTrigger(MemoryConfig.FlushTrigger.throttled(
+                    java.time.Duration.ofMinutes(Math.max(0, cfg.getFlushThrottleMinutes()))));
+            default -> b.flushTrigger(MemoryConfig.FlushTrigger.always());
+        }
+        if (cfg.getConsolidationMinGapMinutes() > 0) {
+            b.consolidationMinGap(java.time.Duration.ofMinutes(cfg.getConsolidationMinGapMinutes()));
+        }
+        if (cfg.getConsolidationMaxTokens() > 0) {
+            b.consolidationMaxTokens(cfg.getConsolidationMaxTokens());
+        }
+        // Cheap auxiliary model (OD8). Blank id or an unresolvable model → null → native uses the
+        // agent's primary reasoning model (fault-tolerant fallback).
+        if (cfg.getModelId() != null && !cfg.getModelId().isBlank()) {
+            try {
+                Model memModel = modelManager.modelFor(cfg.getModelId());
+                if (memModel != null) {
+                    b.model(memModel);
+                }
+            } catch (Exception e) {
+                log.warn("Memory model '{}' not resolvable — flush/consolidation fall back to the primary model: {}",
+                        cfg.getModelId(), e.getMessage());
+            }
+        }
+        return b.build();
     }
 
     /**

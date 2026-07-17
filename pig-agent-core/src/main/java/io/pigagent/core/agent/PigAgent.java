@@ -3,7 +3,6 @@ package io.pigagent.core.agent;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
-import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.middleware.MiddlewareBase;
@@ -15,10 +14,11 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
+import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.core.memory.ConversationMemory;
-import io.pigagent.core.memory.EphemeralMemoryMiddleware;
+import io.pigagent.core.memory.NativeMemoryContextMiddleware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -52,16 +52,17 @@ import java.util.Set;
  *       {@link #call(Msg)} now calls {@code call(List, RuntimeContext)}; {@link #stream(Msg)} moves to
  *       {@code streamEvents(Msg)} returning {@code Flux<AgentEvent>} (the deprecated
  *       {@code Flux<io.agentscope.core.agent.Event>} stream is retired).</li>
- *   <li>Long-term memory is still injected on the user side, ephemerally, via our own hook — NOT
- *       through AgentScope wiring (see {@link EphemeralMemoryMiddleware}). The forward path for
- *       this hook is a {@code MiddlewareBase#onReasoning} (deferred to Phase 4).</li>
+ *   <li>Long-term memory is the AgentScope 2.0 <b>native two-layer memory</b> ({@code pa-memory-native}):
+ *       native flush/consolidation hooks + memory tools write the workspace-level {@code MEMORY.md}, and
+ *       pig injects it into the system prompt via {@code NativeMemoryContextMiddleware}
+ *       ({@link Builder#memory(MemoryConfig)}).</li>
  * </ul>
  *
  * <p><b>av2 Phase 5b — HarnessAgent adoption (the vehicle).</b> {@code PigAgent} now wraps a
  * {@link HarnessAgent} instead of a bare {@code ReActAgent}. The {@code HarnessAgent} is a thin
  * delegating vehicle around the exact same {@code ReActAgent} pig builds (its
  * {@link HarnessAgent#getDelegate()} is that {@code ReActAgent}), carrying pig's {@code Toolkit},
- * middlewares (ephemeral-memory / loop-detection / logging), native {@code stateStore},
+ * middlewares (native-memory injection / loop-detection / logging), native {@code stateStore},
  * {@code permissionContext}, {@code maxRetries}/{@code fallbackModel} and {@code maxIters}
  * <em>unchanged</em>. Turn methods ({@code call}/{@code stream}/{@code streamEvents}) run through the
  * {@code HarnessAgent} so its native <b>tool-result eviction</b> (the one gap pig lacked) applies;
@@ -69,14 +70,17 @@ import java.util.Set;
  * {@link ConversationMemory}) run through {@code getDelegate()} — the exact instance the vehicle uses,
  * so state stays consistent. Every batteries-included harness extra pig already owns is disabled at
  * build ({@code disableFilesystemTools}/{@code disableShellTool} — pig's guarded FileSystemTools/
- * ShellTools; {@code disableMemoryTools}/{@code disableMemoryHooks} — pig's ephemeral + A4;
- * {@code disableCompaction} — pig's A5 context-engineering; native <b>subagents</b> are enabled on
- * demand (av2 Phase 6a — {@link Builder#subagents(boolean)}; disabled by default so a bare builder is
- * byte-for-byte the old behavior);
+ * ShellTools; {@code disableCompaction} — pig's A5 context-engineering; native <b>subagents</b> are
+ * enabled on demand (av2 Phase 6a — {@link Builder#subagents(boolean)}; disabled by default so a bare
+ * builder is byte-for-byte the old behavior);
  * {@code disableWorkspaceContext}/{@code disableAtPathExpansion}/{@code disableDynamicSkills}/
  * {@code disableToolsConfig} — pig owns the system prompt + toolkit; {@code disableSessionPersistence}
- * — pig's {@code AgentStateStore} stays the single persistence mechanism). Only tool-result eviction
- * is turned on. The public method surface is unchanged, so cli/web/channel/kernel are untouched.
+ * — pig's {@code AgentStateStore} stays the single persistence mechanism). <b>Native two-layer
+ * long-term memory</b> ({@code pa-memory-native}) is enabled via {@link Builder#memory(MemoryConfig)}
+ * (flush/consolidation hooks + memory tools ON + {@code NativeMemoryContextMiddleware} injection); when
+ * no config is supplied it stays disabled ({@code disableMemoryTools}/{@code disableMemoryHooks}). Only
+ * tool-result eviction is turned on unconditionally. The public method surface is unchanged, so
+ * cli/web/channel/kernel are untouched.
  */
 public final class PigAgent {
 
@@ -299,7 +303,7 @@ public final class PigAgent {
         private Model model;
         private Toolkit toolkit;
         private List<MiddlewareBase> middlewares;
-        private LongTermMemory longTermMemory;
+        private MemoryConfig memoryConfig; // null = native long-term memory disabled (today's behavior)
         private AgentStateStore stateStore;
         private PermissionContextState permissionContext;
         private int maxIters; // 0 = do not set (keep AgentScope's default)
@@ -336,17 +340,29 @@ public final class PigAgent {
         /**
          * The native {@link MiddlewareBase}s installed on the underlying {@code ReActAgent}
          * (av2 Phase 5a — the 2.0 replacement for the removed {@code hooks(List&lt;Hook&gt;)}). Loop
-         * detection + logging come in here; ephemeral long-term-memory injection/record is added
-         * automatically from {@link #longTermMemory(LongTermMemory)} (appended last, so it injects
-         * closest to the model). List order is onion order (first = outermost).
+         * detection + logging come in here; when native long-term memory is enabled
+         * ({@link #memory(MemoryConfig)}), the {@code NativeMemoryContextMiddleware} (MEMORY.md →
+         * system prompt) is appended last automatically. List order is onion order (first = outermost).
          */
         public Builder middlewares(List<MiddlewareBase> middlewares) {
             this.middlewares = middlewares;
             return this;
         }
 
-        public Builder longTermMemory(LongTermMemory longTermMemory) {
-            this.longTermMemory = longTermMemory;
+        /**
+         * Enable AgentScope 2.0 <b>native two-layer long-term memory</b> ({@code pa-memory-native}).
+         * When non-null, the {@link HarnessAgent} vehicle keeps its native memory hooks
+         * ({@code MemoryFlushMiddleware} flush → {@code memory/YYYY-MM-DD.md}, {@code
+         * MemoryMaintenanceMiddleware} consolidation → workspace-level {@code MEMORY.md}) and memory
+         * tools ({@code memory_search}/{@code memory_get}/{@code memory_save}/{@code session_search})
+         * turned ON, and pig injects the consolidated {@code MEMORY.md} into the system prompt via a
+         * {@code NativeMemoryContextMiddleware}. The config's {@code model()} (Doubao lite) runs
+         * flush/consolidation off the primary reasoning model (OD8). {@code null} (the default) keeps
+         * the native memory hooks/tools DISABLED — byte-for-byte the pre-{@code pa-memory-native}
+         * behaviour (used by the connectivity probe, leaf subagents, and {@code /memory off}).
+         */
+        public Builder memory(MemoryConfig memoryConfig) {
+            this.memoryConfig = memoryConfig;
             return this;
         }
 
@@ -471,44 +487,56 @@ public final class PigAgent {
 
             AgentStateStore effectiveStore =
                     stateStore != null ? stateStore : new InMemoryAgentStateStore();
+            Path resolvedWorkspace = workspace != null ? workspace : fallbackWorkspace();
 
-            // Long-term memory is injected on the user side, ephemerally, via our own middleware — NOT
-            // through AgentScope's long-term-memory wiring, whose injection is persisted into the
-            // conversation and accumulates every turn. See EphemeralMemoryMiddleware. It is appended
-            // LAST so it is the innermost reasoning middleware (memory injected closest to the model,
-            // after e.g. loop-detection has counted the raw user messages).
+            // Middleware chain (loop-detection/logging first). When native long-term memory is enabled
+            // (memoryConfig != null, pa-memory-native), pig injects the consolidated MEMORY.md into the
+            // system prompt via NativeMemoryContextMiddleware — appended LAST (its onSystemPrompt runs
+            // once per call; every other stage is identity). The native flush/consolidation hooks +
+            // memory tools do the WRITING; this only surfaces MEMORY.md to the model.
             List<MiddlewareBase> effectiveMiddlewares = new ArrayList<>();
             if (middlewares != null) {
                 effectiveMiddlewares.addAll(middlewares);
             }
-            if (longTermMemory != null) {
-                effectiveMiddlewares.add(new EphemeralMemoryMiddleware(longTermMemory));
+            boolean memoryEnabled = memoryConfig != null;
+            if (memoryEnabled) {
+                effectiveMiddlewares.add(new NativeMemoryContextMiddleware(
+                        resolvedWorkspace.resolve("MEMORY.md")));
             }
 
             // av2 Phase 5b: build a HarnessAgent VEHICLE around the same ReActAgent config. The
             // HarnessAgent.Builder setters delegate to an inner ReActAgent.Builder (toolkit/middlewares/
             // stateStore/permissionContext/maxRetries/fallbackModel/maxIters), so pig's config reaches
             // the delegate unchanged (delegate == getDelegate()). We disable every batteries-included
-            // extra pig already owns and turn ON only tool-result eviction (the gap pig lacked).
+            // extra pig already owns and turn ON tool-result eviction (the gap pig lacked) + native
+            // long-term memory when configured (pa-memory-native).
             HarnessAgent.Builder hb = HarnessAgent.builder()
                     .name(name)
                     .sysPrompt(sysPrompt)
                     .model(model)
                     .stateStore(effectiveStore)
                     .toolkit(toolkit) // setter tolerates null (creates an empty Toolkit)
-                    .workspace(workspace != null ? workspace : fallbackWorkspace())
+                    .workspace(resolvedWorkspace)
                     // pig owns these — disable the native equivalents so there is no overlap:
                     .disableFilesystemTools()   // pig's guarded FileSystemTools
                     .disableShellTool()         // pig's ShellTools + command sandbox
-                    .disableMemoryTools()       // pig's ephemeral memory + A4 extraction
-                    .disableMemoryHooks()
                     .disableCompaction()        // pig's A5 context-engineering compaction
                     .disableWorkspaceContext()  // pig assembles its own byte-stable system prompt
+                                                // (native MEMORY.md injected by NativeMemoryContextMiddleware)
                     .disableAtPathExpansion()
                     .disableDynamicSkills()     // pig's SkillsTool + built-in skills
                     .disableDefaultWorkspaceSkills()
                     .disableToolsConfig()       // pig manages its own Toolkit (no tools.json)
                     .disableSessionPersistence(); // pig's AgentStateStore is the single mechanism
+
+            // pa-memory-native: native two-layer long-term memory (flush + consolidation + memory
+            // tools). When enabled, keep the native memory hooks/tools ON via .memory(config);
+            // otherwise disable them (byte-for-byte the pre-feature behaviour).
+            if (memoryEnabled) {
+                hb.memory(memoryConfig);
+            } else {
+                hb.disableMemoryTools().disableMemoryHooks();
+            }
 
             if (maxIters > 0) {
                 hb.maxIters(maxIters);

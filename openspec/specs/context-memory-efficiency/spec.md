@@ -1,7 +1,7 @@
 # context-memory-efficiency Specification
 
 ## Purpose
-内核上下文/记忆热路径的效率优化：让上下文压缩的 token 估算与摘要都 tool-aware（覆盖 tool 调用入参与 tool 返回结果，而非仅纯文本），并在一个回合内按 query 缓存长期记忆检索（装饰器），把每步推理重复读盘降为一次。目标是让压缩触发反映真实上下文规模、让摘要保留关键 tool 输出、并消除记忆注入的逐步重复读盘——均不改压缩触发阈值/保留策略、`/memory` 开关、两层记忆合并与 `record` 语义。
+内核上下文压缩热路径的效率优化：让上下文压缩的 token 估算与摘要都 tool-aware（覆盖 tool 调用入参与 tool 返回结果，而非仅纯文本），使压缩触发反映真实上下文规模、让摘要保留关键 tool 输出——不改压缩触发阈值/保留策略。（历史注：本能力原含「回合内记忆检索缓存」（`CachingLongTermMemory` 装饰器），随 `pa-memory-native` 采用 2.0 原生两层记忆、退役 pig 自建 `LongTermMemory` 栈而消解。）
 ## Requirements
 ### Requirement: token 估算计入全部内容块
 
@@ -30,26 +30,6 @@
 #### Scenario: 受保护/高重要度内容不进摘要
 - **WHEN** 待压缩的较早回合中既有普通闲聊、也有受保护逐字内容或高重要度回合
 - **THEN** 只有普通闲聊被喂入摘要模型，受保护逐字内容与高重要度回合被逐字保留、不被摘要改写
-
-### Requirement: 回合内记忆检索缓存
-
-系统 SHALL 通过一个包裹 `LongTermMemory` 的缓存装饰器，在一个回合内按 query 缓存 `retrieve` 的结果：对同一 query 的重复检索只访问底层存储一次；当 query 变化（新回合）时缓存未命中并重新检索。`record` MUST 直通到底层（写入语义不变）并使缓存失效；记忆被禁用时经装饰器的行为 MUST 与未加装饰时一致（不注入、`record` no-op）。
-
-#### Scenario: 同 query 只检索一次
-- **WHEN** 一个回合内对相同 query 连续多次检索记忆
-- **THEN** 底层记忆存储只被读取一次，后续检索复用缓存结果
-
-#### Scenario: 新 query 重新检索
-- **WHEN** query 发生变化（进入新回合）
-- **THEN** 缓存未命中，触发对底层存储的一次新检索
-
-#### Scenario: record 直通并失效缓存
-- **WHEN** 调用 `record` 写入记忆
-- **THEN** 写入被委托到底层记忆，且缓存被失效，使随后的检索重新读取底层
-
-#### Scenario: 禁用记忆经装饰器仍 no-op
-- **WHEN** 记忆被禁用且经装饰器检索/记录
-- **THEN** 检索不返回内容、`record` 不写入，与未加装饰时行为一致
 
 ### Requirement: 三层 token 预算分配
 

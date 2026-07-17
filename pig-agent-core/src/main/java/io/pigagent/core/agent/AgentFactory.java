@@ -1,11 +1,11 @@
 package io.pigagent.core.agent;
 
-import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 
@@ -15,11 +15,17 @@ import java.util.function.Supplier;
 
 /**
  * Builds {@link PigAgent} instances that all share the same configuration (name, system
- * prompt, toolkit, middlewares, long-term memory) but a swappable {@code Model}.
+ * prompt, toolkit, middlewares, native memory) but a swappable {@code Model}.
  *
- * <p>Used to rebuild the agent when the user switches models at runtime: the toolkit, hooks
- * and {@code CompositeLongTermMemory} are reused unchanged, only the model differs. The
- * conversation is restored separately via the session layer.
+ * <p>Used to rebuild the agent when the user switches models at runtime: the toolkit, middlewares
+ * and memory wiring are reused unchanged, only the model differs. The conversation is restored
+ * separately via the session layer.
+ *
+ * <p><b>Native long-term memory (pa-memory-native).</b> A {@link Supplier}&lt;{@link MemoryConfig}&gt;
+ * is re-evaluated on every {@link #create(Model)} (incl. model-switch and {@code /memory}-toggle
+ * rebuilds): it returns the built {@code MemoryConfig} when memory is enabled (native flush +
+ * consolidation + memory tools + MEMORY.md system-prompt injection), or {@code null} when disabled
+ * ({@code /memory off} → native memory hooks/tools disabled). {@code null} supplier = memory always off.
  *
  * <p><b>Shared state store (av2 Phase 3).</b> An optional {@link AgentStateStore} is threaded into
  * every rebuilt {@link PigAgent}. Passing the same store instance across rebuilds is what lets
@@ -38,7 +44,10 @@ public final class AgentFactory {
     private final String sysPrompt;
     private final Toolkit toolkit;
     private final List<MiddlewareBase> middlewares;
-    private final LongTermMemory longTermMemory;
+    // pa-memory-native: supplies the native MemoryConfig when memory is enabled, else null. Nullable
+    // supplier → memory always off. Re-evaluated on every create() so a /memory toggle rebuild picks
+    // up the current enable state.
+    private final Supplier<MemoryConfig> memoryConfigSupplier;
     private final int maxRetries; // <= 0 = keep AgentScope's ExecutionConfig default retry
     private final Model fallbackModel; // nullable → no fallback model
     private final int maxIters; // 0 = keep AgentScope's default (see PigAgent.Builder.maxIters)
@@ -53,20 +62,22 @@ public final class AgentFactory {
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, 0, null, 0, null, null, null, null);
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, 0, null, 0, null, null, null, null);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, null, 0, null, null, null, null);
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries) {
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, null, 0, null, null, null, null);
     }
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, fallbackModel, maxIters,
                 stateStore, permissionContextSupplier, null, null);
     }
 
@@ -78,16 +89,18 @@ public final class AgentFactory {
      * @param permissionContextSupplier supplies a freshly-built native permission context on each
      *        {@link #create(Model)} (including model-switch rebuilds), so a rebuilt agent reflects the
      *        current permission mode. {@code null} = no native permission context.
-     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root;
-     *        {@code null} → PigAgent uses a shared temp workspace.
+     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root
+     *        AND the native memory root ({@code MEMORY.md}/{@code memory/*.md}); {@code null} → PigAgent
+     *        uses a shared temp workspace.
      * @param toolResultEviction native tool-result-eviction config (av2 Phase 5b); {@code null} disables it.
      */
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier,
                         Path workspace, ToolResultEvictionConfig toolResultEviction) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, fallbackModel, maxIters,
                 stateStore, permissionContextSupplier, workspace, toolResultEviction, false, null);
     }
 
@@ -100,12 +113,13 @@ public final class AgentFactory {
      *        when {@code subagentsEnabled}. {@code null}/empty = built-in + workspace only.
      */
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier,
                         Path workspace, ToolResultEvictionConfig toolResultEviction,
                         boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations) {
-        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, fallbackModel, maxIters,
                 stateStore, permissionContextSupplier, workspace, toolResultEviction, subagentsEnabled,
                 subagentDeclarations, PlanModeSettings.disabled());
     }
@@ -117,7 +131,8 @@ public final class AgentFactory {
      *        channel / autonomous tracks (no confirmer for a {@code plan_exit} HITL).
      */
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
-                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
                         Model fallbackModel, int maxIters, AgentStateStore stateStore,
                         Supplier<PermissionContextState> permissionContextSupplier,
                         Path workspace, ToolResultEvictionConfig toolResultEviction,
@@ -127,7 +142,7 @@ public final class AgentFactory {
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
         this.middlewares = middlewares;
-        this.longTermMemory = longTermMemory;
+        this.memoryConfigSupplier = memoryConfigSupplier;
         this.maxRetries = maxRetries;
         this.fallbackModel = fallbackModel;
         this.maxIters = maxIters;
@@ -153,7 +168,7 @@ public final class AgentFactory {
                 .model(model)
                 .toolkit(toolkit)
                 .middlewares(middlewares)
-                .longTermMemory(longTermMemory)
+                .memory(memoryConfigSupplier == null ? null : memoryConfigSupplier.get())
                 .maxIters(maxIters)
                 .maxRetries(maxRetries)
                 .fallbackModel(fallbackModel)

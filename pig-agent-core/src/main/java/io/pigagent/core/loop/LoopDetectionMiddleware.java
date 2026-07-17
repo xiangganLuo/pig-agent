@@ -40,14 +40,14 @@ import java.util.function.Function;
  *   <li><b>{@link #onReasoning}</b> does two things: (1) detect a turn boundary via the count of USER
  *       messages in the reasoning input and {@link LoopDetector#reset()} on change, so counts never
  *       leak across unrelated turns; (2) if a WARN nudge is pending, inject it as a trailing user-side
- *       {@link Msg} into a new {@link ReasoningInput} — the same <em>ephemeral</em> injection the
- *       {@code EphemeralMemoryMiddleware} uses (never written back to history).</li>
+ *       {@link Msg} into a new {@link ReasoningInput} — an <em>ephemeral</em> injection (never written
+ *       back to history).</li>
  * </ul>
  *
- * <p><b>Ordering.</b> This middleware must run <em>before</em> {@code EphemeralMemoryMiddleware} in the
- * list (i.e. be more-outer) so its {@code onReasoning} sees the raw conversation and counts only real
- * USER messages — not the ephemeral memory message the memory middleware appends. This mirrors the 1.x
- * hook priority ({@code 10} < the memory hook's {@code 50}).
+ * <p><b>Ordering.</b> This middleware is placed early (more-outer) in the list so its {@code onReasoning}
+ * sees the raw conversation and counts only real USER messages. Native long-term memory
+ * ({@code pa-memory-native}) is injected into the <em>system prompt</em> (not the reasoning list), so it
+ * does not affect this USER-message count.
  *
  * <p>State is per instance (per agent). The mutable fields ({@code lastUserMsgCount},
  * {@code pendingWarnToolName}) are guarded by {@code this}.

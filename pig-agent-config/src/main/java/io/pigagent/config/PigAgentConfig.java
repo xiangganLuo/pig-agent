@@ -216,33 +216,38 @@ public final class PigAgentConfig {
     }
 
     /**
-     * 记忆配置。当前仅含 {@code extraction}（记忆 LLM 抽取）子块，全部可选、默认安全。
-     * 注意：全局记忆读写总开关是顶层的 {@code memory-enabled}（历史字段，保持不动）。
+     * 记忆配置（{@code pa-memory-native}）——映射 AgentScope 2.0 原生两层记忆 {@code MemoryConfig}
+     * （flush 每回合抽事实入日志层 {@code memory/YYYY-MM-DD.md}，consolidation 后台去重合并到工作区级
+     * {@code MEMORY.md}）。全部可选、默认安全。
+     *
+     * <p>注意：记忆读写总开关是顶层的 {@code memory-enabled}（历史字段，默认 true，保持不动）——{@code /memory
+     * on|off} 走它并触发重建；本块只承载 flush/consolidation 的细节 + 廉价辅助模型 id。
+     * <ul>
+     *   <li>{@code flush}：{@code always}（默认，每回合）| {@code never} | {@code throttled}（配
+     *       {@code flush-throttle-minutes}）。</li>
+     *   <li>{@code flush-throttle-minutes}：{@code throttled} 时的最小间隔（分钟，默认 0=退化为 always）。</li>
+     *   <li>{@code consolidation-min-gap-minutes}：后台合并最小间隔（默认 30）——使固化层在一次会话内通常稳定。</li>
+     *   <li>{@code consolidation-max-tokens}：固化层重写 token 上限（默认 4000）。</li>
+     *   <li>{@code model-id}：flush/consolidation 用的廉价模型 id（如 Doubao lite）；空 = 回退主推理模型。</li>
+     * </ul>
      */
     public static final class MemoryConfig {
-        @JsonProperty("extraction") private MemoryExtractionConfig extraction = new MemoryExtractionConfig();
-        public MemoryExtractionConfig getExtraction() { return extraction; }
-        public void setExtraction(MemoryExtractionConfig e) {
-            this.extraction = e == null ? new MemoryExtractionConfig() : e;
-        }
-    }
+        @JsonProperty("flush") private String flush = "always";
+        @JsonProperty("flush-throttle-minutes") private int flushThrottleMinutes = 0;
+        @JsonProperty("consolidation-min-gap-minutes") private int consolidationMinGapMinutes = 30;
+        @JsonProperty("consolidation-max-tokens") private int consolidationMaxTokens = 4000;
+        @JsonProperty("model-id") private String modelId = "";
 
-    /**
-     * 记忆 LLM 抽取（memory-extraction）。默认 {@code enabled=false} → 逐字节保留原始「死记原始回合」的
-     * record 行为（不起抽取模型调用、不起后台线程），需显式开启。启用后：会话层 record 改为用当前模型
-     * 从完成的回合中抽取带类别 + 置信度的结构化事实，经置信度门（{@code confidence-threshold}，默认 0.7）
-     * + 纠正覆盖 + 噪声过滤后，异步去抖（{@code debounce-ms}，默认 2000）写入。全部可选、向后兼容。
-     */
-    public static final class MemoryExtractionConfig {
-        @JsonProperty("enabled") private boolean enabled = false;
-        @JsonProperty("confidence-threshold") private double confidenceThreshold = 0.7;
-        @JsonProperty("debounce-ms") private long debounceMs = 2000;
-        public boolean isEnabled() { return enabled; }
-        public void setEnabled(boolean e) { this.enabled = e; }
-        public double getConfidenceThreshold() { return confidenceThreshold; }
-        public void setConfidenceThreshold(double t) { this.confidenceThreshold = t; }
-        public long getDebounceMs() { return debounceMs; }
-        public void setDebounceMs(long ms) { this.debounceMs = ms; }
+        public String getFlush() { return flush; }
+        public void setFlush(String f) { this.flush = f == null || f.isBlank() ? "always" : f; }
+        public int getFlushThrottleMinutes() { return flushThrottleMinutes; }
+        public void setFlushThrottleMinutes(int m) { this.flushThrottleMinutes = m; }
+        public int getConsolidationMinGapMinutes() { return consolidationMinGapMinutes; }
+        public void setConsolidationMinGapMinutes(int m) { this.consolidationMinGapMinutes = m; }
+        public int getConsolidationMaxTokens() { return consolidationMaxTokens; }
+        public void setConsolidationMaxTokens(int t) { this.consolidationMaxTokens = t; }
+        public String getModelId() { return modelId; }
+        public void setModelId(String id) { this.modelId = id == null ? "" : id; }
     }
 
     /**

@@ -1,16 +1,17 @@
 package io.pigagent.core.agent;
 
-import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Builds an {@link AgentInstance} from an {@link AgentSpec}, one per agent — deliberately NOT
@@ -25,8 +26,9 @@ import java.util.Objects;
  *   <li>{@link MiddlewareProvider} — builds this agent's middlewares (loop detection, logging, …);
  *       permission is native (the {@link PermissionContextProvider}), not a middleware.</li>
  * </ul>
- * Short-term memory is per-agent automatically ({@link PigAgent} builds its own); long-term
- * memory is shared and passed through.
+ * Short-term memory is per-agent automatically ({@link PigAgent} builds its own); native long-term
+ * memory ({@code pa-memory-native}) is shared and supplied as a {@link Supplier}&lt;{@link
+ * MemoryConfig}&gt; (returns the config when memory is enabled, else {@code null} → disabled).
  */
 public final class AgentInstanceFactory {
 
@@ -59,7 +61,8 @@ public final class AgentInstanceFactory {
     private final ModelResolver models;
     private final ToolkitProvider toolkits;
     private final MiddlewareProvider middlewares;
-    private final LongTermMemory longTermMemory;
+    // pa-memory-native: native memory config supplier (null supplier or null result = memory off).
+    private final Supplier<MemoryConfig> memoryConfigSupplier;
     private final AgentStateStore stateStore; // nullable → per-agent in-memory default
     private final PermissionContextProvider permissionContexts; // nullable → no native context
     private final int maxRetries; // <= 0 = keep AgentScope's default (av2 Phase 5a native retry)
@@ -69,39 +72,39 @@ public final class AgentInstanceFactory {
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory) {
-        this(models, toolkits, middlewares, longTermMemory, null, null, 0, null, null);
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
+        this(models, toolkits, middlewares, memoryConfigSupplier, null, null, 0, null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, null, 0, null, null);
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, null, 0, null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, 0, null, null);
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, 0, null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, maxRetries,
                 null, null);
     }
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries,
                                 Path workspace, ToolResultEvictionConfig toolResultEviction) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, maxRetries,
                 workspace, toolResultEviction, false);
     }
 
@@ -114,23 +117,19 @@ public final class AgentInstanceFactory {
      *        = no native permission context (AgentScope default).
      * @param maxRetries native model-call retry count applied to each agent (av2 Phase 5a); {@code <= 0}
      *        keeps AgentScope's default, {@code 1} effectively disables retry.
-     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root;
-     *        {@code null} → PigAgent uses a shared temp workspace.
+     * @param workspace HarnessAgent workspace root (av2 Phase 5b) — the tool-result-eviction spool root
+     *        AND native memory root; {@code null} → PigAgent uses a shared temp workspace.
      * @param toolResultEviction native tool-result-eviction config (av2 Phase 5b); {@code null} disables it.
-     * @param subagentsEnabled enable native subagent delegation on each per-agent instance (av2 Phase 6a):
-     *        the built-in {@code general-purpose} + {@code agent_spawn}/… tools + {@code
-     *        <workspace>/subagents/*.md} discovery. Per-agent peers get the built-in + workspace surface
-     *        (no code-declared peer subagents — that would need a registry back-reference; the default
-     *        agent surfaces peer subagents via {@code AgentFactory}). {@code false} = pre-6a behavior.
+     * @param subagentsEnabled enable native subagent delegation on each per-agent instance (av2 Phase 6a).
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries,
                                 Path workspace, ToolResultEvictionConfig toolResultEviction,
                                 boolean subagentsEnabled) {
-        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, maxRetries,
                 workspace, toolResultEviction, subagentsEnabled, PlanModeSettings.disabled());
     }
 
@@ -140,7 +139,7 @@ public final class AgentInstanceFactory {
      *        peer is active; {@link PlanModeSettings#disabled()} (or {@code null}) keeps it off.
      */
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
-                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
                                 AgentStateStore stateStore,
                                 PermissionContextProvider permissionContexts,
                                 int maxRetries,
@@ -149,7 +148,7 @@ public final class AgentInstanceFactory {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
-        this.longTermMemory = longTermMemory; // may be null (no long-term memory)
+        this.memoryConfigSupplier = memoryConfigSupplier; // may be null (no long-term memory)
         this.stateStore = stateStore;
         this.permissionContexts = permissionContexts;
         this.maxRetries = maxRetries;
@@ -168,7 +167,7 @@ public final class AgentInstanceFactory {
                 .model(models.resolve(spec))
                 .toolkit(toolkit)
                 .middlewares(middlewares.middlewaresFor(spec))
-                .longTermMemory(longTermMemory)
+                .memory(memoryConfigSupplier == null ? null : memoryConfigSupplier.get())
                 .maxIters(spec.maxIters())
                 .maxRetries(maxRetries)
                 .stateStore(stateStore)

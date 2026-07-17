@@ -9,8 +9,6 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
-import io.pigagent.core.memory.CompositeLongTermMemory;
-import io.pigagent.core.memory.FileSystemLongTermMemory;
 import io.pigagent.mcp.JsonMcpStore;
 import io.pigagent.mcp.McpManager;
 import io.pigagent.mcp.McpServerSpec;
@@ -69,7 +67,6 @@ class FullLinkAgentIT {
     private AgentHolder agentHolder;
     private AgentFactory agentFactory;
     private ModelManager modelManager;
-    private CompositeLongTermMemory memory;
     private ConfigurationManager configManager;
     private Path skillsDir;
     private Path sessionsDir;
@@ -94,7 +91,6 @@ class FullLinkAgentIT {
         skillsDir = Files.createDirectories(tmp.resolve("skills"));
         sessionsDir = Files.createDirectories(tmp.resolve("sessions"));
         Path tasksDir = Files.createDirectories(tmp.resolve("tasks"));
-        Path contextDir = Files.createDirectories(tmp.resolve("context"));
 
         taskManager = new TaskManager(new FileSystemTaskRepository(tasksDir));
 
@@ -111,12 +107,10 @@ class FullLinkAgentIT {
         toolkit.registration().tool(new McpTool(mcpManager,
                 () -> new PigAgentConfig.AgentManagementConfig(), denyAll)).apply();
 
-        memory = new CompositeLongTermMemory(
-                new FileSystemLongTermMemory(contextDir.resolve("memory.md")), true);
-
         String sysPrompt = "你是一个集成测试助理。当用户要求进行文件、任务、技能、MCP 等操作时，"
                 + "你必须调用对应的工具完成，而不是凭空回答。";
-        agentFactory = new AgentFactory("test-agent", sysPrompt, toolkit, List.of(), memory);
+        agentFactory = new AgentFactory("test-agent", sysPrompt, toolkit, List.of(),
+                (java.util.function.Supplier<io.agentscope.harness.agent.memory.MemoryConfig>) null);
         agentHolder = new AgentHolder(agentFactory.create(model));
 
         configManager = new ConfigurationManager(tmp.resolve("application.yaml"));
@@ -191,7 +185,7 @@ class FullLinkAgentIT {
     private SessionManager newSessionManager() {
         // av2 Phase 3/4: no JsonSession — conversation persists via the native AgentStateStore; the
         // SessionManager is the metadata sidecar (name/timestamps/model binding) this round-trip checks.
-        return new SessionManager(agentHolder, modelManager, memory,
+        return new SessionManager(agentHolder, modelManager,
                 new FileSystemSessionRepository(sessionsDir), configManager, sessionsDir);
     }
 
