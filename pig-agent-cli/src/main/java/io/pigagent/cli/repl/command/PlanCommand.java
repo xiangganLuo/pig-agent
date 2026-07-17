@@ -105,6 +105,10 @@ public final class PlanCommand implements Runnable {
             Ansi.println(t, Ansi.error("No active agent."));
             return;
         }
+        if (!safeActive()) {
+            Ansi.println(t, Ansi.dim("Not in Plan Mode — nothing to exit."));
+            return;
+        }
         try {
             agent.exitPlanMode(sessionId());
         } catch (Exception e) {

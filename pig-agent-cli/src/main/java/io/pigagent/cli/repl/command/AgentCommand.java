@@ -5,10 +5,14 @@ import io.pigagent.cli.repl.ReplContext;
 import io.pigagent.core.agent.AgentInstance;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.model.StoredModel;
 import org.fusesource.jansi.Ansi.Color;
 import org.jline.terminal.Terminal;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * {@code /agent} — manage agents through the {@link AgentKernel} façade: list them, switch the
@@ -82,7 +86,7 @@ public final class AgentCommand implements Runnable {
 
     private void create(Terminal t) {
         if (args == null || args.length < 2) {
-            Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name> [modelId]"));
+            Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name...> [modelId]"));
             return;
         }
         String id = args[0];
@@ -90,8 +94,20 @@ public final class AgentCommand implements Runnable {
             Ansi.println(t, Ansi.error("Agent id already exists: " + id));
             return;
         }
-        String name = args[1];
-        String modelId = args.length >= 3 ? args[2] : null;
+        // The trailing token is treated as a modelId ONLY when it resolves to a saved model; otherwise
+        // it is part of a multi-word (unquoted) name — so "/agent new bot My Bot" keeps the full name
+        // instead of dropping "Bot", and a bogus trailing model is never silently applied.
+        String modelId = null;
+        int nameEnd = args.length;
+        if (args.length >= 3 && isValidModel(args[args.length - 1])) {
+            modelId = args[args.length - 1];
+            nameEnd = args.length - 1;
+        }
+        String name = String.join(" ", Arrays.copyOfRange(args, 1, nameEnd)).strip();
+        if (name.isBlank()) {
+            Ansi.println(t, Ansi.warn("Usage: /agent new <id> <name...> [modelId]"));
+            return;
+        }
         AgentSpec spec = AgentSpec.create(id, name).withModelId(modelId);
         try {
             ctx.agentKernel().createAgent(spec);
@@ -114,12 +130,33 @@ public final class AgentCommand implements Runnable {
             Ansi.println(t, Ansi.error("No such agent: " + id));
             return;
         }
+        // Validate against the saved models first: an unsaved id would otherwise silently fall back to
+        // the default at build time while this printed a false "now uses model: <bogus>".
+        if (!isValidModel(modelId)) {
+            Ansi.println(t, Ansi.error("No such model: " + modelId + validModelsHint()));
+            return;
+        }
         try {
             ctx.agentKernel().updateAgent(inst.spec().withModelId(modelId));
             Ansi.println(t, Ansi.success("Agent " + id + " now uses model: ") + Ansi.info(modelId));
         } catch (Exception e) {
             Ansi.println(t, Ansi.error("Failed to switch model: " + e.getMessage()));
         }
+    }
+
+    /** True iff {@code modelId} names a saved model (mirrors how {@code /model} validates). */
+    private boolean isValidModel(String modelId) {
+        return modelId != null && ctx.modelManager() != null
+                && ctx.modelManager().findById(modelId).isPresent();
+    }
+
+    /** A friendly ", valid: [...]" suffix listing the saved model ids (never a credential). */
+    private String validModelsHint() {
+        if (ctx.modelManager() == null) {
+            return "";
+        }
+        List<String> ids = ctx.modelManager().list().stream().map(StoredModel::id).toList();
+        return ids.isEmpty() ? " (no models configured — use /model add)" : " — valid: " + ids;
     }
 
     /** Manually trigger one autonomous run of an agent's mandate now. */
@@ -173,8 +210,9 @@ public final class AgentCommand implements Runnable {
         Ansi.println(t, Ansi.heading("/agent actions:"));
         Ansi.println(t, Ansi.dim("  list                       list agents (* = active, ⏰ = scheduled)"));
         Ansi.println(t, Ansi.dim("  use <id>                   switch the active agent"));
-        Ansi.println(t, Ansi.dim("  new <id> <name> [modelId]  create + register a new agent"));
-        Ansi.println(t, Ansi.dim("  model <id> <modelId>       change an agent's model"));
+        Ansi.println(t, Ansi.dim("  new <id> <name...> [model] create an agent (name may be multi-word; "
+                + "a trailing saved model id is used as its model)"));
+        Ansi.println(t, Ansi.dim("  model <id> <modelId>       change an agent's model (must be a saved id)"));
         Ansi.println(t, Ansi.dim("  run <id>                   run a digital-employee mandate now"));
         Ansi.println(t, Ansi.dim("  report                     list recent morning reports"));
     }

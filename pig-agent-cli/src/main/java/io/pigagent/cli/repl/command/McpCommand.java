@@ -71,7 +71,9 @@ public final class McpCommand implements Runnable {
             String health = !spec.enabled() ? Ansi.dim("disabled")
                     : s.connected() ? Ansi.success("connected (" + s.toolCount() + " tools)")
                     : Ansi.error("not connected");
-            String target = spec.isStdio() ? ("cmd=" + spec.command()) : ("url=" + spec.url());
+            // Never echo a raw URL: a token in the userinfo or query (e.g. ?token=…) would leak into
+            // scrollback. Show scheme://host[:port]/path with userinfo dropped + query redacted.
+            String target = spec.isStdio() ? ("cmd=" + spec.command()) : ("url=" + redactUrl(spec.url()));
             Ansi.println(t, String.format("  %2d) ", idx) + Ansi.info(spec.name())
                     + Ansi.dim(" [" + spec.transport() + "] " + target + "  ") + health);
             idx++;
@@ -158,6 +160,41 @@ public final class McpCommand implements Runnable {
             out.put(key, value);
         }
         return out;
+    }
+
+    /**
+     * Render a URL for display without leaking a credential: drop any userinfo ({@code user:pass@})
+     * and redact the query string (a common carrier of {@code ?token=…}), keeping only
+     * {@code scheme://host[:port]/path}. A malformed URL degrades to {@code <redacted>} rather than
+     * echoing the raw value.
+     */
+    static String redactUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        try {
+            java.net.URI u = java.net.URI.create(url.trim());
+            StringBuilder sb = new StringBuilder();
+            if (u.getScheme() != null) {
+                sb.append(u.getScheme()).append("://");
+            }
+            if (u.getHost() != null) {
+                sb.append(u.getHost());
+                if (u.getPort() != -1) {
+                    sb.append(':').append(u.getPort());
+                }
+            }
+            if (u.getPath() != null) {
+                sb.append(u.getPath());
+            }
+            if (u.getRawQuery() != null && !u.getRawQuery().isBlank()) {
+                sb.append("?<redacted>");
+            }
+            String out = sb.toString();
+            return out.isBlank() ? "<redacted>" : out;
+        } catch (RuntimeException e) {
+            return "<redacted>";
+        }
     }
 
     /** Keys whose values are credentials and MUST be masked on input. */

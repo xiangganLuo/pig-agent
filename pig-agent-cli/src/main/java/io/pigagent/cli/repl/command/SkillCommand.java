@@ -127,5 +127,6 @@ public final class SkillCommand implements Runnable {
         Ansi.println(t, Ansi.dim("  review [name]     list staged drafts, or show one draft's SKILL.md"));
         Ansi.println(t, Ansi.dim("  approve <name>    safety-scan + dedup + atomically install a draft"));
         Ansi.println(t, Ansi.dim("  reject <name>     discard a staged draft"));
+        Ansi.println(t, Ansi.dim("  (to list installed/available skills, use /skills)"));
     }
 }

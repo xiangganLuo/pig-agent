@@ -121,4 +121,21 @@ class PlanCommandTest {
         assertThat(output).contains("Entered Plan Mode").contains("Exited Plan Mode");
         agent.close();
     }
+
+    @Test
+    void exitWhenNotActiveReportsNothingToExit(@TempDir Path tmp) throws IOException {
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        cfg.updateConfig(c -> c.getPlanMode().setEnabled(true));
+        PigAgent agent = planAgent(tmp.resolve("ws"));
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        // No prior /plan enter → exit must not claim it exited.
+        build(cfg, agent, out).execute("/plan", "exit");
+
+        String output = out.toString(StandardCharsets.UTF_8);
+        assertThat(output).contains("Not in Plan Mode");
+        assertThat(output).doesNotContain("Exited Plan Mode");
+        assertThat(agent.isPlanModeActive(SID)).isFalse();
+        agent.close();
+    }
 }

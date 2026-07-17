@@ -79,7 +79,7 @@ public final class PermissionCommand implements Runnable {
         PermissionConfig p = perms();
         showStatus(t);
         Ansi.println(t, Ansi.dim("  modes: plan(只读否决可变工具) ask(逐次确认) "
-                + "auto(放行编辑/网络,拦执行) bypass(全放行)"));
+                + "auto(放行编辑/网络, 执行仍需确认) bypass(全放行)"));
         Ansi.println(t, Ansi.dim("  allow-tools: " + p.getAllowlist().getTools()));
         Ansi.println(t, Ansi.dim("  allow-cmds:  " + p.getAllowlist().getCommands()));
     }
