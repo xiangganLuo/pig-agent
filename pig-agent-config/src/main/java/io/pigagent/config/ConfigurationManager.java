@@ -83,8 +83,22 @@ public final class ConfigurationManager {
         try {
             Files.createDirectories(configPath.getParent());
             YAML_MAPPER.writerWithDefaultPrettyPrinter().writeValue(configPath.toFile(), cfg);
+            // application.yaml can hold channel credentials (token / signing secret) in plaintext —
+            // restrict it to owner-only on POSIX (no-op on non-POSIX), mirroring JsonModelStore /
+            // JsonMcpStore. Credentials still rely on 0600 + directory perms; not for a shared host.
+            restrictToOwner(configPath);
         } catch (IOException e) {
             log.warn("Failed to save config: {}", e.getMessage());
+        }
+    }
+
+    /** Restrict the config file to owner read/write ({@code 0600}) on POSIX; a no-op elsewhere. */
+    private static void restrictToOwner(Path file) {
+        try {
+            Files.setPosixFilePermissions(file,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // Non-POSIX file system or a transient error — the write already succeeded.
         }
     }
 

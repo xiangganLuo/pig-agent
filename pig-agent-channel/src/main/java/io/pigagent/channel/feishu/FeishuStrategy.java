@@ -89,11 +89,11 @@ public final class FeishuStrategy implements ChannelStrategy {
     }
 
     @Override
-    public void send(String agentReply) {
+    public boolean send(String agentReply) {
         if (webhookUrl == null) {
             log.debug("Feishu outbound skipped: no webhook-url configured ({} chars)",
                     agentReply == null ? 0 : agentReply.length());
-            return;
+            return false;
         }
         String payload;
         if (signSecret != null) {
@@ -102,7 +102,7 @@ public final class FeishuStrategy implements ChannelStrategy {
         } else {
             payload = FeishuCodec.buildTextPayload(agentReply);
         }
-        sender.post(webhookUrl, payload);
+        return sender.post(webhookUrl, payload);
     }
 
     private static String blankToNull(String s) {

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorkspaceManagerTest {
@@ -96,6 +98,35 @@ class WorkspaceManagerTest {
         String prompt = ws.readAgentMd();
 
         assertThat(prompt).containsIgnoringCase("user's language");
+    }
+
+    @Test
+    void defaultConfigYamlMarksStubsAndDocumentsWorkingChannels() throws Exception {
+        WorkspaceManager ws = new WorkspaceManager(tempDir.resolve("test-ws"));
+        ws.initialize();
+        String yaml = Files.readString(ws.getRootPath().resolve("application.yaml"));
+
+        // The WORKING channels are surfaced (as commented examples) so a user knows the real options.
+        assertThat(yaml).contains("dingtalk").contains("feishu").contains("webhook").contains("stdin");
+        // Stubs are clearly marked as placeholders, not pretended-functional.
+        assertThat(yaml).contains("telegram").contains("占位").containsIgnoringCase("stub");
+        // The gateway kernel is documented as NOT required for pig's own channels.
+        assertThat(yaml).contains("channel-gateway");
+    }
+
+    @Test
+    void applicationYamlIsOwnerOnlyOnPosix() throws Exception {
+        WorkspaceManager ws = new WorkspaceManager(tempDir.resolve("test-ws"));
+        ws.initialize();
+        Path yaml = ws.getRootPath().resolve("application.yaml");
+        assertThat(Files.exists(yaml)).isTrue();
+
+        // 0600 only applies on POSIX; on non-POSIX (Windows) restrictToOwner is a no-op, so guard.
+        if (yaml.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            Set<PosixFilePermission> perms = Files.getPosixFilePermissions(yaml);
+            assertThat(perms).containsExactlyInAnyOrder(
+                    PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+        }
     }
 
     @Test

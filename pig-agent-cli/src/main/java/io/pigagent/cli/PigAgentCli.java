@@ -3,6 +3,7 @@ package io.pigagent.cli;
 import io.pigagent.channel.ChannelAgentBridge;
 import io.pigagent.channel.ChannelFactory;
 import io.pigagent.channel.ChannelRegistry;
+import io.pigagent.channel.ChannelType;
 import io.pigagent.channel.gateway.GatewayChannelKernel;
 import io.pigagent.channel.gateway.GatewayOutboundChannel;
 import io.pigagent.channel.gateway.NativeChannelFactory;
@@ -116,9 +117,15 @@ public final class PigAgentCli {
         ChannelFactory factory = new ChannelFactory();
 
         if (!config.getChannelGateway().isEnabled()) {
-            // Default path (unchanged): custom adapters bridged directly to the channel agent.
+            // Default path: every enabled + functional channel is a pig custom adapter bridged directly
+            // to the channel agent. This starts independent of the opt-in native `channel-gateway`
+            // kernel flag (that flag only selects the native Gateway routing engine + native platform
+            // adapters) — so an enabled channel is never left silently dead waiting on the gateway.
             List<ChannelAgentBridge> bridges = new ArrayList<>();
             for (var entry : channelConfigs.entrySet()) {
+                if (skipStub(entry.getKey(), entry.getValue())) {
+                    continue;
+                }
                 factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
                     ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel);
                     bridge.start();
@@ -162,6 +169,9 @@ public final class PigAgentCli {
         // Custom adapters keep their pig inbound transport but route turns through the native gateway.
         List<ChannelAgentBridge> bridges = new ArrayList<>();
         for (var entry : customEntries) {
+            if (skipStub(entry.getKey(), entry.getValue())) {
+                continue;
+            }
             factory.create(entry.getKey(), entry.getValue()).ifPresent(channel -> {
                 ChannelAgentBridge bridge = new ChannelAgentBridge(agentHolder, channel, agentKernel, kernel);
                 bridge.start();
@@ -170,5 +180,22 @@ public final class PigAgentCli {
             });
         }
         return new ChannelStartup(bridges, kernel);
+    }
+
+    /**
+     * Whether an enabled channel entry is a non-functional stub (Telegram/Discord/Slack) that must NOT
+     * be started — logging a clear warning instead of a misleading "Channel started" for a dead stub.
+     * Disabled/unknown entries return {@code false} (the factory already skips them appropriately).
+     */
+    private static boolean skipStub(String id, PigAgentConfig.ChannelConfig cfg) {
+        if (cfg == null || !cfg.isEnabled()) {
+            return false;
+        }
+        boolean stub = ChannelType.fromId(id).map(type -> !type.isFunctional()).orElse(false);
+        if (stub) {
+            log.warn("Channel '{}' is enabled but is a stub (not functional) — skipping. "
+                    + "Use a working channel (dingtalk/feishu/webhook/stdin); see /channel.", id);
+        }
+        return stub;
     }
 }

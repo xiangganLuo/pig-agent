@@ -25,7 +25,7 @@ class StrategyHttpChannelTest {
         @Override public String defaultPath() { return "/fake"; }
         @Override public Inbound inbound(InboundHttp request) { return next; }
         @Override public OutboundHttp ack() { return OutboundHttp.json(200, "{\"ok\":true}"); }
-        @Override public void send(String agentReply) { sent.add(agentReply); }
+        @Override public boolean send(String agentReply) { sent.add(agentReply); return true; }
     }
 
     private static InboundHttp post() {

@@ -5,6 +5,7 @@ import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.repl.command.AgentCommand;
+import io.pigagent.cli.repl.command.ChannelCommand;
 import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.NotifyCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
@@ -61,6 +62,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new ModelCommand(ctx));
         cmd.addSubcommand(new AgentCommand(ctx));
         cmd.addSubcommand(new ChannelsCommand(ctx));
+        cmd.addSubcommand(new ChannelCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
         cmd.addSubcommand(new McpCommand(ctx));
         cmd.addSubcommand(new PermissionCommand(ctx));
@@ -103,6 +105,7 @@ public final class ReplCommands {
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
             entry(t, "/agent <action>", "Manage agents (list|use|new|model)");
             entry(t, "/channels", "Show connected channels and status");
+            entry(t, "/channel <action>", "Manage channels (list|add|remove|enable|disable|test)");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
             entry(t, "/permission <action>", "Tool permissions (status|mode|allow|revoke|reset|list)");
