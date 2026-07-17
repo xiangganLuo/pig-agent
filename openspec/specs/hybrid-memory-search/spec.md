@@ -1,7 +1,7 @@
 # hybrid-memory-search Specification
 
 ## Purpose
-TBD - created by archiving change hybrid-memory-search. Update Purpose after archive.
+在 `pa-memory-native` 的记忆库（`MEMORY.md` + `memory/*.md`）与 `user-profile` 的 `USER.md` 之上，提供 OpenClaw 蓝本的**混合 BM25+向量检索**（`0.7·BM25 + 0.3·cosine`，可配、候选×N、归一化、去重、top-K），取代 2.0 原生纯关键词 `memory_search`，让记忆检索「换个说法也能找到」。BM25 为纯 Java、确定性、全离线可测；向量层置于可 mock 的 `Embedder` seam（离线 fake、真实嵌入器延后 live 验证）+ 可插拔 `VectorStore`（内存暴力 cosine 默认、零原生依赖）之后；config 门控、**默认关**（今日关键词检索不变），启用时以稳定的 `memory_search` @Tool 名接入。
 ## Requirements
 ### Requirement: 记忆库上的混合 BM25+向量检索
 
