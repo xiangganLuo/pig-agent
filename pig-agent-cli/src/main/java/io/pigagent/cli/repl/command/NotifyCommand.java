@@ -66,6 +66,18 @@ public final class NotifyCommand implements Runnable {
     }
 
     private void test(Terminal t) {
+        // Pre-check config so a misconfiguration gives a specific, actionable line instead of a generic
+        // service outcome. The recipient value is never printed (only whether one is configured).
+        PigAgentConfig.OutreachConfig o = ctx.configManager().getConfig().getOutreach();
+        if (!o.isEnabled()) {
+            Ansi.println(t, Ansi.warn("Outreach is disabled — set outreach.enabled: true in application.yaml."));
+            return;
+        }
+        if (o.getChannel().isBlank() || o.getRecipient().isBlank()) {
+            Ansi.println(t, Ansi.warn("Outreach has no channel/recipient configured "
+                    + "(set outreach.channel + outreach.recipient)."));
+            return;
+        }
         String body = (args == null || args.length == 0) ? "This is a test notification."
                 : String.join(" ", args).strip();
         Notification n = Notification.of(NotificationType.MESSAGE, Severity.NORMAL,

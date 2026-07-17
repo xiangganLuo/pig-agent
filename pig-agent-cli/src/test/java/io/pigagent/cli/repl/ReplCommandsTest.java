@@ -5,8 +5,12 @@ import io.pigagent.config.PermissionMode;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.mcp.McpManager;
+import io.pigagent.mcp.McpServerSpec;
 import io.pigagent.model.ModelManager;
+import io.pigagent.model.StoredModel;
 import io.pigagent.session.SessionManager;
+import io.pigagent.task.FileSystemTaskRepository;
+import io.pigagent.task.TaskManager;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
 import io.pigagent.tool.availability.ToolAvailabilityReport.Hidden;
 import org.jline.terminal.Terminal;
@@ -21,8 +25,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -203,5 +209,110 @@ class ReplCommandsTest {
         // picocli returns a non-zero usage error for an unmatched subcommand.
         assertThat(code).isNotZero();
         assertThat(h.running().get()).isTrue();
+    }
+
+    /** A dumb terminal + a ReplContext with only the fields a command needs (others null). */
+    private CommandLine build(ReplContext ctx) {
+        return ReplCommands.build(ctx, CommandLine.defaultFactory());
+    }
+
+    private Terminal dumbTerminal(ByteArrayOutputStream out) throws IOException {
+        return TerminalBuilder.builder().dumb(true)
+                .streams(new ByteArrayInputStream(new byte[0]), out).build();
+    }
+
+    @Test
+    void tasksListedFromTaskStoreWithoutAgentCall() throws IOException {
+        // Persist a task under <tmp>/tasks; reportsDir = <tmp>/reports (so root = <tmp>).
+        Path reports = tmp.resolve("reports");
+        Files.createDirectories(reports);
+        new TaskManager(new FileSystemTaskRepository(tmp.resolve("tasks")))
+                .createTask("Ship the release", "do the thing");
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // agentHolder is null on purpose: the old agent.call path would NPE, so passing proves the
+        // listing is a deterministic read of the task store (no LLM round-trip).
+        ReplContext ctx = new ReplContext(
+                null, null, reports, null, null, null, null, null, null, null,
+                dumbTerminal(out), new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
+
+        int code = build(ctx).execute("/tasks");
+
+        assertThat(code).isZero();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Tasks:").contains("Ship the release");
+    }
+
+    @Test
+    void tasksRendersNoneWhenEmpty() throws IOException {
+        Path reports = tmp.resolve("reports");
+        Files.createDirectories(reports); // no tasks/ dir → empty listing
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ReplContext ctx = new ReplContext(
+                null, null, reports, null, null, null, null, null, null, null,
+                dumbTerminal(out), new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
+
+        int code = build(ctx).execute("/tasks");
+
+        assertThat(code).isZero();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Tasks:").contains("none");
+    }
+
+    @Test
+    void skillsListedFromRegistryWithoutAgentCall() throws IOException {
+        Path reports = tmp.resolve("reports");
+        Files.createDirectories(reports);
+        Path skill = tmp.resolve("skills").resolve("demo-skill");
+        Files.createDirectories(skill);
+        Files.writeString(skill.resolve("SKILL.md"), "# demo-skill\n\nA demonstration skill.");
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // agentHolder null again → a deterministic registry read, not an agent.call.
+        ReplContext ctx = new ReplContext(
+                null, null, reports, null, null, null, null, null, null, null,
+                dumbTerminal(out), new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
+
+        int code = build(ctx).execute("/skills");
+
+        assertThat(code).isZero();
+        String o = out.toString(StandardCharsets.UTF_8);
+        assertThat(o).contains("Skills:").contains("demo-skill").contains("/skill");
+    }
+
+    @Test
+    void configReadsLiveModelAndMcpManagers() throws IOException {
+        ModelManager mm = mock(ModelManager.class);
+        when(mm.getCurrentModel()).thenReturn(Optional.of(StoredModel.create("openai", "sk-x", null, "gpt-4o")));
+        McpManager mcp = mock(McpManager.class);
+        McpServerSpec spec = new McpServerSpec("myserver", null, List.of(), Map.of(),
+                "https://mcp.example.com/sse", false, Map.of(), true);
+        when(mcp.list()).thenReturn(List.of(new McpManager.ServerStatus(spec, true, 2)));
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ReplContext ctx = new ReplContext(
+                null, null, null, cfg, null, mm, null, mcp, null, null,
+                dumbTerminal(out), new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null);
+
+        int code = build(ctx).execute("/config");
+
+        assertThat(code).isZero();
+        String o = out.toString(StandardCharsets.UTF_8);
+        assertThat(o).contains("Configuration").contains("gpt-4o").contains("openai").contains("myserver");
+    }
+
+    @Test
+    void mcpListRedactsUrlToken() throws IOException {
+        McpManager mcp = mock(McpManager.class);
+        McpServerSpec spec = new McpServerSpec("brave", null, List.of(), Map.of(),
+                "https://mcp.example.com/sse?token=SUPERSECRET", false, Map.of(), true);
+        when(mcp.list()).thenReturn(List.of(new McpManager.ServerStatus(spec, true, 5)));
+        Harness h = newHarness(mcp);
+
+        int code = h.cmd().execute("/mcp", "list");
+
+        assertThat(code).isZero();
+        String o = h.output();
+        assertThat(o).contains("brave").contains("?<redacted>");
+        assertThat(o).doesNotContain("SUPERSECRET");
     }
 }

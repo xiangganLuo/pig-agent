@@ -26,4 +26,19 @@ class McpCommandSensitiveKeyTest {
         assertThat(McpCommand.isSensitiveKey("HOST")).isFalse();
         assertThat(McpCommand.isSensitiveKey("timeout")).isFalse();
     }
+
+    @Test
+    void redactUrl_dropsUserinfoAndQueryToken() {
+        String out = McpCommand.redactUrl("https://user:s3cr3t@host.example.com:8443/sse?token=abc123&x=1");
+        // The credential-bearing parts must be gone; host + path stay for the operator.
+        assertThat(out).doesNotContain("abc123").doesNotContain("s3cr3t").doesNotContain("user:");
+        assertThat(out).contains("host.example.com:8443").contains("/sse").contains("?<redacted>");
+    }
+
+    @Test
+    void redactUrl_keepsPlainUrlAndHandlesMalformed() {
+        assertThat(McpCommand.redactUrl("https://mcp.example.com/sse")).isEqualTo("https://mcp.example.com/sse");
+        assertThat(McpCommand.redactUrl("")).isEmpty();
+        assertThat(McpCommand.redactUrl("::not a url::")).isEqualTo("<redacted>");
+    }
 }

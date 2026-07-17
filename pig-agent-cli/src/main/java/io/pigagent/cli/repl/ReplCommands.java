@@ -1,8 +1,5 @@
 package io.pigagent.cli.repl;
 
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.message.MsgRole;
-import io.agentscope.core.message.TextBlock;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.repl.command.AgentCommand;
 import io.pigagent.cli.repl.command.McpCommand;
@@ -17,7 +14,11 @@ import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.session.Session;
 import io.pigagent.session.SessionManager;
+import io.pigagent.task.FileSystemTaskRepository;
+import io.pigagent.task.Task;
+import io.pigagent.task.TaskManager;
 import io.pigagent.tool.availability.ToolAvailabilityReport;
+import io.pigagent.tool.skills.SkillsTool;
 import org.fusesource.jansi.Ansi.Color;
 import org.jline.reader.LineReader;
 import org.jline.terminal.Terminal;
@@ -28,9 +29,11 @@ import picocli.CommandLine.IFactory;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
+import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -101,11 +104,11 @@ public final class ReplCommands {
             entry(t, "/config", "Show current configuration");
             entry(t, "/protocols", "List all model protocol types");
             entry(t, "/model <action>", "Manage models (list|add|switch|edit|delete)");
-            entry(t, "/agent <action>", "Manage agents (list|use|new|model)");
+            entry(t, "/agent <action>", "Manage agents (list|use|new|model|run|report)");
             entry(t, "/channels", "Show connected channels and status");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
-            entry(t, "/permission <action>", "Tool permissions (status|mode|allow|revoke|reset|list)");
+            entry(t, "/permission <action>", "Tool permissions (status|mode|channel-mode|allow|revoke|reset|list)");
             entry(t, "/plan <action>", "Native Plan Mode (enter|exit|status)");
             entry(t, "/memory <on|off>", "Toggle/show native long-term memory (MEMORY.md)");
             entry(t, "/compress <action>", "Context compression (now|status|off|on)");
@@ -130,7 +133,25 @@ public final class ReplCommands {
 
         @Override
         public void run() {
-            Ansi.println(ctx.terminal(), Ansi.info(ctx.agent().call(userMsg("List all tasks")).getTextContent()));
+            // Deterministic, offline read of the file-backed task store — no LLM round-trip (which was
+            // slow, non-deterministic and could print "Error: null"). Same tasks/ dir the agent's
+            // TaskTool persists to, so the listing is authoritative.
+            Terminal t = ctx.terminal();
+            Path root = workspaceRoot(ctx);
+            if (root == null) {
+                Ansi.println(t, Ansi.dim("Task directory is unavailable."));
+                return;
+            }
+            List<Task> tasks = new TaskManager(new FileSystemTaskRepository(root.resolve("tasks"))).getAllTasks();
+            Ansi.println(t, Ansi.heading("Tasks:"));
+            if (tasks.isEmpty()) {
+                Ansi.println(t, Ansi.dim("  (none)"));
+                return;
+            }
+            tasks.stream()
+                    .sorted(Comparator.comparing(Task::createdAt).thenComparing(Task::id))
+                    .forEach(task -> Ansi.println(t, "  " + Ansi.info(task.title())
+                            + Ansi.dim(" [" + task.status() + "]  [" + task.id() + "]")));
         }
     }
 
@@ -144,7 +165,18 @@ public final class ReplCommands {
 
         @Override
         public void run() {
-            Ansi.println(ctx.terminal(), Ansi.info(ctx.agent().call(userMsg("List available skills")).getTextContent()));
+            // Deterministic, offline enumeration via the same SkillRegistry the agent uses
+            // (SkillsTool.listSkills → SkillRegistry.all: workspace + built-in classpath skills),
+            // instead of an LLM round-trip.
+            Terminal t = ctx.terminal();
+            Path root = workspaceRoot(ctx);
+            if (root == null) {
+                Ansi.println(t, Ansi.dim("Skills directory is unavailable."));
+                return;
+            }
+            Ansi.println(t, Ansi.heading("Skills:"));
+            Ansi.println(t, Ansi.info(new SkillsTool(root.resolve("skills")).listSkills()));
+            Ansi.println(t, Ansi.dim("Use /skill to review/approve staged skill drafts."));
         }
     }
 
@@ -161,12 +193,33 @@ public final class ReplCommands {
             PigAgentConfig cfg = ctx.configManager().getConfig();
             Terminal t = ctx.terminal();
             Ansi.println(t, Ansi.heading("Configuration"));
-            Ansi.println(t, line("Provider", cfg.getModel().getProvider()));
-            Ansi.println(t, line("Model", cfg.getModel().getModelName()));
+            // Model + MCP are read from the LIVE managers, not the legacy YAML blocks: models.json /
+            // mcp.json are the source of truth and the YAML blocks are NOT updated on a runtime switch,
+            // so the old cfg.getModel()/cfg.getMcp() reads were stale. Mirror /status.
+            Ansi.println(t, line("Protocol", currentProtocol()));
+            Ansi.println(t, line("Model", currentModel()));
             Ansi.println(t, line("Agent", cfg.getAgent().getName()));
             Ansi.println(t, line("Max Iters", String.valueOf(cfg.getAgent().getMaxIters())));
-            Ansi.println(t, line("MCP", String.valueOf(cfg.getMcp().getServers().keySet())));
+            Ansi.println(t, line("MCP", mcpServers()));
             Ansi.println(t, line("Channels", String.valueOf(cfg.getChannels().keySet())));
+        }
+
+        private String currentModel() {
+            ModelManager mm = ctx.modelManager();
+            return mm == null ? "(n/a)" : mm.getCurrentModel().map(StoredModel::label).orElse("(none)");
+        }
+
+        private String currentProtocol() {
+            ModelManager mm = ctx.modelManager();
+            return mm == null ? "(n/a)" : mm.getCurrentModel().map(StoredModel::protocolId).orElse("(none)");
+        }
+
+        private String mcpServers() {
+            if (ctx.mcpManager() == null) {
+                return "(n/a)";
+            }
+            List<String> names = ctx.mcpManager().list().stream().map(s -> s.spec().name()).toList();
+            return names.isEmpty() ? "(none)" : names.toString();
         }
     }
 
@@ -440,8 +493,20 @@ public final class ReplCommands {
                     ctx.compressionService().setEnabled(sid, true);
                     Ansi.println(t, Ansi.success("Auto-compression on for this session."));
                 }
-                default -> Ansi.println(t, Ansi.error("Usage: /compress <now|status|off|on>"));
+                case "help" -> usage(t);
+                default -> {
+                    Ansi.println(t, Ansi.error("Unknown action: " + act));
+                    usage(t);
+                }
             }
+        }
+
+        private static void usage(Terminal t) {
+            Ansi.println(t, Ansi.heading("/compress actions:"));
+            Ansi.println(t, Ansi.dim("  now       compress the current conversation now"));
+            Ansi.println(t, Ansi.dim("  status    show budget + token estimate + last run (default)"));
+            Ansi.println(t, Ansi.dim("  off       disable auto-compression for this session"));
+            Ansi.println(t, Ansi.dim("  on        enable auto-compression for this session"));
         }
     }
 
@@ -738,14 +803,26 @@ public final class ReplCommands {
                 }
                 case "status" -> Ansi.println(t, Ansi.info("Memory: ")
                         + (sm.isMemoryEnabled() ? Ansi.success("on") : Ansi.warn("off")));
-                default -> Ansi.println(t, Ansi.error("Usage: /memory <on|off|status>"));
+                case "help" -> usage(t);
+                default -> {
+                    Ansi.println(t, Ansi.error("Unknown action: " + act));
+                    usage(t);
+                }
             }
+        }
+
+        private static void usage(Terminal t) {
+            Ansi.println(t, Ansi.heading("/memory actions:"));
+            Ansi.println(t, Ansi.dim("  on        enable native long-term memory (MEMORY.md flush + injection)"));
+            Ansi.println(t, Ansi.dim("  off       disable memory (no MEMORY.md injection, no flush)"));
+            Ansi.println(t, Ansi.dim("  status    show whether memory is on or off (default)"));
         }
     }
 
-    private static Msg userMsg(String text) {
-        return Msg.builder().name("user").role(MsgRole.USER)
-                .content(TextBlock.builder().text(text).build()).build();
+    /** Workspace root, derived from the reports dir ({@code <root>/reports}); {@code null} if unknown. */
+    private static Path workspaceRoot(ReplContext ctx) {
+        Path reports = ctx.reportsDir();
+        return reports == null ? null : reports.getParent();
     }
 
     private static String line(String label, String value) {

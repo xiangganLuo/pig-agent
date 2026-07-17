@@ -52,9 +52,20 @@ class NotifyCommandTest {
         return ReplCommands.build(ctx, CommandLine.defaultFactory());
     }
 
+    /** Enable outreach with a channel + recipient so {@code /notify test} passes the pre-check. */
+    private static ConfigurationManager configuredOutreach(Path yaml) {
+        ConfigurationManager cfg = new ConfigurationManager(yaml);
+        cfg.updateConfig(c -> {
+            c.getOutreach().setEnabled(true);
+            c.getOutreach().setChannel("feishu");
+            c.getOutreach().setRecipient("some-recipient");
+        });
+        return cfg;
+    }
+
     @Test
     void testActionSendsThroughService() throws IOException {
-        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        ConfigurationManager cfg = configuredOutreach(tmp.resolve("application.yaml"));
         RecordingService svc = new RecordingService();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -64,6 +75,36 @@ class NotifyCommandTest {
         assertThat(svc.notified).hasSize(1);
         assertThat(svc.notified.get(0).body()).isEqualTo("hello world");
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("Sent");
+    }
+
+    @Test
+    void testRefusedWhenOutreachDisabled() throws IOException {
+        // Default config → outreach disabled: the pre-check refuses before touching the service.
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        RecordingService svc = new RecordingService();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        build(cfg, svc, out).execute("/notify", "test");
+
+        assertThat(svc.notified).isEmpty();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("disabled");
+    }
+
+    @Test
+    void testRefusedWhenNoRecipientConfigured() throws IOException {
+        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        cfg.updateConfig(c -> {
+            c.getOutreach().setEnabled(true);
+            c.getOutreach().setChannel("feishu");
+            // recipient left blank on purpose
+        });
+        RecordingService svc = new RecordingService();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        build(cfg, svc, out).execute("/notify", "test");
+
+        assertThat(svc.notified).isEmpty();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("channel/recipient");
     }
 
     @Test
@@ -88,13 +129,14 @@ class NotifyCommandTest {
 
     @Test
     void suppressedResultShownAsNotSent() throws IOException {
-        ConfigurationManager cfg = new ConfigurationManager(tmp.resolve("application.yaml"));
+        // Outreach configured so the pre-check passes; the service then reports a guardrail suppression.
+        ConfigurationManager cfg = configuredOutreach(tmp.resolve("application.yaml"));
         RecordingService svc = new RecordingService();
-        svc.result = NotificationResult.of(NotificationResult.Outcome.DISABLED, "disabled");
+        svc.result = NotificationResult.of(NotificationResult.Outcome.QUIET_HOURS, "quiet hours");
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         build(cfg, svc, out).execute("/notify", "test");
 
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Not sent").contains("DISABLED");
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Not sent").contains("QUIET_HOURS");
     }
 }
