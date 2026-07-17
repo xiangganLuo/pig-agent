@@ -1,296 +1,236 @@
-span
+<div align="center">
 
 <img src="assets/logo.svg" alt="Pig Agent Logo" width="150"/>
 
 # Pig Agent
 
-**一个基于 AgentScope Java 构建的终端 AI Agent 框架**
+**一个基于 AgentScope Java 2.0 构建的、24 小时常驻的终端个人助理框架**
 
-*架构简单 · 开发者易学习 · 功能完整 · 方便扩展*
+*记得住你 · 越用越懂你 · 会自己沉淀经验 · 底层 harness 外包给 2.0 原生*
 
 </div>
 
 ## 项目背景
 
-Pig Agent 的设计灵感来源于 OpenCLAW、Hermes Agent 等终端智能体产品。目标是为 Java 开发者提供一个：
+Pig Agent 的北极星是：**站在 Claude Code 之上的「超级助手」——有自己的大脑（多协议模型层），编排专业 agent 去干活，通过多种渠道随时触达人，自己专注于「解决人的事情」。** 它不是「按需唤起的会话工具」，而是持续在线、无人值守替人办事的数字员工。
 
-- **开箱即用**的终端 AI Agent
-- **模块化架构**，各功能独立、易于替换
-- **标准化接口**，基于 AgentScope 的 `@Tool`、`Hook`、`Memory` 等抽象
-- **MCP 原生支持**，可连接任意 MCP Server 扩展能力
+为此，Pig Agent 把复杂的、别人已做到极致的基础设施**交出去**，只把力气花在自己的差异化上：
+
+- **底层 harness**（权限 / 记忆 / 压缩 / 中断 / 沙箱 / 事件 / session / 子 agent / Plan Mode）→ **AgentScope Java 2.0 原生**。
+- **模型能力** → Pig Agent **自己的大脑**：5 套协议标准的多协议模型层，供应商无关、运行时可切换。
+- **专注差异化** → 编排 + 人机交互（多渠道触达）+ 事务自动化 + **个人助理记忆/画像/自主技能**。
+
+每个 agent 都封装 AgentScope 的 **`HarnessAgent`** 载体（内部委派给 `ReActAgent`），并通过 picocli + JLine3 的 CC 风格 REPL 暴露给用户。
 
 ### 技术栈
 
+| 组件         | 技术选型                                                      |
+| ------------ | ------------------------------------------------------------- |
+| Agent 框架   | AgentScope Java 2.0.0（`agentscope-core` + `agentscope-harness` + `agentscope-extensions-model-*`） |
+| Agent 载体   | `HarnessAgent`（委派 `ReActAgent`）                           |
+| 终端 REPL    | JLine3 3.28.0 + picocli 4.7.6 + Jansi                        |
+| 配置管理     | Jackson YAML 2.18.3                                           |
+| MCP 协议     | 动态增删改查（stdio / SSE / streamable-http）                |
+| 日志         | SLF4J + Logback                                              |
+| 构建工具     | Maven（Java 17）                                             |
 
-| 组件       | 技术选型                   |
-| ---------- | -------------------------- |
-| Agent 框架 | AgentScope Java 1.0.10     |
-| 终端 REPL  | JLine3 3.28.0              |
-| 配置管理   | Jackson YAML 2.18.3        |
-| MCP 协议   | AgentScope 内置 MCP Client |
-| 构建工具   | Maven (Java 17)            |
+> **版本说明**：仓库已全量迁移到 AgentScope 2.0——不再依赖 1.x 的 `io.agentscope:agentscope` 单包，也不再有已废弃的 `io.agentscope.core.hook.*`。旧的 1.0.12（v1）线归档在分支 **`v1-stable-20260716`** + tag **`v1-final-20260716`**（另有 `v1.0.12-final`），需要 2.0 之前的构建可从那里取。
 
 ## 核心架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      CLI (JLine3 REPL)                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
-│  │ /help    │  │ /tasks   │  │ /skills  │  │ /config │ │
-│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
-├─────────────────────────────────────────────────────────┤
-│                    PigAgent (ReActAgent)                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │
-│  │  Hooks      │  │  Memory     │  │  Model          │ │
-│  │  - Logging  │  │  - InMemory │  │  (Provider)     │ │
-│  │  - ToolCall │  │  - File     │  │                 │ │
-│  └─────────────┘  └─────────────┘  └─────────────────┘ │
-├─────────────────────────────────────────────────────────┤
-│                      Toolkit                             │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────┐ │
-│  │ Shell  │ │  File  │ │  Web   │ │  Task  │ │ MCP  │ │
-│  │ System │ │ System │ │ Fetch  │ │  Tool  │ │Tools │ │
-│  └────────┘ └────────┘ └────────┘ └────────┘ └──────┘ │
-│  ┌────────┐ ┌────────┐ ┌────────┐                     │
-│  │ Search │ │CheckList│ │ Skills │                     │
-│  └────────┘ └────────┘ └────────┘                     │
-├─────────────────────────────────────────────────────────┤
-│              Provider / MCP / Task / Workspace            │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│              前端适配器（Add a frontend = add an adapter）      │
+│   ┌─────────────────────┐        ┌──────────────────────┐    │
+│   │  CC 风格 REPL (CLI)  │        │  Web 控制台 (可选)    │    │
+│   └─────────────────────┘        └──────────────────────┘    │
+├──────────────────────────────────────────────────────────────┤
+│                   AgentKernel 门面 (facade)                    │
+│   listAgents / useAgent / chat / interruptCurrent / events    │
+├──────────────────────────────────────────────────────────────┤
+│              PigAgent  →  HarnessAgent  →  ReActAgent          │
+│   ┌────────────┐  ┌────────────┐  ┌────────────────────────┐ │
+│   │ Middleware │  │ 原生权限   │  │  原生两层记忆 + 用户画像 │ │
+│   │ (中间件链) │  │PermissionE.│  │  MEMORY.md / USER.md    │ │
+│   └────────────┘  └────────────┘  └────────────────────────┘ │
+│   原生：状态/session · 重试/中断 · 子 agent · Plan Mode · 淘汰 │
+├──────────────────────────────────────────────────────────────┤
+│                          Toolkit                              │
+│  文件 · 命令 · 任务 · 清单 · 技能 · 记忆 · 画像 · 外呼 · MCP  │
+│  按需工具 (tool_search) · 计算/网络插件 (plugin-builtin)      │
+├──────────────────────────────────────────────────────────────┤
+│   多协议大脑 · Session · Task 调度 · MCP · Channel · Workspace │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### 请求处理流程
+**请求处理流程**（一次对话回合）：
 
 ```
 用户输入 → JLine3 REPL
+    ↓ 构建 Msg(USER)
+AgentKernel.chat(activeId, msg, sessionId)   ← 注册可中断 TurnHandle
     ↓
-构建 Msg(USER)
-    ↓
-PigAgent.stream(msg)
-    ↓
-ReActAgent 推理循环:
-    ├── PreReasoningEvent  → LoggingHook
-    ├── LLM 调用 (Model.chat)
-    ├── PostReasoningEvent → LoggingHook
-    ├── PreActingEvent     → ToolCallLoggingHook
-    ├── 工具执行 (@Tool 方法)
-    └── PostActingEvent    → ToolCallLoggingHook
-    ↓
+PigAgent → HarnessAgent → ReActAgent 推理循环
+    ├── Middleware 链：onSystemPrompt / onReasoning / onActing / onModelCall
+    ├── LLM 调用（原生重试 429/5xx）
+    ├── 原生 PermissionEngine 逐工具放行 / DENY / HITL 确认
+    ├── 工具执行（@Tool 方法，多道正交护栏）
+    └── 大结果淘汰 (tool-result eviction)
+    ↓ Flux<AgentEvent> 流式富渲染（TextBlockDelta / ToolResult* / RequireUserConfirm）
+终端增量出字 + markdown 高亮；Ctrl-C 真中断
 ```
+
+## 个人助理核心（差异化 headline）
+
+Pig Agent 的灵魂是「记得住你、越用越懂你、会自己沉淀经验」。这一层建在 2.0 原生记忆地基之上，叠加 Pig 的差异化能力。
+
+### 跨会话原生两层记忆（`pa-memory-native`）
+
+采用 AgentScope 2.0 的**原生两层记忆**，取代此前自建、有跨会话缺陷的记忆栈：
+
+- **两层落盘（工作区级，天然跨会话）**：日志层 `memory/YYYY-MM-DD.md`（每回合 flush，LLM 抽取长期事实，**无字数过滤**）→ 固化层 `MEMORY.md`（后台节流 consolidation 合并去重、整文件重写）。
+- **注入 system prompt**：Pig 自有的 `NativeMemoryContextMiddleware`（`onSystemPrompt`）把 `MEMORY.md` 注入系统提示词——会话内稳定、前缀缓存友好。
+- **记忆工具**：`memory_search` / `memory_get` / `memory_save` / `session_search`（+ `session_list` / `session_history`），已在 `ToolRiskClassifier` 分级（检索只读、`memory_save` 写）。
+- **廉价模型**：flush / consolidation 可跑在轻量模型（`memory.model-id`，如 Doubao lite），省成本。
+- **开关**：`/memory on|off` 翻转 `memory-enabled` 并重建 agent；一次性迁移旧 `context/memory.md` 到 `MEMORY.md`（幂等、容错）。
+
+> 这修好了一个真 bug：会话 A 说「我叫罗湘赣」→ `/session new` → 会话 B 记不住。因为固化层是工作区级、跨会话，durable 事实不再随会话丢失。
+
+### 用户画像 `USER.md`（`user-profile`）
+
+一份**结构化的用户画像**（工作区根 `USER.md`）——身份（怎么称呼你）、长期偏好（语言 / 输出风格 / 技术取向）、工作方式——与 `MEMORY.md`（通用事实台账）分离：
+
+- 由 `UserProfileContextMiddleware` 注入 system prompt（在 `MEMORY.md` 之前），有界、凭据脱敏、字节稳定。
+- 两条维护路径：`updateProfile` `@Tool`（确定性 set/merge 一个字段，agent 立即落用户明确表达的偏好）；可选后台 consolidation（默认关，用廉价模型从 `MEMORY.md` 蒸馏画像）。
+- 工作区级 → 会话 A 设的字段在会话 B 也生效。
+
+### 自主沉淀技能（`autonomous-skills`，默认关）
+
+让 Pig「越用越会」：把解过的任务/工作流蒸馏成可复用 `SKILL.md`——但**永不直接安装**：
+
+- 两个 `@Tool`（`proposeSkill` / `skillManage`，分类 WRITE）把草稿写入**暂存区** `workspace/skills/.pending/<name>/`（对读路径不可见）。
+- **默认人工门**（OpenClaw 模型）：`/skill review|approve|reject` 人工审后才提升到 `workspace/skills/<name>/`，提升即被 `WorkspaceSkillSource` 实时发现（无需重启）。
+- 提升前跑内容安全扫描（`SkillSecurity` 路径 + `SkillLimits` 大小 + `CredentialSanitizer` 凭据拒绝 + 结构校验）+ 去重。
+- **fail-closed**：agent 工具本身不持有 promoter，渠道/自主 agent 只能提案、不能安装。
+
+### 混合记忆检索 BM25 + 向量（`hybrid-memory-search`，默认关，opt-in）
+
+在记忆库（`MEMORY.md` + `memory/*.md` + `USER.md`）上叠加 OpenClaw 式**混合检索**：纯 Java `Bm25Index`（Okapi BM25，CJK 分词）+ 可插拔 `VectorStore`（默认内存 cosine，无原生依赖），`HybridRanker` 归一化后按 `0.7·向量 + 0.3·BM25` 混合。无 embedder 时优雅降级为 BM25-only。启用后 `HybridMemorySearchTool`（`@Tool name="memory_search"`）取代原生关键词检索。
+
+## Harness / 原生能力
+
+迁移到 2.0 后，大量此前自建的基础设施改为框架原生，Pig 只保留门面/接线：
+
+| 能力 | 实现 | 运维/触达 |
+| ---- | ---- | -------- |
+| **原生权限引擎** | `PermissionEngine` + `PermissionContextFactory`（模式 `plan/ask/auto/bypass`）；`GuardedAgentTool extends ToolBase` 让引擎真正生效 | `/permission` |
+| **人在环确认（HITL）** | ASK → 原生 `RequireUserConfirmEvent`，REPL 逐工具 y/a/N 后携 `ConfirmResult` 恢复 | REPL 内联 |
+| **原生重试 + 中断** | `ReActAgent` `maxRetries` / `fallbackModel`（429/5xx 自愈）；`interrupt(RuntimeContext)` 协作式中断 | 回合中 Ctrl-C |
+| **Hook → 中间件** | `MiddlewareBase`（5 阶段：`onAgent/onReasoning/onActing/onModelCall/onSystemPrompt`）；1.x Hook 事件模型已移除 | — |
+| **原生事件流** | `streamEvents` → `Flux<AgentEvent>`（`TextBlockDeltaEvent`/`ToolResult*Event`/…），按子类型分发 | — |
+| **原生状态 / session** | `JsonFileAgentStateStore`（`workspace/state/`），按 `(userId,sessionId)` 自动存取 | `/session` |
+| **原生子 agent 委派** | `agent_spawn`/`agent_send`/`agent_list` + `task_*`；父权限 fail-closed 继承（Pig 注入 `subagentFactory` 补 2.0.0 缺口） | 自动（默认开）|
+| **Plan Mode** | 原生「只读思考 → 写 `PLAN.md` → HITL 批准 → 执行」（`plan_enter/write/exit`） | `/plan` |
+| **大结果淘汰** | `ToolResultEviction`（默认开）：超阈值工具结果落盘 + 占位回读，防上下文膨胀 | 自动 |
+| **按需工具** | `tool_search`（默认关）：大/低频工具留在非激活组，模型按需揭示，省 prompt token | 自动 |
+| **命令执行沙箱** | `SandboxPolicy` + `CommandGuard`：输出封顶 / 超时 / 灾难命令三级 denylist / 环境凭据擦除 | 自动 |
+| **循环检测** | `LoopDetectionMiddleware`：同一动作重复 → WARN 提示 / STOP 改写为哨兵工具 | 自动 |
+| **主动外呼** | `notifyUser` `@Tool` + `OutreachGate` 防打扰（限流/去重/免打扰时段，URGENT 例外） | `/notify` |
+| **Gateway 渠道内核** | 可选：原生 `Gateway`/`ChatUiChannel`（公平队列 + 子 agent 桥 `expose_to_user`） | `channel-gateway` |
+| **动态 MCP** | `McpManager` + `mcp.json` 运行时增删改查、热注册工具 | `/mcp` |
+
+> **peer agent vs 子 agent**：`/agent use` 切换的是长期存在的 **peer**（多 agent，每个有自己的 `AgentSpec`/模型/工具子集/权限模式，落盘 `workspace/agents/{id}.md`）；子 agent 是 peer 委派子任务的**临时子进程**（经 `agent_spawn`）。二者不混淆。
 
 ## 系统模块
 
-项目采用 Maven 多模块结构，共 11 个模块：
+Maven 多模块项目（`io.pigagent`，`0.1.0-SNAPSHOT`），共 **16 个模块**；`pig-agent-cli` 是主入口，依赖其余全部。
 
-### pig-agent-core — Agent 核心
+| 模块 | 职责 | 关键类型 |
+| ---- | ---- | -------- |
+| `pig-agent-core` | Agent 载体（`HarnessAgent` 封装）+ 可重建 agent、多 agent 注册表、原生中间件、原生两层记忆注入/迁移、用户画像、压缩、中断、协议 SPI | `PigAgent`、`AgentHolder`、`AgentFactory`、`AgentSpec`、`AgentRegistry`、`AgentInstanceFactory`、`middleware/*`、`memory/*`、`memory/search/*`、`profile/*`、`compression/CompressionService`、`interrupt/*`、`protocol/ModelProtocol`、`outreach/*`、`agent/runner/*` |
+| `pig-agent-providers` | 5 套模型协议实现 + 注册表 | `OpenAiProtocol`、`AnthropicProtocol`、`GeminiProtocol`、`OllamaProtocol`、`DashScopeProtocol`、`ProtocolRegistry` |
+| `pig-agent-model` | 多模型配置、连通测试、运行时切换 | `StoredModel`、`ModelStore`、`JsonModelStore`、`ModelManager` |
+| `pig-agent-session` | 会话元数据/血缘 sidecar（叠在原生 `AgentStateStore` 上） | `Session`、`SessionManager`、`FileSystemSessionRepository`、`SessionLineageWriter` |
+| `pig-agent-tools` | **核心** `@Tool` 工具 + 工具框架（权限/契约/可用性/沙箱/SPI），SPI 自动注册；`SkillsTool` 组合多个 `SkillSource` | `ShellTools`、`FileSystemTools`、`TaskTool`、`SkillsTool`、`McpTool`、`notify/NotifyUserTool`、`profile/UserProfileTool`、`memory/HybridMemorySearchTool`、`skills/*`、`permission/*`、`contract/*`、`availability/*`、`sandbox/*`、`deferred/*`、`spi/*` |
+| `pig-agent-task` | 任务模型、调度、文件持久化 | `Task`、`TaskManager`、`TaskScheduler`、`FileSystemTaskRepository` |
+| `pig-agent-mcp` | 动态 MCP 服务器管理 + JSON store | `McpManager`、`McpServerSpec`、`McpStore`、`JsonMcpStore` |
+| `pig-agent-workspace` | `~/.pig-agent/workspace/` 布局 | `WorkspaceManager` |
+| `pig-agent-config` | YAML 配置 + 变更监听 | `PigAgentConfig`、`ConfigurationManager`、`ConfigurationChangedEvent` |
+| `pig-agent-channel` | 通道抽象 + agent 桥接 + 适配器工厂 + 原生 Gateway 内核 + 主动外呼 | `Channel`、`ChannelFactory`、`ChannelAgentBridge`、`TelegramChannel`/`DiscordChannel`/`SlackChannel`/`WebhookChannel`/`StdinPipeChannel`、`gateway/*`、`outreach/*`、`ChannelRegistry` |
+| `pig-agent-onboarding` | 首次运行交互式模型配置 | `OnboardingWizard` |
+| `pig-agent-plugin` | 插件 SPI（`register(ctx)`）+ 发现源 | `Plugin`、`PluginContext`、`ServiceLoaderPluginSource`、`DirectoryPluginSource`、`PluginRegistry` |
+| `pig-agent-plugin-builtin` | 内置插件参考实现：6 个离线计算插件 + 从核心拆出的 web 搜索/抓取/清单 | `AbstractToolPlugin`、`PluginCatalog`、`Time/Uuid/Base64/Hash/Json/Random` 插件、`WebSearchPlugin`/`WebFetchPlugin`/`ChecklistPlugin` |
+| `pig-agent-skills-builtin` | 内置系统技能（classpath `SKILL.md` 资源，`SkillProvider` SPI 发现） | `SkillCatalog`、`BuiltinSkillProvider`、7 个 `SKILL.md`（code-review / systematic-debugging / tdd / refactoring / git-commit / security-review / planning） |
+| `pig-agent-web` | 嵌入式本地 Web 控制台——第二个 `AgentKernel` 适配器（HTTP + SSE），`web.enabled` 可选启用 | `WebConsole`、`WebLauncher`、`ChatHandler`、`EventStreamHandler`、`StaticHandler` |
+| `pig-agent-cli` | picocli + JLine3 + Jansi 的 CC 风格 REPL，接线（`AgentBootstrap`）、优雅关闭 | `PigAgentCli`、`AgentBootstrap`、`repl/*`、`repl/command/*`、`repl/render/*`、`repl/select/*` |
 
+## 内置工具
 
-| 类                    | 职责                                                                                   |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| `PigAgent`            | 核心 Agent，封装 AgentScope 的 ReActAgent，提供`call()` 和 `stream()` 接口             |
-| `LoggingHook`         | 生命周期 Hook，打印 Pre/PostReasoning、Pre/PostActing 事件                             |
-| `ToolCallLoggingHook` | 工具调用 Hook，打印工具名称和执行状态                                                  |
-| `FileMemory`          | 文件持久化内存，会话历史保存到磁盘                                                     |
-| `ModelProtocol`       | 模型协议标准接口（`io.pigagent.core.protocol`），定义 `protocolId`、模型创建等标准方法 |
-| `ProviderCredentials` | 不可变凭证容器，copy-on-write 语义                                                     |
+| 工具 | `@Tool` 方法 | 功能 |
+| ---- | ------------ | ---- |
+| `FileSystemTools` | `readFile`、`writeFile`、`listDirectory` | 文件读写与目录列表（凭据文件黑名单护栏） |
+| `ShellTools` | `executeCommand` | 执行 shell 命令（命令执行沙箱：输出封顶/超时/denylist/环境擦除） |
+| `TaskTool` | `createTask`、`listTasks`、`updateTaskStatus` | 任务管理 |
+| `CheckListTool`（plugin-builtin） | `createChecklist`、`completeItem`、`showChecklist` | 清单管理 |
+| `SkillsTool` | `listSkills`、`loadSkill` | 加载技能（内置 classpath + 工作区两源，渐进加载） |
+| 原生记忆工具 | `memory_search`、`memory_get`、`memory_save`、`session_search` | 两层记忆检索/写入 |
+| `UserProfileTool` | `updateProfile` | 确定性写入用户画像 `USER.md` |
+| `NotifyUserTool` | `notifyUser` | 主动经渠道给用户发通知 |
+| 自主技能（默认关） | `proposeSkill`、`skillManage` | 起草/管理暂存技能（人工门后才安装） |
+| 按需工具（默认关） | `tool_search` | 揭示被延迟的工具 |
+| `McpTool` | `listMcpServers`、`testMcpServer`、`addMcpServer`、`removeMcpServer` | Agent 自助 MCP（受 D-SEC 门控） |
+| `WebSearchPlugin`（plugin-builtin） | `webSearch` | Brave Search 网页搜索（`BRAVE_API_KEY` 可用性门控） |
+| `WebFetchPlugin`（plugin-builtin） | `fetchUrl` | 抓取网页（`SsrfGuard` 防私网访问） |
+| 计算插件（plugin-builtin） | `currentDateTime`/`convertTimezone`、`generateUuid`、`base64Encode/Decode`、`md5Hash`/`sha256Hash`、`jsonPrettyPrint`/`jsonValidate`、`randomNumber`/`randomString` 等 | 纯计算，`READ_ONLY` |
 
-### pig-agent-providers — 模型协议
-
-按**协议标准**（而非厂商）组织，共 5 套协议。具体模型由用户经"选协议 + 填 baseUrl / API key / 模型名"配置；任何 OpenAI 兼容厂商（小米 mimo、DeepSeek、Kimi、通义-compat 等）都走 `openai` 协议 + 各自 baseUrl，无需新增代码。
-
-
-| 协议      | 底层 Model           | 默认模型          | 说明                                            |
-| --------- | -------------------- | ----------------- | ----------------------------------------------- |
-| openai    | `OpenAIChatModel`    | gpt-4o            | OpenAI 兼容协议，吃掉 mimo/DeepSeek/Kimi 等厂商 |
-| anthropic | `AnthropicChatModel` | claude-sonnet-4-6 | Anthropic messages 协议                         |
-| gemini    | `GeminiChatModel`    | gemini-2.0-flash  | Google Gemini 协议                              |
-| ollama    | `OllamaChatModel`    | llama3.2          | 本地自托管，无需 API key                        |
-| dashscope | `DashScopeChatModel` | qwen-max          | 阿里云 DashScope 原生协议（通义千问）           |
-
-### pig-agent-tools — 内置工具
-
-
-| 工具                 | @Tool 方法                                         | 功能                              |
-| -------------------- | -------------------------------------------------- | --------------------------------- |
-| `ShellTools`         | `executeCommand`                                   | 执行 Shell 命令，30 秒超时        |
-| `FileSystemTools`    | `readFile`, `writeFile`, `listDirectory`           | 文件读写和目录列表                |
-| `SmartWebFetchTool`  | `fetchUrl`                                         | 抓取网页内容，自动截断至 10K 字符 |
-| `BraveWebSearchTool` | `webSearch`                                        | Brave Search API 网页搜索         |
-| `TaskTool`           | `createTask`, `listTasks`, `updateTaskStatus`      | 任务管理                          |
-| `CheckListTool`      | `createChecklist`, `completeItem`, `showChecklist` | 清单管理                          |
-| `SkillsTool`         | `listSkills`, `loadSkill`                          | 从 workspace/skills/ 加载技能     |
-
-### pig-agent-task — 任务管理
-
-
-| 类                         | 职责                                                                     |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `Task`                     | 不可变记录，支持`withStatus()`、`withSchedule()` 生成新实例              |
-| `TaskSchedule`             | 调度配置：ONCE（一次）、CRON（定时）、DELAYED（延迟）                    |
-| `TaskStatus`               | 状态枚举：TODO、IN_PROGRESS、COMPLETED、AWAITING_HUMAN_INPUT             |
-| `TaskManager`              | 任务 CRUD 操作                                                           |
-| `TaskScheduler`            | 后台调度器，使用`ScheduledExecutorService` 执行延迟/定时任务             |
-| `FileSystemTaskRepository` | 文件系统存储，任务以 Markdown 格式保存在`workspace/tasks/{date}/{id}.md` |
-
-### pig-agent-mcp — MCP 集成
-
-
-| 类              | 职责                                                        |
-| --------------- | ----------------------------------------------------------- |
-| `McpManager`    | MCP 服务器运行时增删改查、启停、连通测试，实时注册/注销工具 |
-| `McpServerSpec` | 不可变服务器配置（record，`withXxx` 拷贝）                  |
-| `McpStore`      | 持久化接口                                                  |
-| `JsonMcpStore`  | `workspace/mcp.json` 实现（按名作键，坏文件备份后从空开始） |
-
-支持的 MCP 传输方式：
-
-- **stdio**: 启动本地进程通信（如 `npx @modelcontextprotocol/server-filesystem`）
-- **SSE**: Server-Sent Events 长连接
-- **Streamable HTTP**: HTTP 流式传输
-
-### pig-agent-workspace — 工作区管理
-
-
-| 类                 | 职责                                   |
-| ------------------ | -------------------------------------- |
-| `WorkspaceManager` | 管理`~/.pig-agent/workspace/` 目录结构 |
-
-工作区结构：
-
-```
-~/.pig-agent/workspace/
-├── AGENT.md            # 系统提示词（可自定义）
-├── INFO.md             # 环境信息
-├── application.yaml    # 配置文件
-├── context/            # 上下文文件
-├── skills/             # 技能目录
-└── tasks/              # 任务目录
-    ├── recurring/      # 周期任务
-    └── 2026-05-14/     # 按日期组织
-        └── ab12cd34.md # 单个任务文件
-```
-
-### pig-agent-config — 配置管理
-
-
-| 类                          | 职责                                                        |
-| --------------------------- | ----------------------------------------------------------- |
-| `PigAgentConfig`            | Jackson 注解的配置类，支持 model、agent、channels、mcp 配置 |
-| `ConfigurationManager`      | YAML 持久化，支持变更监听器模式                             |
-| `ConfigurationChangedEvent` | 配置变更事件，携带 oldConfig 和 newConfig                   |
-
-### pig-agent-channel — 通道抽象
-
-
-| 类                   | 职责                                                 |
-| -------------------- | ---------------------------------------------------- |
-| `Channel`            | 通道接口：start、sendMessage、stop、isRunning        |
-| `ChannelAgentBridge` | 通道-Agent 桥接器，将通道消息路由到 Agent 并回传响应 |
-| `ChatChannel`        | 终端通道实现                                         |
-| `TelegramChannel`    | Telegram 通道（存根）                                |
-| `DiscordChannel`     | Discord 通道（存根）                                 |
-| `ChannelRegistry`    | 通道注册中心                                         |
-
-> **终端前端说明**：曾有一个可选的嵌入式本地 Web 控制台模块（`pig-agent-web`）。当前端收敛到 CC 风格 REPL 后，该模块已移除；Web 可在生态扩展阶段作为又一个 `AgentKernel` adapter 回归（投影蓝本仍在 git 历史）。终端前端唯一入口即下文的 `pig-agent-cli` REPL。
-
-### pig-agent-onboarding — 引导向导
-
-
-| 类                 | 职责                                         |
-| ------------------ | -------------------------------------------- |
-| `OnboardingWizard` | 首次运行引导，选择提供商、配置凭证、更新配置 |
-
-### pig-agent-cli — CLI 入口（CC 风格 REPL）
-
-终端唯一前端：Claude-Code 风格的**行式对话** REPL（非全屏 TUI），基于 JLine3 + picocli。
-
-
-| 类 / 包                                         | 职责                                                                                                                                                           |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PigAgentCli`                                   | 主入口，构建共享运行时 + 启动 channel + 交给`AgentRepl`                                                                                                        |
-| `repl/AgentRepl`                                | REPL 主循环；回合走`kernel.chat` 并流式富渲染；Ctrl-C 真中断                                                                                                   |
-| `repl/render/MarkdownAnsiRenderer`              | markdown→ANSI（粗体/行内代码/代码块/列表/标题），纯函数                                                                                                       |
-| `repl/render/StreamingMarkdownPrinter`          | 答案按完成行增量出字，fence 状态跨 chunk                                                                                                                       |
-| `repl/render/ToolCallFormatter`                 | 工具调用块`⏺工具名 / └结果摘要`，凭据 redact                                                                                                                 |
-| `repl/StatusLine`                               | 提示符上方状态行`model · session · perms`（不含凭据）                                                                                                        |
-| `repl/select/InlineSelector` + `SelectorModel`  | 方向键行内选择器（`/model` 无参用；数字降级）                                                                                                                  |
-| `repl/SlashCommands` + `SlashCompletionWidgets` | 斜杠命令边打边弹补全（`/` 起自动列出、随输入过滤、`↑/↓` 选择、Enter 补全、Esc 退出）；仅 `/` 缓冲触发，普通对话不打扰；纯 TTY 才装，dumb 终端降级为 Tab 补全 |
-
-**富渲染 / 交互**：流式出字 + markdown 高亮；`REASONING` 显示 `⋯ thinking`；工具调用缩进成块；输入 `/` **自动弹出全部命令补全菜单**（无需按 Tab），随输入实时过滤（如 `/mo` → 只剩 `/model`），`↑/↓` 移动高亮、Enter 补全、Esc/退格退出——**仅当缓冲以 `/` 开头**，普通对话不弹菜单；`/model` 无参弹方向键选择器（Enter 选定、Esc 取消）；破坏性操作 y/N 确认。
-
-**Ctrl-C 真中断**：回合进行中按 Ctrl-C → `AgentKernel.interruptCurrent()` 取消当前模型调用、回到提示符，**进程不退出**；空闲态 Ctrl-C 丢弃当前行、Ctrl-D 退出。
-
-REPL 命令（输入 `/` 触发补全）：`/help /model /agent /session /mcp /permission /memory /compress /status /tasks /skills /config /protocols /channels /clear /quit`。
-
-**终端要求**：JLine 需要真控制台。请用 **Windows Terminal / PowerShell / cmd**（或 Linux/macOS 原生终端）。**git-bash / mintty 下 stdin 不是真 TTY，交互会异常**——请用 `winpty mvn ... exec:java`，或改用 Windows Terminal。
+> 所有内置工具遵循统一返回契约：成功返回正常输出，失败返回规范化的 `{"error":"<reason>"}`（凭据脱敏），从不抛异常中断回合。
 
 ## 代码结构
 
 ```
 pig-agent/
-├── pom.xml                          # 父 POM，依赖管理
+├── pom.xml                          # 父 POM（16 modules，AgentScope 2.0.0）
 ├── pig-agent-core/                  # Agent 核心
 │   └── src/main/java/io/pigagent/core/
-│       ├── agent/PigAgent.java
-│       ├── hook/
-│       │   ├── LoggingHook.java
-│       │   └── ToolCallLoggingHook.java
-│       ├── memory/FileMemory.java
-│       ├── protocol/
-│       │   ├── ModelProtocol.java
-│       │   └── ModelSpec.java
-│       └── provider/ProviderCredentials.java
-├── pig-agent-providers/             # 模型协议
-│   └── src/main/java/io/pigagent/provider/
-│       ├── openai/OpenAiProtocol.java
-│       ├── anthropic/AnthropicProtocol.java
-│       ├── gemini/GeminiProtocol.java
-│       ├── ollama/OllamaProtocol.java
-│       ├── dashscope/DashScopeProtocol.java
-│       └── registry/ProtocolRegistry.java
-├── pig-agent-tools/                 # 内置工具
+│       ├── agent/PigAgent.java              # 封装 HarnessAgent（委派 ReActAgent）
+│       ├── agent/kernel/AgentKernel.java    # 前端门面
+│       ├── middleware/{LoggingMiddleware,ToolCallLoggingMiddleware}.java
+│       ├── loop/LoopDetectionMiddleware.java
+│       ├── memory/{ConversationMemory,NativeMemoryContextMiddleware,MemoryMigration}.java
+│       ├── memory/search/{MemorySearchIndex,Bm25Index,HybridRanker,...}.java
+│       ├── profile/{UserProfileStore,UserProfileContextMiddleware,...}.java
+│       ├── compression/CompressionService.java
+│       ├── interrupt/{InterruptController,TurnHandle}.java
+│       ├── outreach/{Notification,NotificationService,OutreachGate}.java
+│       ├── agent/runner/AgentRunner.java    # 数字员工（自主 agent）
+│       └── protocol/{ModelProtocol,ModelSpec}.java
+├── pig-agent-providers/             # 5 套模型协议
+│   └── .../provider/{openai,anthropic,gemini,ollama,dashscope}/*Protocol.java
+├── pig-agent-tools/                 # 内置工具 + 工具框架
 │   └── src/main/java/io/pigagent/tool/
-│       ├── shell/ShellTools.java
-│       ├── filesystem/FileSystemTools.java
-│       ├── webfetch/SmartWebFetchTool.java
-│       ├── websearch/BraveWebSearchTool.java
-│       ├── task/TaskTool.java
-│       ├── checklist/CheckListTool.java
-│       ├── skills/SkillsTool.java
-│       └── discovery/ToolDiscovery.java
-├── pig-agent-task/                  # 任务管理
-│   └── src/main/java/io/pigagent/task/
-│       ├── Task.java
-│       ├── TaskStatus.java
-│       ├── TaskSchedule.java
-│       ├── TaskManager.java
-│       ├── TaskScheduler.java
-│       ├── TaskRepository.java
-│       └── FileSystemTaskRepository.java
-├── pig-agent-mcp/                   # MCP 集成
-│   └── src/main/java/io/pigagent/mcp/
-│       └── McpManager.java
-├── pig-agent-workspace/             # 工作区管理
-│   └── src/main/java/io/pigagent/workspace/
-│       └── WorkspaceManager.java
-├── pig-agent-config/                # 配置管理
-│   └── src/main/java/io/pigagent/config/
-│       ├── PigAgentConfig.java
-│       ├── ConfigurationManager.java
-│       └── ConfigurationChangedEvent.java
-├── pig-agent-channel/               # 通道抽象
-│   └── src/main/java/io/pigagent/channel/
-│       ├── Channel.java
-│       ├── ChannelRegistry.java
-│       ├── chat/ChatChannel.java
-│       ├── telegram/TelegramChannel.java
-│       └── discord/DiscordChannel.java
-├── pig-agent-onboarding/            # 引导向导
-│   └── src/main/java/io/pigagent/onboarding/
-│       └── OnboardingWizard.java
+│       ├── shell/ShellTools.java  filesystem/FileSystemTools.java  task/TaskTool.java
+│       ├── skills/{SkillsTool,SkillRegistry,WorkspaceSkillSource,...}
+│       ├── permission/{PermissionContextFactory,ToolRiskClassifier,...}
+│       ├── contract/{ToolContractGuard,GuardedAgentTool,ToolErrors}
+│       ├── sandbox/{SandboxPolicy,CommandGuard}
+│       ├── deferred/{DeferredToolRegistry,ToolSearchTool}
+│       └── spi/{ToolProvider,ToolContext,ToolRegistrar}
+├── pig-agent-model/                 # StoredModel / ModelManager / JsonModelStore
+├── pig-agent-session/               # SessionManager（原生 state 之上的 sidecar）
+├── pig-agent-task/                  # Task / TaskScheduler / FileSystemTaskRepository
+├── pig-agent-mcp/                   # McpManager / JsonMcpStore
+├── pig-agent-workspace/             # WorkspaceManager
+├── pig-agent-config/                # PigAgentConfig / ConfigurationManager
+├── pig-agent-channel/               # Channel / ChannelAgentBridge / gateway / outreach
+├── pig-agent-onboarding/            # OnboardingWizard
+├── pig-agent-plugin/                # Plugin SPI + 发现源
+├── pig-agent-plugin-builtin/        # 内置插件（计算 + web + 清单）
+├── pig-agent-skills-builtin/        # 7 个内置技能 SKILL.md
+├── pig-agent-web/                   # 可选 Web 控制台适配器
 └── pig-agent-cli/                   # CLI 入口
     └── src/main/java/io/pigagent/cli/
-        └── PigAgentCli.java
+        ├── PigAgentCli.java  AgentBootstrap.java
+        └── repl/{AgentRepl,ReplCommands,StatusLine,...}  repl/command/*  repl/render/*
 ```
 
 ## 快速开始
@@ -299,363 +239,274 @@ pig-agent/
 
 - Java 17+
 - Maven 3.9+
-- 至少一个 LLM 提供商的 API Key
+- 至少一个可用的 LLM 模型（首次运行交互式配置，或用环境变量兜底）
 
-### 编译
-
-```bash
-mvn compile -s 
-```
-
-### 运行
+### 编译与运行
 
 ```bash
-# 设置 API Key（选择一个提供商）
-export ANTHROPIC_API_KEY=your_key
-# 或
-export OPENAI_API_KEY=your_key
-# 或使用本地 Ollama（无需 Key）
-
-# 启动
-mvn exec:java -s  -pl pig-agent-cli
+mvn compile                       # 编译全部模块
+mvn -pl pig-agent-cli -am compile # 只编译 CLI 及其依赖
+mvn exec:java -pl pig-agent-cli   # 启动 CLI REPL（主类 io.pigagent.cli.PigAgentCli）
+mvn test                          # 全量单测（离线）
+mvn verify                        # 单测 + jacoco 每模块覆盖率下限（ratchet）；*IT 默认跳过
+mvn verify -Pit                   # 额外跑真模型 *IT（需配置好 models.json）
 ```
 
-首次运行会自动：
+模型**在首次运行时交互式配置**：引导向导写入 `~/.pig-agent/workspace/models.json`，此后以该文件为准。API key 不再只从环境读取，但环境变量仍作兜底：`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`DASHSCOPE_API_KEY`、`GEMINI_API_KEY`、`MIMO_API_KEY`（Ollama 无需 key）。没有任何可用模型时，向导会运行且无法跳过。
 
-1. 创建 `~/.pig-agent/workspace/` 工作区
-2. 生成 `AGENT.md`、`INFO.md`、`application.yaml`
-3. 如果 API Key 未配置，启动引导向导
+首次运行会自动创建 `~/.pig-agent/workspace/`，生成 `AGENT.md`（可编辑的系统提示词）、`INFO.md`（环境信息）、`application.yaml`。
+
+> **终端要求**：JLine 需要真控制台。请用 **Windows Terminal / PowerShell / cmd**（或 Linux/macOS 原生终端）。**git-bash / mintty 下 stdin 不是真 TTY，交互会异常**——请用 `winpty mvn ... exec:java`，或改用 Windows Terminal。
+
+### 工作区结构
+
+```
+~/.pig-agent/workspace/
+├── AGENT.md            # 系统提示词（可编辑，仅新工作区 seed 默认值）
+├── INFO.md             # 每机环境信息
+├── USER.md             # 用户画像（身份/偏好/工作方式）
+├── MEMORY.md           # 记忆固化层（跨会话，注入 system prompt）
+├── memory/             # 记忆日志层：YYYY-MM-DD.md（每回合 flush）
+├── models.json         # 模型配置（0600，凭据源）
+├── mcp.json            # MCP 服务器配置（0600）
+├── application.yaml    # 其余配置
+├── state/              # 原生对话状态（(userId,sessionId) 存储槽）
+├── sessions/           # 会话元数据 sidecar（meta.json + temp-memory）
+├── agents/             # 声明式 AgentSpec（{id}.md）
+├── skills/             # 工作区技能（含 .pending 暂存区）
+├── tasks/              # 任务（按日期 + recurring/）
+├── reports/            # 数字员工晨报
+├── plugins/            # 外部插件 jar
+└── logs/               # 滚动日志 pig-agent.log
+```
 
 ### 日志
 
-日志经 **SLF4J + Logback**：控制台 + 滚动文件，文件落在 `~/.pig-agent/workspace/logs/pig-agent.log`（按天/大小滚动，保留 7 天）。默认级别 INFO；要调级别或输出目标，编辑 `pig-agent-cli/src/main/resources/logback.xml`（`io.pigagent` 可单独设级，嘈杂第三方压到 WARN）。首次运行引导向导与 REPL 的彩色/流式输出属交互界面，不走日志。
+日志经 **SLF4J + Logback**：控制台 + 滚动文件（`~/.pig-agent/workspace/logs/pig-agent.log`）。默认级别 INFO；要调级别/输出目标，编辑 `pig-agent-cli/src/main/resources/logback.xml`。首次运行向导与 REPL 的彩色/流式输出属交互界面，不走日志。
 
 ### 配置示例
 
-编辑 `~/.pig-agent/workspace/application.yaml`：
+编辑 `~/.pig-agent/workspace/application.yaml`（以下均可选、缺省即安全默认，仅列常用块）：
 
 ```yaml
-model:
-  provider: anthropic
-  model-name: mimo-v2.5-pro
-  # 模型调用重试（瞬时错误 5xx/网络 自愈）——缺省即启用，可全部省略
-  retry:
-    enabled: true                    # false 完全关闭（恢复旧行为）
-    max-retries: 10                  # 最多重试次数
-    per-attempt-timeout-seconds: 0   # 0=关闭（默认）。客户端超时与不可中断 agent 不兼容，会误伤慢模型，勿轻易开启
-    first-backoff-ms: 500            # 首次退避
-    max-backoff-ms: 8000             # 退避封顶（指数退避）
-
+# —— agent 迭代上限 ——
 agent:
   name: PigAgent
-  # 迭代上限：现约束**全部** agent（交互/渠道/自主），仅在 > 0 时生效、换模型后仍保留。
-  # 交互/渠道默认 40（够用、不截断复杂任务）；自主/数字员工用 AgentSpec.maxIters（默认 10，保守防失控）。
-  max-iters: 40
+  max-iters: 40                 # 交互/渠道默认 40；自主/数字员工用 AgentSpec.maxIters（默认 10）
 
+# —— 模型重试（原生，429/5xx 自愈）——
+model:
+  retry:
+    enabled: true
+    max-retries: 10
+
+# —— 记忆（原生两层）——
+memory-enabled: true            # 总开关（= /memory on|off）
+memory:
+  flush: throttled              # always | never | throttled
+  flush-throttle-minutes: 5
+  consolidation-min-gap-minutes: 30
+  model-id: ""                  # 廉价模型跑 flush/consolidation；空=用主模型
+  search:
+    hybrid-enabled: false       # 开启 BM25+向量混合检索（默认关=原生关键词）
+    bm25-weight: 0.3
+    vector-weight: 0.7
+
+# —— 用户画像 ——
+user-profile:
+  enabled: true
+  path: USER.md
+  consolidation:
+    enabled: false              # 后台从 MEMORY.md 蒸馏画像（默认关）
+
+# —— 权限（原生 PermissionEngine）——
+permissions:
+  mode: ask                     # plan | ask（默认）| auto | bypass
+  channel-mode: auto            # 渠道 agent 无 confirmer，fail-closed
+  allowlist:
+    tools: []
+    commands: []                # executeCommand 按命令首 token 放行
+
+# —— 命令执行沙箱 ——
+sandbox:
+  exec:
+    timeout-seconds: 30
+    output-cap-bytes: 204800
+    scrub-env: true
+    denylist: []                # 只能扩展内置灾难命令下限
+    warnlist: []
+
+# —— 工具：web / 按需 / 大结果淘汰 ——
+tools:
+  web:
+    allowed-hosts: []           # 非空时 fetchUrl 仅放行白名单
+  deferred:
+    enabled: false              # 按需工具（tool_search）
+    auto-defer-mcp: true
+    threshold: 25
+  result-eviction:
+    enabled: true               # 大工具结果落盘（默认开）
+    threshold: 80000
+
+# —— 子 agent / Plan Mode / 自主技能 / 外呼 ——
+subagents:
+  enabled: true                 # 交互轨道原生子 agent 委派
+plan-mode:
+  enabled: false                # 原生 Plan Mode（/plan）
+skills:
+  autonomous:
+    enabled: false              # 自主沉淀技能（proposeSkill + 人工门）
+    auto-promote: false
+outreach:
+  enabled: false                # 主动外呼（notifyUser / 晨报推送）
+  channel: ""
+  quiet-hours: "22:00-08:00"
+
+# —— 循环检测 ——
+loop-detection:
+  enabled: true
+  window-size: 20
+  warn-threshold: 3
+  stop-threshold: 5
+
+# —— 渠道 ——
+channels:
+  telegram: { enabled: false, token: "" }
+  discord:  { enabled: false, token: "" }
+channel-gateway:
+  enabled: false                # 原生 Gateway 内核（公平队列 + expose_to_user）
+
+# —— MCP（首启从此导入到 mcp.json，之后以 mcp.json 为准）——
 mcp:
-  servers:
-    # stdio 传输 - 本地文件系统
-    filesystem:
-      command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-
-    # SSE 传输 - 远程服务
-    remote:
-      url: http://localhost:3000/sse
-      headers:
-        Authorization: Bearer token
+  servers: {}
+  agent-management:
+    allow-add: false
+    allow-remove: false
+    allowed-hosts: []
 ```
 
-## 核心扩展
+## REPL 命令
 
-### 1. 自定义工具
+REPL 是 Claude-Code 风格的**行式对话**（非全屏 TUI）。输入 `/` 会**自动弹出补全菜单**并随输入实时过滤（如 `/mo` → `/model`），`↑/↓` 移动、Enter 补全、Esc 退出——仅当缓冲以 `/` 开头，普通对话不打扰。回合进行中 Ctrl-C **真中断**（取消当前模型调用、回到提示符，进程不退出）；空闲态 Ctrl-C 丢弃当前行、Ctrl-D 退出。
 
-使用 AgentScope 的 `@Tool` 注解即可创建新工具：
+```
+/help                 帮助                    /model      管理模型（list|add|switch|edit|delete）
+/agent                管理 agent（list|use|new|model|run|report）
+/session              会话（new|list|switch|fork|…）      /memory  切换/查看原生长期记忆
+/compress             上下文压缩（now|status|off|on）      /mcp     MCP 服务器（list|add|remove|edit|enable|disable|test）
+/permission           权限（status|mode|channel-mode|allow|revoke|reset|list）
+/plan                 原生 Plan Mode（enter|exit|status）  /notify  主动外呼（status|test）
+/skills               列出可用技能（只读）                /skill   自主技能人工门（review|approve|reject）
+/tasks                列出任务                            /status  agent 状态摘要
+/protocols            列出模型协议类型                    /channels 已连接渠道及状态
+/config               查看当前配置                        /clear   清屏      /quit（/exit） 退出
+```
+
+## 核心扩展（SPI 优先，不改核心）
+
+### 1. 自定义工具（`@Tool` + SPI 自动注册）
+
+写一个带 `@Tool`/`@ToolParam` 方法的类，再加一个 `ToolProvider` SPI 实现并登记到 `META-INF/services/io.pigagent.tool.spi.ToolProvider`，`ToolRegistrar` 会在 `AgentBootstrap` 自动发现，无需改接线。
 
 ```java
-package io.pigagent.tool.custom;
-
-import io.agentscope.core.tool.Tool;
-import io.agentscope.core.tool.ToolParam;
-
 public final class MyCustomTool {
-
     @Tool(description = "描述工具的功能")
-    public String myMethod(
-            @ToolParam(name = "param1", description = "参数说明") String param1
-    ) {
-        // 工具逻辑
+    public String myMethod(@ToolParam(name = "param1", description = "参数说明") String param1) {
+        // 成功返回正常输出；失败返回 ToolErrors.message(reason)（规范 {"error"}，凭据脱敏）
         return "结果";
     }
 }
 ```
 
-在 `PigAgentCli.java` 中注册：
+### 2. 自定义中间件（`MiddlewareBase`）
+
+实现 `io.agentscope.core.middleware.MiddlewareBase`（2.0 的 5 阶段）；每个阶段包裹一个 `next`，你用「可能是新的」输入 record 调用它来注入/观测，而不改传入列表。1.x 的 `Hook` 事件模型（`Pre/PostReasoningEvent`、`priority()`）已移除。
 
 ```java
-toolkit.registration().tool(new MyCustomTool()).apply();
-```
-
-### 2. 自定义 Hook
-
-实现 `io.agentscope.core.hook.Hook` 接口：
-
-```java
-public final class MyHook implements Hook {
-
+public final class MyMiddleware extends MiddlewareBase {
     @Override
-    public <T extends HookEvent> Mono<T> onEvent(T event) {
-        if (event instanceof PreReasoningEvent) {
-            // 推理前的逻辑
-        } else if (event instanceof PostActingEvent) {
-            // 工具执行后的逻辑
-        }
-        return Mono.just(event);
-    }
-
-    @Override
-    public int priority() {
-        return 70; // 数值越小优先级越高
+    public Flux<AgentEvent> onReasoning(ReasoningInput input, ReasoningNext next) {
+        // 观测/改写后交给 next（顺序 = builder 中的列表位置）
+        return next.next(input);
     }
 }
 ```
 
 ### 3. 自定义模型协议
 
-> 接入某个**已有协议**的新厂商（例如又一个 OpenAI 兼容端点）**无需写代码**——用户在 onboarding / `/model add` 里选协议并填 baseUrl 即可。只有引入一套**全新协议**时才需实现下面的接口。
+实现 `ModelProtocol`（`io.pigagent.core.protocol`：`protocolId()` + `createModel(ModelSpec)` + `supportsBaseUrl()`/`requiresApiKey()`），在 `PigAgentCli` 注册到 `ProtocolRegistry`。
 
-实现 `ModelProtocol` 接口（`io.pigagent.core.protocol`）：
+> 接入**已有协议**的新厂商（例如又一个 OpenAI 兼容端点）**无需写代码**——用户在向导 / `/model add` 里选协议并填 baseUrl 即可（小米 mimo / DeepSeek / Kimi / 通义-compat 都走 `openai` 协议）。
 
-```java
-public final class MyProtocol implements ModelProtocol {
+| 协议 | 底层 Model | 默认模型 | 说明 |
+| ---- | ---------- | -------- | ---- |
+| openai | `OpenAIChatModel` | gpt-4o | OpenAI 兼容协议，吃掉 mimo/DeepSeek/Kimi 等 |
+| anthropic | `AnthropicChatModel` | claude-sonnet-4-6 | Anthropic messages 协议 |
+| gemini | `GeminiChatModel` | gemini-2.0-flash | Google Gemini 协议 |
+| ollama | `OllamaChatModel` | llama3.2 | 本地自托管，无需 API key |
+| dashscope | `DashScopeChatModel` | qwen-max | 阿里云 DashScope 原生协议（通义千问） |
 
-    @Override
-    public String protocolId() { return "my-protocol"; }
-
-    @Override
-    public String displayName() { return "My Protocol"; }
-
-    @Override
-    public String description() { return "My model protocol"; }
-
-    @Override
-    public String defaultModelName() { return "my-model"; }
-
-    @Override
-    public boolean supportsBaseUrl() { return true; }
-
-    @Override
-    public Model createModel(ModelSpec spec) {
-        return MyChatModel.builder()
-                .apiKey(spec.apiKey())
-                .baseUrl(spec.baseUrl())
-                .modelName(spec.modelName())
-                .build();
-    }
-}
-```
-
-在 `PigAgentCli.java` 中注册：
-
-```java
-registry.register(new MyProtocol());
-```
+（底层 Model 类为 `io.agentscope.extensions.model.<protocol>.*ChatModel`。）
 
 ### 4. 自定义通道
 
-实现 `Channel` 接口：
+实现 `Channel` 接口并注册到 `ChannelRegistry`；`ChannelAgentBridge` 把渠道消息路由到 agent 并回传。可选实现 `OutboundChannel.send(...)` 支持主动外呼。原生平台适配器（钉钉/飞书/GitHub/…）可在 `channels.<id>.native: true` 时反射加载。
 
-```java
-public final class MyChannel implements Channel {
+### 5. 自定义插件
 
-    @Override
-    public String channelId() { return "my-channel"; }
+实现 `io.pigagent.plugin.Plugin`（`register(PluginContext ctx)`），用 `ctx.addTool(...)` / `ctx.addMiddleware(...)` 贡献能力；两种发现源：classpath `ServiceLoader<Plugin>`，或丢进 `workspace/plugins/` 的外部 jar（`URLClassLoader`）。`pig-agent-plugin-builtin` 是参考实现（计算 + web + 清单）。
 
-    @Override
-    public void start(Consumer<ChannelMessageReceivedEvent> onMessage) {
-        // 启动消息监听
-    }
+> 外部 jar 是无沙箱的任意代码——只放可信 jar。
 
-    @Override
-    public void sendMessage(String userId, String content) {
-        // 发送消息
-    }
+### 6. 自主沉淀技能
 
-    @Override
-    public void stop() {
-        // 停止通道
-    }
-}
-```
+`proposeSkill` 起草 → 暂存区 → `/skill approve` 人工门 → 提升到 `workspace/skills/`，`WorkspaceSkillSource` 实时发现。安全扫描 + 去重内建，渠道/自主 agent fail-closed（只提案不安装）。
 
-### 5. MCP Server 扩展（动态增删改查）
+## 工具安全护栏（多道正交）
 
-MCP 服务器**在运行时管理**，配置持久化到 `workspace/mcp.json`（按名作键，为唯一真源）。
-首次启动时会把旧的 `application.yaml` 中 `mcp.servers` **一次性导入** `mcp.json`，此后以 `mcp.json` 为准。
+工具执行叠了多道相互独立的护栏，各管一件事：
 
-**运维者通过 `/mcp` 命令实时管理**（完全信任，可添加 stdio 服务器）：
+1. **可用性门控**（`availability`）——决定工具是否对模型**可见**（如 `webSearch` 依赖 `BRAVE_API_KEY`，缺失则从 schema 移除）。
+2. **原生权限引擎**（`PermissionEngine`）——决定可见工具是否**可运行**。四种模式 `plan`（只读产计划）/ `ask`（逐次确认，默认）/ `auto`（自动放行写文件/网络，仍确认执行）/ `bypass`（全放行）；工具按风险分级（只读/写/执行/网络/MCP 管理，未知按最严）。ASK 走原生 HITL 确认；`a`（始终允许）持久化到 allowlist。运维：`/permission`。
+3. **返回契约**（`contract`）——成功返回正常输出，失败返回规范 `{"error"}`（凭据脱敏）；`ToolContractGuard` 把每个工具包成 `GuardedAgentTool extends ToolBase`（既兜住异常，又让权限引擎真正生效）。
+4. **出口边界**（`sandbox`）——文件出口黑名单（`readFile`/`writeFile` 拒触凭据文件 `models.json`/`mcp.json`）；网络出口 SSRF 防护（`fetchUrl` 解析目标全部 IP，命中回环/私网/link-local/云 metadata 即拒）。
+5. **命令执行沙箱**——`executeCommand` 专属：输出封顶（默认 200KB）、可配超时（默认 30s）、灾难命令三级 denylist（`block`>`warn`>`pass`，两遍最严胜）、环境凭据擦除。
+6. **循环检测**——同一工具签名重复 → WARN 提示 / STOP 改写为哨兵，防推理-工具死循环。
 
-```text
-/mcp list                    列出所有服务器及实时健康（已连接 + 工具数 / 未连接 / 已停用）
-/mcp add                     交互式添加（stdio | sse | http），先连通测试再生效
-/mcp remove <名称|序号>      移除（先确认）
-/mcp edit <名称|序号>        重新录入配置（先测试新配置再应用，失败保持旧的）
-/mcp enable  <名称|序号>     启用并连接
-/mcp disable <名称|序号>     停用（注销工具，保留配置）
-/mcp test <名称|序号>        仅测试连通性，不改动任何状态
-```
-
-新增/删除即时生效（热注册/注销工具），无需重启。工具命名空间扁平，**新增服务器若工具名与已注册工具冲突即拒绝**。
-
-**Agent 自助管理（受 D-SEC 安全门控制）**：Agent 可经 `McpTool` 调用 `listMcpServers`/`testMcpServer`/`addMcpServer`/`removeMcpServer`，但受 `application.yaml` 的 `mcp.agent-management` 门控：
-
-```yaml
-mcp:
-  agent-management:
-    allow-add: false        # 默认关：禁止 agent 添加
-    allow-remove: false     # 默认关：禁止 agent 移除
-    allowed-hosts: []       # 开启 add 后，仅允许这些 host 的 URL 服务器
-```
-
-- `list`/`test` 始终允许；`add`/`remove` 默认全部关闭。
-- 开启 `allow-add` 后，agent **只能添加 URL 类型**（拒绝 stdio/command），且 host 必须在 `allowed-hosts` 白名单内，并经**人工确认**方可添加。
-- 工具返回值对 `env`/`headers` **脱敏**（只显示键名，值为 `***`），避免凭据回显。
-
-> 旧的 `application.yaml` `mcp.servers` 配置仍兼容（首启导入），但推荐改用 `/mcp` 命令管理。
-
-### 6. 通道-Agent 打通
-
-通过 `ChannelAgentBridge` 将外部通道（Telegram、Discord 等）连接到 Agent，实现消息自动路由：
-
-```
-外部通道 (Telegram/Discord)
-    ↓ 用户消息
-ChannelAgentBridge
-    ↓ Msg(USER)
-PigAgent.stream(msg)
-    ↓ Agent 响应
-Channel.sendMessage(response)
-    ↓
-外部通道回复用户
-```
-
-配置示例（`application.yaml`）：
-
-```yaml
-channels:
-  telegram:
-    enabled: true
-    token: "your-telegram-bot-token"
-  discord:
-    enabled: true
-    token: "your-discord-bot-token"
-```
-
-启动后自动连接所有 `enabled: true` 的通道，无需手动干预。
-
-## 工具权限体系
-
-对标 Claude Code / opencode / hermes 的权限级别，为工具执行加一道统一安全门（`ToolPermissionHook`，在 `PreActingEvent` 逐次判定）。四种全局**模式**：
-
-
-| 模式          | 行为                                                   |
-| ------------- | ------------------------------------------------------ |
-| `plan`        | 只读：否决所有可变工具，agent 只产出计划               |
-| `ask`（默认） | 逐次确认可变工具（`y` 本次 / `a` 始终允许 / `N` 拒绝） |
-| `auto`        | 自动放行写文件/网络，仍确认执行 shell / MCP 管理       |
-| `bypass`      | 全部放行、无提示（完全信任 / 恢复旧行为）              |
-
-工具按风险分级（只读 / 写 / 执行 / 网络 / MCP 管理；未知工具按最严处理）。`a`（始终允许）会持久化到 `permissions.allowlist`（工具名或命令首 token）。运维命令：
-
-```
-/permission status                     查看当前模式与 allowlist
-/permission mode <plan|ask|auto|bypass>  切换模式
-/permission allow <命令键>              加入 allowlist（--tool 加工具名）
-/permission revoke <名称> | reset       移除 / 清空
-```
-
-配置（`application.yaml`）：
-
-```yaml
-span
-```
-
-> 说明：默认 `ask` 会改变旧行为（此前等同 bypass）。MCP 自助接入的 D-SEC 门保持不变（不重复弹窗）。渠道回合共享交互门（fail-safe，不会自动执行需确认的工具）；完整 per-origin `channel-mode` 为后续跟进。
-
-## 工具出口边界与凭据保护
-
-在权限门之外再加一道**出口边界**（约束"可见且获准的工具能触达什么"），并收敛凭据存取卫生：
-
-- **文件出口（凭据文件黑名单）**：`readFile`/`writeFile` 拒绝触碰工作区凭据文件（`models.json`/`mcp.json` 及 `.bak`）。这是**黑名单护凭据**、**不是工作目录沙箱**——本项目是终端编码助手，任意项目文件照常读写。路径规范化（`toRealPath`/`normalize`）使 `../` 与符号链接间接指向同样被拦。
-- **网络出口（SSRF 防护）**：`fetchUrl` 请求前解析目标 host 的**全部 IP**，任一命中回环/私网/链路本地（含 `169.254.169.254` 云 metadata）/IPv6 ULA/multicast 即拒；判定基于**解析 IP** 而非字面 host，故十进制 IP、`[::1]`、DNS 指向内网等绕过失效；保持不跟随重定向。可选主机白名单：
-
-  ```yaml
-  tools:
-    web:
-      allowed-hosts: []      # 非空时 fetchUrl 仅放行白名单内主机；空则仅施加 SSRF 私网守卫
-  ```
-- **凭据录入掩码**：`/model add`、`/model edit`、`/mcp add|edit`（敏感键 token/key/authorization/secret/password）与首启向导录入 API key 时不回显（无交互 console 时降级可见并告警）。
-- **凭据文件 0600**：`models.json`/`mcp.json` 在 POSIX 平台落盘后收敛为仅属主可读写（`rw-------`），非 POSIX 忽略。
-
-> 安全默认无需配置：黑名单随工作区根自动生效，SSRF 恒拒私网。凭据仍**明文存储**（依赖 `0600` + 目录权限保护），**请勿在共享主机使用**。
+> 凭据卫生：`/model`、`/mcp`、向导录入敏感值掩码不回显；`models.json`/`mcp.json` 落盘 POSIX `0600`。凭据仍**明文存储**（依赖 `0600` + 目录权限）——**请勿在共享主机使用**。
 
 ## 24 小时不间断运行
 
-Pig Agent 支持作为后台服务 24 小时运行，持续接收外部通道消息和执行定时任务。
-
-### 运行方式
+Pig Agent 可作为后台服务常驻，持续接收渠道消息、执行定时任务、无人值守替人办事。
 
 ```bash
-# 前台运行
-mvn exec:java -s  -pl pig-agent-cli
-
-# 后台运行（nohup）
-nohup mvn exec:java -s  -pl pig-agent-cli > pig-agent.log 2>&1 &
-
-# 使用 systemd（推荐生产环境）
-# 创建 /etc/systemd/system/pig-agent.service
+# 前台
+mvn exec:java -pl pig-agent-cli
+# 后台
+nohup mvn exec:java -pl pig-agent-cli > pig-agent.log 2>&1 &
+# 生产推荐 systemd（Restart=always 故障自愈）
 ```
 
-### systemd 服务配置示例
+**数字员工（自主 agent）**：一个带 `schedule`（cron 表达式）的 `AgentSpec` 即自主 agent——`TaskScheduler` 到点触发 `AgentRunner`，构建一次性隔离 agent 无人值守执行 `mandate`，写三段式晨报（`我做了 / 我发现 / 等你决定`）到 `workspace/reports/{date}/{id}.md`。安全：无 confirmer → 原生 `DONT_ASK` + ASK→DENY（fail-closed），只有 `commandAllowlist` 里的安全命令放行，其余被 `PermissionEngine` 拒并汇总到「等你决定」。运维：`/agent run <id>`、`/agent report`。样例：`docs/examples/nightwatch.md`。
 
-```ini
-[Unit]
-Description=Pig Agent - AI Agent Service
-After=network.target
-
-[Service]
-Type=simple
-User=pigagent
-WorkingDirectory=/opt/pig-agent
-ExecStart=/usr/bin/mvn exec:java -s -pl pig-agent-cli
-Environment=MIMO_API_KEY=your_key
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 持续运行能力
-
-
-| 能力       | 说明                                              |
-| ---------- | ------------------------------------------------- |
-| 通道常驻   | Telegram/Discord 通道持续监听消息，收到即响应     |
-| 定时任务   | TaskScheduler 后台执行 CRON/DELAYED 任务          |
-| MCP 长连接 | MCP Server 连接保持，工具随时可用                 |
-| 运行上限   | `maxIters` 约束**全部** agent（交互/渠道默认 40，自主默认 10），防推理-工具循环失控 |
-| 任务无损/容错 | 任务 `.md` 无损往返（CRON/DELAYED 重启后正确重排），坏文件跳过不崩启动 |
-| 配置容错   | 配置忽略未知字段，schema 漂移不再让整份配置回退默认               |
-| 优雅关闭   | 收到 SIGTERM 时依次关闭通道、任务调度器、MCP 连接 |
-| 自动重启   | 配合 systemd`Restart=always` 实现故障自愈         |
+| 能力 | 说明 |
+| ---- | ---- |
+| 渠道常驻 | Telegram/Discord/Slack/Webhook 等持续监听，收到即响应 |
+| 主动外呼 | `notifyUser` + 定时晨报/提醒，`OutreachGate` 防打扰（URGENT 例外） |
+| 定时任务 | `TaskScheduler` 后台执行 CRON/DELAYED，`.md` 无损往返、重启重排 |
+| MCP 长连接 | 连接保持、工具随时可用 |
+| 运行上限 | `maxIters` 约束全部 agent（交互/渠道 40，自主 10） |
+| 配置容错 | 忽略未知字段，schema 漂移不再让整份配置回退默认 |
+| 优雅关闭 | SIGTERM 时依次关闭渠道、任务调度器、MCP 连接 |
 
 ## 设计原则
 
-- **不可变数据** — `Task`、`ProviderCredentials` 等核心类型均为 record，通过 `withXxx()` 生成新实例
-- **接口抽象** — `ModelProtocol`、`Channel`、`TaskRepository` 等均为接口，方便替换实现
-- **Hook 扩展** — 通过 `Hook` 接口拦截 Agent 生命周期事件，无需修改核心代码
-- **配置驱动** — YAML 配置文件 + 变更监听器，支持运行时动态调整
+- **不可变数据** — `Task`、`Session`、`StoredModel`、`ProviderCredentials` 等均为 record，通过 `withXxx()` 生成新实例。
+- **设计模式优先** — Strategy / Factory / 枚举登记 / Template Method 等灵活运用，不面向功能硬编码。
+- **容错持久化** — 文件仓库遇单个坏文件跳过或备份，从不让整份列表崩溃。
+- **门面 + 适配器** — 前端只依赖 `AgentKernel` 门面；「加一个前端 = 加一个适配器」（REPL + Web 两个活例）。
+- **SPI 扩展** — 工具 / 中间件 / 协议 / 通道 / 插件 / 技能都靠 SPI 组合，不改核心。
+- **配置驱动** — YAML + 变更监听器，运行时动态调整。
 
 ## License
 
