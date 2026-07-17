@@ -12,14 +12,19 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Automatic in-memory context compression, upgraded to structured <em>context engineering</em>.
  *
- * <p>Operates ONLY on the agent's in-memory conversation ({@code agent.getMemory()}); the
- * persisted session history and the two-tier memory are never read or modified here. When the
- * estimated token usage crosses the threshold, the conversation is rewritten by a
+ * <p>Operates ONLY on the agent's in-memory conversation for a given session slot
+ * ({@code agent.getMemory(sessionId)}, the {@code (userId="pig", sessionId)} conversation the model
+ * actually sees); the persisted session history and the two-tier memory are never summarized here.
+ * The rewrite IS persisted back to that same slot right after it lands (see {@code compress}) — the
+ * native store reloads the slot at the start of every turn, so an unsaved in-memory rewrite would be
+ * silently discarded on the next turn. When the estimated token usage crosses the threshold, the
+ * conversation is rewritten by a
  * {@link ContextEngineer}: a three-tier {@link ContextBudget} (pinned / recent verbatim /
  * summarized), importance-based verbatim retention ({@link ImportanceScorer}), verbatim protection
  * of code/commands/IDs ({@link VerbatimGuard}), recursive summarization ({@link RecursiveSummarizer})
@@ -50,7 +55,10 @@ public final class CompressionService {
         String summarize(List<Msg> older);
     }
 
-    private final Supplier<Memory> memorySupplier;
+    /** Resolves the live {@link Memory} view for a session slot (session-scoped; may return null). */
+    private final Function<String, Memory> memoryFn;
+    /** Persists a session slot after its conversation is rewritten (no-op seam for tests). */
+    private final Consumer<String> persister;
     private final ContextEngineer engineer;
     private final CompressionLineageRecorder lineageRecorder;
     private final int budgetTokens;
@@ -75,26 +83,34 @@ public final class CompressionService {
     public CompressionService(AgentHolder agentHolder, int budgetTokens, double threshold,
                               boolean defaultEnabled, CompressionLineageRecorder lineageRecorder,
                               EngineeringOptions options) {
-        this(() -> {
+        this(sessionId -> {
                     PigAgent agent = agentHolder.get();
-                    return agent == null ? null : agent.getMemory();
+                    return agent == null ? null : agent.getMemory(sessionId);
+                },
+                sessionId -> {
+                    PigAgent agent = agentHolder.get();
+                    if (agent != null) {
+                        agent.saveTo(sessionId);
+                    }
                 },
                 new ModelSummarizer(agentHolder),
                 budgetTokens, threshold, defaultEnabled, lineageRecorder, options);
     }
 
     /** Injectable-seam constructor (default options) — package-private for unit tests. */
-    CompressionService(Supplier<Memory> memorySupplier, Summarizer summarizer, int budgetTokens,
-                       double threshold, boolean defaultEnabled, CompressionLineageRecorder lineageRecorder) {
-        this(memorySupplier, summarizer, budgetTokens, threshold, defaultEnabled, lineageRecorder,
+    CompressionService(Function<String, Memory> memoryFn, Consumer<String> persister, Summarizer summarizer,
+                       int budgetTokens, double threshold, boolean defaultEnabled,
+                       CompressionLineageRecorder lineageRecorder) {
+        this(memoryFn, persister, summarizer, budgetTokens, threshold, defaultEnabled, lineageRecorder,
                 EngineeringOptions.defaults());
     }
 
     /** Full injectable-seam constructor with engineering options — package-private for unit tests. */
-    CompressionService(Supplier<Memory> memorySupplier, Summarizer summarizer, int budgetTokens,
-                       double threshold, boolean defaultEnabled, CompressionLineageRecorder lineageRecorder,
-                       EngineeringOptions options) {
-        this.memorySupplier = memorySupplier;
+    CompressionService(Function<String, Memory> memoryFn, Consumer<String> persister, Summarizer summarizer,
+                       int budgetTokens, double threshold, boolean defaultEnabled,
+                       CompressionLineageRecorder lineageRecorder, EngineeringOptions options) {
+        this.memoryFn = memoryFn;
+        this.persister = persister == null ? sessionId -> { } : persister;
         EngineeringOptions opts = options == null ? EngineeringOptions.defaults() : options;
         this.engineer = ContextEngineer.withDefaults(summarizer, opts);
         this.lineageRecorder = lineageRecorder == null ? CompressionLineageRecorder.NOOP : lineageRecorder;
@@ -128,7 +144,7 @@ public final class CompressionService {
         if (sessionId == null || !isEnabled(sessionId)) {
             return;
         }
-        Memory memory = currentMemory();
+        Memory memory = currentMemory(sessionId);
         if (memory == null) {
             return;
         }
@@ -148,7 +164,7 @@ public final class CompressionService {
 
     /** Manual trigger (/compress now): compress regardless of threshold if there is anything to do. */
     public boolean compressNow(String sessionId) {
-        Memory memory = currentMemory();
+        Memory memory = currentMemory(sessionId);
         if (memory == null) {
             return false;
         }
@@ -160,7 +176,7 @@ public final class CompressionService {
     }
 
     public CompressionStatus status(String sessionId) {
-        Memory memory = currentMemory();
+        Memory memory = currentMemory(sessionId);
         List<Msg> messages = memory == null ? List.of() : memory.getMessages();
         if (messages == null) {
             messages = List.of();
@@ -191,6 +207,10 @@ public final class CompressionService {
             if (sessionId != null) {
                 lastCompressedAt.put(sessionId, System.currentTimeMillis());
                 lastCompressedSize.put(sessionId, memory.getMessages().size());
+                // Persist the rewritten slot immediately: the native store reloads the
+                // (pig, sessionId) slot at the start of the next turn, so an unsaved rewrite would be
+                // discarded and compression silently reverted. This is the load-bearing HIGH fix.
+                persist(sessionId);
                 recordLineage(sessionId);
             }
             return true;
@@ -214,8 +234,21 @@ public final class CompressionService {
         }
     }
 
-    private Memory currentMemory() {
-        return memorySupplier.get();
+    /**
+     * Persist the just-rewritten session slot so the native per-turn reload observes the compressed
+     * conversation. Fault-tolerant: a persist failure is logged and swallowed (the in-memory rewrite
+     * still stands for the current process) so it can never abort a successful compression.
+     */
+    private void persist(String sessionId) {
+        try {
+            persister.accept(sessionId);
+        } catch (Exception e) {
+            log.warn("Compression persist skipped for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    private Memory currentMemory(String sessionId) {
+        return memoryFn.apply(sessionId);
     }
 
     /** Default summarizer: spins up a throwaway agent on the live model to write the summary. */

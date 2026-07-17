@@ -1,10 +1,13 @@
 package io.pigagent.session;
 
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.model.ToolSchema;
+import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.AgentModelSwitcher;
@@ -43,6 +46,7 @@ class SessionManagerTest {
     private ConfigurationManager configManager;
     private final List<String> ensureModelCalls = new ArrayList<>();
     private final AtomicInteger memoryRebuilds = new AtomicInteger();
+    private AgentHolder holder;
     private SessionManager manager;
 
     @BeforeEach
@@ -50,11 +54,20 @@ class SessionManagerTest {
         sessionsDir = root.resolve("sessions");
         repository = new FileSystemSessionRepository(sessionsDir);
         configManager = new ConfigurationManager(root.resolve("application.yaml"));
-        AgentHolder holder = new AgentHolder(
-                PigAgent.builder().name("t").sysPrompt("s").model(stubModel()).build());
+        // A real PigAgent on a real on-disk JsonFileAgentStateStore so delete-removes-native-slot is
+        // exercised end-to-end; the stub model is never called (no turns are run).
+        holder = new AgentHolder(
+                PigAgent.builder().name("t").sysPrompt("s").model(stubModel())
+                        .stateStore(new JsonFileAgentStateStore(root.resolve("state")))
+                        .workspace(root).build());
         AgentModelSwitcher switcher = id -> ensureModelCalls.add(id);
         manager = new SessionManager(holder, switcher, repository, configManager, sessionsDir,
                 memoryRebuilds::incrementAndGet);
+    }
+
+    private static Msg user(String text) {
+        return Msg.builder().name("user").role(MsgRole.USER)
+                .content(TextBlock.builder().text(text).build()).build();
     }
 
     @Test
@@ -198,6 +211,35 @@ class SessionManagerTest {
 
         assertThat(manager.getCurrentSessionId()).isNotNull().isNotEqualTo(id);
         assertThat(manager.list()).hasSize(1);
+    }
+
+    @Test
+    void delete_removesNativeConversationStateSlot() {
+        manager.createBlank("keep"); // stays current; not deleted
+        Session target = repository.save(Session.create("target"));
+        PigAgent agent = holder.get();
+        // Seed and persist the (pig, target) native conversation slot.
+        agent.getMemory(target.id()).addMessage(user("hi"));
+        agent.saveTo(target.id());
+        assertThat(agent.loadIfExists(target.id())).isTrue();
+
+        manager.delete(List.of(target.id()));
+
+        // Both the native conversation slot AND the metadata sidecar are removed (no orphan on disk).
+        assertThat(agent.loadIfExists(target.id())).isFalse();
+        assertThat(repository.findById(target.id())).isEmpty();
+    }
+
+    @Test
+    void clearConversation_invokesSnapshotResetHook() {
+        List<String> resets = new ArrayList<>();
+        SessionManager mgr = new SessionManager(holder, id -> ensureModelCalls.add(id),
+                repository, configManager, sessionsDir, null, resets::add);
+        Session created = mgr.createBlank("c");
+
+        mgr.clearConversation(false);
+
+        assertThat(resets).containsExactly(created.id());
     }
 
     @Test

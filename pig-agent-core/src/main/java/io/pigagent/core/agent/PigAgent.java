@@ -203,6 +203,24 @@ public final class PigAgent {
     }
 
     /**
+     * Delete the persisted conversation slot ({@code (userId="pig", sessionId)}) from the underlying
+     * {@link AgentStateStore} — backs {@code /session delete}, which otherwise removes only the
+     * metadata sidecar and orphans the native state on disk (a privacy/disk leak). Fault-tolerant: a
+     * {@code null}/blank {@code sessionId} is a no-op and any store failure is logged and swallowed so
+     * a multi-session delete loop keeps going. Does not touch the default slot.
+     */
+    public void deleteConversation(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        try {
+            stateStore.delete(USER_ID, sessionId);
+        } catch (Exception e) {
+            log.warn("Failed to delete conversation state for session {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    /**
      * Copy one session's conversation into another session's slot and persist it (backs
      * {@code /session fork}). A no-op when source and target are the same. Only the conversation
      * context is copied; metadata (name/timestamps/lineage) is the sidecar's concern.

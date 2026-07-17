@@ -55,7 +55,9 @@ class ModelSummarizerToolAwareTest {
         // (everything but the last 6 messages) contains a tool-result payload.
         CapturingModel model = new CapturingModel();
         AgentHolder holder = new AgentHolder(PigAgent.builder().name("main").model(model).build());
-        Memory memory = holder.get().getMemory();
+        // Seed the (pig, sess-1) slot — the exact slot compressNow("sess-1") now operates on (the
+        // service is session-scoped; it no longer conflates this with the default slot).
+        Memory memory = holder.get().getMemory("sess-1");
         memory.addMessage(text(MsgRole.USER, "please run the build"));
         memory.addMessage(Msg.builder().name("shell").role(MsgRole.TOOL)
                 .content(ToolResultBlock.text("TOOLRESULTMARKER: BUILD SUCCESS, 42 tests")
