@@ -23,6 +23,12 @@ public final class ToolRiskClassifier {
             Map.entry("showChecklist", ToolRisk.READ_ONLY),
             // 延迟工具发现（deferred-tools）——只读：仅搜索/揭示元数据，不改任何状态
             Map.entry("tool_search", ToolRisk.READ_ONLY),
+            // 原生两层记忆检索（pa-memory-native）——只读：扫固化层/日志层、读行区间、搜历史转录
+            Map.entry("memory_search", ToolRisk.READ_ONLY),
+            Map.entry("memory_get", ToolRisk.READ_ONLY),
+            Map.entry("session_search", ToolRisk.READ_ONLY),
+            Map.entry("session_list", ToolRisk.READ_ONLY),
+            Map.entry("session_history", ToolRisk.READ_ONLY),
             // 内置计算插件（pig-agent-plugin-builtin）——纯计算工具，无 shell/网络/写盘
             Map.entry("currentDateTime", ToolRisk.READ_ONLY),
             Map.entry("convertTimezone", ToolRisk.READ_ONLY),
@@ -41,6 +47,8 @@ public final class ToolRiskClassifier {
             Map.entry("writeFile", ToolRisk.WRITE),
             Map.entry("createChecklist", ToolRisk.WRITE),
             Map.entry("completeItem", ToolRisk.WRITE),
+            // 原生记忆写（pa-memory-native）——memory_save 原子更新 MEMORY.md + 日志层
+            Map.entry("memory_save", ToolRisk.WRITE),
             // 执行
             Map.entry("executeCommand", ToolRisk.EXEC),
             // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）

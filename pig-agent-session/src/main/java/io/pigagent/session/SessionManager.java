@@ -3,12 +3,10 @@ package io.pigagent.session;
 import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.AgentModelSwitcher;
-import io.pigagent.core.memory.CompositeLongTermMemory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -20,64 +18,65 @@ import java.util.Optional;
  * activated, {@link AgentModelSwitcher#ensureModel(String)} makes the agent use that session's
  * bound model (or the global default), satisfying per-session temporary switching.
  *
- * <p><b>AgentScope 2.0 conversation state (av2 Phase 3).</b> The 1.x
- * {@code io.agentscope.core.session.Session}/{@code JsonSession} classes are removed; conversation
- * history now persists automatically through the native {@code AgentStateStore}, keyed by
- * {@code (userId="pig", sessionId)}. This manager no longer loads/clears the agent's conversation on
- * a switch — instead the active session id flows into the agent's per-turn
- * {@code call/stream} (via {@code PigAgent.stream(Msg, sessionId)}), and the
- * store auto-loads/saves the correct slot per turn. This manager keeps pig's differentiators as a
- * thin <em>metadata sidecar</em>: the {@link Session} record (name/timestamps/model binding/
- * compression lineage) via {@link SessionRepository}, plus the per-session temporary memory file.
- * Switching a session = save current → ensure the session's model → point the temp-memory tier at
- * the target → record the active id (the native store handles the conversation itself).
+ * <p><b>AgentScope 2.0 conversation state (av2 Phase 3).</b> Conversation history persists
+ * automatically through the native {@code AgentStateStore}, keyed by {@code (userId="pig",
+ * sessionId)}. This manager keeps pig's differentiators as a thin <em>metadata sidecar</em>: the
+ * {@link Session} record (name/timestamps/model binding/compression lineage) via
+ * {@link SessionRepository}. Switching a session = save current → ensure the session's model →
+ * record the active id (the native store loads/creates the conversation per turn).
+ *
+ * <p><b>Native two-layer memory (pa-memory-native).</b> Long-term memory is now the AgentScope 2.0
+ * native workspace-level {@code MEMORY.md} + daily ledger (retired: pig's self-built
+ * {@code CompositeLongTermMemory} two-tier and the per-session temp-memory tier). Durable facts are
+ * workspace-level and cross-session by construction, so this manager no longer swaps a session-tier
+ * memory on activation. {@code /memory on|off} maps to the top-level {@code memory-enabled} config
+ * flag and triggers an agent rebuild (via {@code memoryToggleHook}) so the native memory hooks/tools
+ * + MEMORY.md injection are turned on/off — off = no injection, no flush.
  */
 public final class SessionManager {
 
+    /** Legacy per-session temp-memory file (retired tier) — kept only for {@code --with-memory} cleanup. */
     private static final String TEMP_MEMORY_FILE = "temp-memory.md";
 
     private final AgentHolder agentHolder;
     private final AgentModelSwitcher modelSwitcher;
-    private final CompositeLongTermMemory memory;
     private final SessionRepository repository;
     private final ConfigurationManager configManager;
     private final Path sessionsDir;
-    private final SessionMemoryFactory sessionMemoryFactory;
+    private final Runnable memoryToggleHook;
 
     private String currentSessionId;
 
-    /** Backward-compatible constructor: uses the raw {@link SessionMemoryFactory#DEFAULT}. */
+    /** Convenience constructor with no memory-toggle rebuild hook (tests). */
     public SessionManager(AgentHolder agentHolder,
                           AgentModelSwitcher modelSwitcher,
-                          CompositeLongTermMemory memory,
                           SessionRepository repository,
                           ConfigurationManager configManager,
                           Path sessionsDir) {
-        this(agentHolder, modelSwitcher, memory, repository, configManager,
-                sessionsDir, SessionMemoryFactory.DEFAULT);
+        this(agentHolder, modelSwitcher, repository, configManager, sessionsDir, null);
     }
 
+    /**
+     * @param memoryToggleHook invoked after {@code /memory on|off} updates the config flag, to rebuild
+     *        the live agent(s) so the native memory hooks/tools + MEMORY.md injection reflect the new
+     *        state. {@code null} = no rebuild (tests / no wiring).
+     */
     public SessionManager(AgentHolder agentHolder,
                           AgentModelSwitcher modelSwitcher,
-                          CompositeLongTermMemory memory,
                           SessionRepository repository,
                           ConfigurationManager configManager,
                           Path sessionsDir,
-                          SessionMemoryFactory sessionMemoryFactory) {
+                          Runnable memoryToggleHook) {
         this.agentHolder = agentHolder;
         this.modelSwitcher = modelSwitcher;
-        this.memory = memory;
         this.repository = repository;
         this.configManager = configManager;
         this.sessionsDir = sessionsDir;
-        this.sessionMemoryFactory = sessionMemoryFactory == null
-                ? SessionMemoryFactory.DEFAULT : sessionMemoryFactory;
+        this.memoryToggleHook = memoryToggleHook;
     }
 
     /** Restore the last active session on startup, or create a default one. */
     public void initialize() {
-        memory.setEnabled(configManager.getConfig().isMemoryEnabled());
-
         String configured = configManager.getConfig().getCurrentSessionId();
         List<Session> all = repository.findAll();
 
@@ -97,9 +96,9 @@ public final class SessionManager {
         }
     }
 
-    /** Make the given session current: persist the previous conversation, ensure the right
-     * model is loaded, then point the temp-memory tier at this session. The conversation itself is
-     * restored automatically by the native state store on the next session-aware turn. */
+    /** Make the given session current: persist the previous conversation, then ensure the right
+     * model is loaded. The conversation itself is restored automatically by the native state store
+     * on the next session-aware turn; long-term memory is workspace-level (cross-session). */
     public void activate(String id) {
         if (currentSessionId != null) {
             saveCurrent();
@@ -109,7 +108,6 @@ public final class SessionManager {
 
         // No manual clear/load: the native AgentStateStore auto-loads the (pig, id) conversation
         // slot on the next session-aware call/stream (and auto-saves it after each turn).
-        memory.setSessionMemory(sessionMemoryFactory.create(tempMemoryPath(id)));
         currentSessionId = id;
         configManager.updateConfig(c -> c.setCurrentSessionId(id));
         touch(id);
@@ -140,7 +138,7 @@ public final class SessionManager {
         return created;
     }
 
-    /** Fork the current session: copy its conversation + temp memory + model binding. */
+    /** Fork the current session: copy its conversation + model binding. */
     public Session fork(String name) {
         if (currentSessionId == null) {
             return createBlank(name);
@@ -159,7 +157,6 @@ public final class SessionManager {
         forked = repository.save(forked);
         // Copy the source session's conversation slot into the fork's slot (native state store).
         agentHolder.get().copyConversation(currentSessionId, forked.id());
-        copyTempMemory(currentSessionId, forked.id());
 
         activate(forked.id());
         return forked;
@@ -173,7 +170,7 @@ public final class SessionManager {
                 .toList();
     }
 
-    /** Clear the current conversation; optionally also wipe this session's temp memory. */
+    /** Clear the current conversation; optionally also wipe this session's (legacy) temp-memory file. */
     public void clearConversation(boolean withTempMemory) {
         if (currentSessionId == null) {
             return;
@@ -237,14 +234,21 @@ public final class SessionManager {
                 .ifPresent(s -> repository.save(s.withName(Session.deriveName(text))));
     }
 
-    /** Toggle global memory reading/writing and persist the choice. */
+    /**
+     * Toggle native long-term memory and persist the choice ({@code /memory on|off}). Maps to the
+     * top-level {@code memory-enabled} config flag, then triggers an agent rebuild (via
+     * {@code memoryToggleHook}) so the native memory hooks/tools + MEMORY.md system-prompt injection
+     * are turned on/off — off means no injection and no flush.
+     */
     public void setMemoryEnabled(boolean enabled) {
-        memory.setEnabled(enabled);
         configManager.updateConfig(c -> c.setMemoryEnabled(enabled));
+        if (memoryToggleHook != null) {
+            memoryToggleHook.run();
+        }
     }
 
     public boolean isMemoryEnabled() {
-        return memory.isEnabled();
+        return configManager.getConfig().isMemoryEnabled();
     }
 
     public String getCurrentSessionId() {
@@ -275,18 +279,5 @@ public final class SessionManager {
 
     private Path tempMemoryPath(String id) {
         return sessionsDir.resolve(id).resolve(TEMP_MEMORY_FILE);
-    }
-
-    private void copyTempMemory(String fromId, String toId) {
-        Path src = tempMemoryPath(fromId);
-        if (!Files.exists(src)) {
-            return;
-        }
-        Path dst = tempMemoryPath(toId);
-        try {
-            Files.createDirectories(dst.getParent());
-            Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException ignored) {
-        }
     }
 }

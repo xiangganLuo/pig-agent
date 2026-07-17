@@ -9,7 +9,6 @@ import io.pigagent.config.ConfigurationManager;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.AgentModelSwitcher;
 import io.pigagent.core.agent.PigAgent;
-import io.pigagent.core.memory.CompositeLongTermMemory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,17 +20,18 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Offline behavioural coverage for the {@link SessionManager} orchestrator: session lifecycle
  * (initialize/activate/create/fork/delete/rename), the per-session model switch handshake
- * ({@link AgentModelSwitcher}), memory toggling and temp-memory file handling. Uses a real
- * {@link FileSystemSessionRepository} on a {@code @TempDir}, a real {@link PigAgent} on an
+ * ({@link AgentModelSwitcher}), and memory toggling ({@code memory-enabled} config + rebuild hook).
+ * Uses a real {@link FileSystemSessionRepository} on a {@code @TempDir}, a real {@link PigAgent} on an
  * in-memory {@code AgentStateStore} with a stub {@link Model} (never called), and a recording model
- * switcher — no network. Conversation state is exercised only through the native store (av2 Phase 3);
- * the metadata sidecar (name/timestamps/model/lineage) is what these assertions verify.
+ * switcher — no network. Long-term memory is now the AgentScope 2.0 native workspace-level tier
+ * ({@code pa-memory-native}); there is no session-tier temp memory to swap.
  */
 class SessionManagerTest {
 
@@ -41,8 +41,8 @@ class SessionManagerTest {
     private Path sessionsDir;
     private SessionRepository repository;
     private ConfigurationManager configManager;
-    private CompositeLongTermMemory memory;
     private final List<String> ensureModelCalls = new ArrayList<>();
+    private final AtomicInteger memoryRebuilds = new AtomicInteger();
     private SessionManager manager;
 
     @BeforeEach
@@ -50,12 +50,11 @@ class SessionManagerTest {
         sessionsDir = root.resolve("sessions");
         repository = new FileSystemSessionRepository(sessionsDir);
         configManager = new ConfigurationManager(root.resolve("application.yaml"));
-        memory = new CompositeLongTermMemory(null, true);
         AgentHolder holder = new AgentHolder(
                 PigAgent.builder().name("t").sysPrompt("s").model(stubModel()).build());
         AgentModelSwitcher switcher = id -> ensureModelCalls.add(id);
-        manager = new SessionManager(holder, switcher, memory, repository,
-                configManager, sessionsDir);
+        manager = new SessionManager(holder, switcher, repository, configManager, sessionsDir,
+                memoryRebuilds::incrementAndGet);
     }
 
     @Test
@@ -64,7 +63,7 @@ class SessionManagerTest {
 
         assertThat(manager.getCurrentSessionId()).isNotNull();
         assertThat(manager.list()).hasSize(1);
-        assertThat(memory.isEnabled()).isTrue(); // config default memory-enabled=true
+        assertThat(manager.isMemoryEnabled()).isTrue(); // config default memory-enabled=true
         assertThat(configManager.getConfig().getCurrentSessionId())
                 .isEqualTo(manager.getCurrentSessionId());
     }
@@ -202,20 +201,15 @@ class SessionManagerTest {
     }
 
     @Test
-    void fork_copiesModelBindingAndTempMemory() throws IOException {
+    void fork_copiesModelBinding() {
         manager.createBlank("src");
         manager.bindCurrentSessionModel("m-fork");
-        Path srcTemp = sessionsDir.resolve(manager.getCurrentSessionId()).resolve("temp-memory.md");
-        Files.createDirectories(srcTemp.getParent());
-        Files.writeString(srcTemp, "REMEMBER");
 
         Session forked = manager.fork("mine");
 
         assertThat(forked.name()).isEqualTo("mine");
         assertThat(forked.modelId()).isEqualTo("m-fork");
         assertThat(manager.getCurrentSessionId()).isEqualTo(forked.id());
-        Path forkTemp = sessionsDir.resolve(forked.id()).resolve("temp-memory.md");
-        assertThat(Files.readString(forkTemp)).isEqualTo("REMEMBER");
     }
 
     @Test
@@ -227,19 +221,20 @@ class SessionManagerTest {
     }
 
     @Test
-    void setMemoryEnabled_togglesAndPersists() {
+    void setMemoryEnabled_togglesConfig_andTriggersRebuild() {
         manager.setMemoryEnabled(false);
 
         assertThat(manager.isMemoryEnabled()).isFalse();
-        assertThat(memory.isEnabled()).isFalse();
         assertThat(configManager.getConfig().isMemoryEnabled()).isFalse();
+        assertThat(memoryRebuilds.get()).isEqualTo(1); // rebuild hook fired
 
         manager.setMemoryEnabled(true);
         assertThat(manager.isMemoryEnabled()).isTrue();
+        assertThat(memoryRebuilds.get()).isEqualTo(2);
     }
 
     @Test
-    void clearConversation_withTempMemory_deletesTempFile() throws IOException {
+    void clearConversation_withTempMemory_deletesLegacyTempFile() throws IOException {
         manager.createBlank("c");
         Path temp = sessionsDir.resolve(manager.getCurrentSessionId()).resolve("temp-memory.md");
         Files.createDirectories(temp.getParent());
@@ -248,18 +243,6 @@ class SessionManagerTest {
         manager.clearConversation(true);
 
         assertThat(Files.exists(temp)).isFalse();
-    }
-
-    @Test
-    void clearConversation_withoutTempMemory_keepsTempFile() throws IOException {
-        manager.createBlank("c");
-        Path temp = sessionsDir.resolve(manager.getCurrentSessionId()).resolve("temp-memory.md");
-        Files.createDirectories(temp.getParent());
-        Files.writeString(temp, "keep-me");
-
-        manager.clearConversation(false);
-
-        assertThat(Files.readString(temp)).isEqualTo("keep-me");
     }
 
     @Test

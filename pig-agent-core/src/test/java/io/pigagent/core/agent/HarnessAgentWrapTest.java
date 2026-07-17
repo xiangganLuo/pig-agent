@@ -3,7 +3,6 @@ package io.pigagent.core.agent;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
-import io.agentscope.core.memory.LongTermMemory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
@@ -15,26 +14,23 @@ import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.HarnessAgent;
-import io.pigagent.core.memory.CompositeLongTermMemory;
-import io.pigagent.core.memory.EphemeralMemoryMiddleware;
+import io.agentscope.harness.agent.memory.MemoryConfig;
+import io.pigagent.core.memory.NativeMemoryContextMiddleware;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * av2 Phase 5b — proves {@link PigAgent} now wraps a {@link HarnessAgent} <em>vehicle</em> that
- * carries pig's toolkit + middlewares unchanged (extending the throwaway HarnessAgent spike into a
- * production-wiring regression), and that per-session conversation state still persists + restores
- * through the wrap via pig's shared {@code AgentStateStore} (the arbiter that native session
- * persistence being disabled leaves pig's store as the single, working persistence mechanism).
+ * av2 Phase 5b + pa-memory-native — proves {@link PigAgent} wraps a {@link HarnessAgent} <em>vehicle</em>
+ * that carries pig's toolkit + middlewares unchanged, that native long-term memory ({@code .memory(...)})
+ * wires the pig {@link NativeMemoryContextMiddleware} into the delegate chain, and that per-session
+ * conversation state persists + restores through the wrap via pig's shared {@code AgentStateStore}.
  */
 class HarnessAgentWrapTest {
 
@@ -60,16 +56,6 @@ class HarnessAgentWrapTest {
         }
     }
 
-    /** A spy long-term memory recording whether the ephemeral-memory middleware fired. */
-    static final class SpyMemory implements LongTermMemory {
-        final AtomicInteger retrieveCalls = new AtomicInteger();
-        @Override public Mono<Void> record(List<Msg> messages) { return Mono.empty(); }
-        @Override public Mono<String> retrieve(Msg query) {
-            retrieveCalls.incrementAndGet();
-            return Mono.just("MEMTOKEN");
-        }
-    }
-
     private static Msg user(String text) {
         return Msg.builder().name("user").role(MsgRole.USER)
                 .content(TextBlock.builder().text(text).build()).build();
@@ -83,7 +69,7 @@ class HarnessAgentWrapTest {
         PigAgent agent = PigAgent.builder()
                 .name("wrap").sysPrompt("sp").model(new TextOnlyModel())
                 .toolkit(toolkit)
-                .longTermMemory(new CompositeLongTermMemory(new SpyMemory(), true))
+                .memory(MemoryConfig.defaults())
                 .workspace(ws)
                 .build();
 
@@ -94,17 +80,16 @@ class HarnessAgentWrapTest {
         assertThat(delegate).isSameAs(vehicle.getDelegate());
         // Pig's custom toolkit tool is visible on the delegate.
         assertThat(delegate.getToolkit().getToolNames()).contains(TOOL_NAME);
-        // Pig's ephemeral-memory middleware is wired into the delegate's chain.
-        assertThat(delegate.getMiddlewares()).anyMatch(m -> m instanceof EphemeralMemoryMiddleware);
+        // pa-memory-native: pig's MEMORY.md system-prompt injector is wired into the delegate's chain.
+        assertThat(delegate.getMiddlewares()).anyMatch(m -> m instanceof NativeMemoryContextMiddleware);
         agent.close();
     }
 
     @Test
-    void streamRunsThroughVehicle_andEphemeralMemoryMiddlewareFires(@TempDir Path ws) {
-        SpyMemory memory = new SpyMemory();
+    void streamRunsThroughVehicle_withNativeMemoryEnabled(@TempDir Path ws) {
         PigAgent agent = PigAgent.builder()
                 .name("wrap").sysPrompt("sp").model(new TextOnlyModel())
-                .longTermMemory(new CompositeLongTermMemory(memory, true))
+                .memory(MemoryConfig.defaults())
                 .workspace(ws)
                 .build();
 
@@ -115,8 +100,19 @@ class HarnessAgentWrapTest {
                 .map(e -> ((TextBlockDeltaEvent) e).getDelta())
                 .reduce("", (a, b) -> a + b);
         assertThat(text).contains("ok from vehicle");
-        assertThat(memory.retrieveCalls.get())
-                .as("the ephemeral-memory middleware ran on the vehicle turn").isGreaterThanOrEqualTo(1);
+        agent.close();
+    }
+
+    @Test
+    void memoryDisabledByDefault_noNativeMemoryMiddleware(@TempDir Path ws) {
+        PigAgent agent = PigAgent.builder()
+                .name("wrap").sysPrompt("sp").model(new TextOnlyModel())
+                .workspace(ws)
+                .build();
+
+        assertThat(agent.getReactAgent().getMiddlewares())
+                .as("no memory config → no MEMORY.md injector (byte-for-byte pre-feature behaviour)")
+                .noneMatch(m -> m instanceof NativeMemoryContextMiddleware);
         agent.close();
     }
 

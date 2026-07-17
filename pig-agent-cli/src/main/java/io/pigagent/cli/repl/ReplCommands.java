@@ -104,7 +104,7 @@ public final class ReplCommands {
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
             entry(t, "/permission <action>", "Tool permissions (status|mode|allow|revoke|reset|list)");
             entry(t, "/plan <action>", "Native Plan Mode (enter|exit|status)");
-            entry(t, "/memory <on|off>", "Toggle/show global + session memory loading");
+            entry(t, "/memory <on|off>", "Toggle/show native long-term memory (MEMORY.md)");
             entry(t, "/compress <action>", "Context compression (now|status|off|on)");
             entry(t, "/notify <action>", "Proactive outreach (status|test)");
             entry(t, "/status", "Show agent status summary");
@@ -708,7 +708,7 @@ public final class ReplCommands {
         }
     }
 
-    @Command(name = "/memory", description = "Toggle or show global + session memory loading")
+    @Command(name = "/memory", description = "Toggle or show native long-term memory (MEMORY.md)")
     static final class MemoryCommand implements Runnable {
         private final ReplContext ctx;
 
@@ -727,11 +727,11 @@ public final class ReplCommands {
             switch (act) {
                 case "on" -> {
                     sm.setMemoryEnabled(true);
-                    Ansi.println(t, Ansi.success("Memory enabled."));
+                    Ansi.println(t, Ansi.success("Memory enabled (native MEMORY.md flush + injection)."));
                 }
                 case "off" -> {
                     sm.setMemoryEnabled(false);
-                    Ansi.println(t, Ansi.warn("Memory disabled (global + session memory will not be loaded)."));
+                    Ansi.println(t, Ansi.warn("Memory disabled (no MEMORY.md injection, no flush)."));
                 }
                 case "status" -> Ansi.println(t, Ansi.info("Memory: ")
                         + (sm.isMemoryEnabled() ? Ansi.success("on") : Ansi.warn("off")));

@@ -33,7 +33,26 @@ pig 记忆现状（代码事实）：`CompositeLongTermMemory`（`io.agentscope.
 - **D6 — 保留 A5、正交**：继续 `disableCompaction()`；pig A5 作用内存对话，原生记忆作用长期落盘，二者不冲突（`MemoryConfig` 与 `CompactionConfig` 为独立 builder 项）。
 - **D7 — `/memory` 开关映射**：`/memory off` → `flushTrigger(NEVER)` + 不注入（或按 javap 结果用 `disableMemoryHooks` 语义），`retrieve`/flush 均 no-op；`/memory on` 恢复。对用户可见语义（记忆参与/关闭）不变。
 - **D8 — 旧数据迁移（设计 OD9，待用户确认）**：默认一次性把旧 `workspace/context/memory.md` 迁入 `MEMORY.md`（幂等、带备份 `.bak`、失败降级为「新库从空开始、旧文件只读保留」，沿用 2.0 session 迁移的容错做法）；会话层 `temp-memory.md` 不迁。
-- **D9 — 退役兼容 shim**：若 `pig-agent-core`/session 别处仍依赖 `LongTermMemory` 读记忆，提供一个实现 `LongTermMemory` 的薄 shim 转调原生（或改调 `memory_search`），避免大爆炸式改动；否则直接删除。
+- **D9 — 退役兼容 shim**：若 `pig-agent-core`/session 别处仍依赖 `LongTermMemory` 读记忆，提供一个实现 `LongTermMemory` 的薄 shim 转调原生（或改调 `memory_search`），避免大爆炸式改动；否则直接删除。**实现结论**：无需 shim——`LongTermMemory` 依赖只有 pig 自建栈（`CompositeLongTermMemory`/`FileSystemLongTermMemory`/`CachingLongTermMemory`/`EphemeralMemoryMiddleware`/A4）本身与其单测，全部随本变更删除；session 层改用新的 `MemoryToggle`（见附录 B）。直接删除，不留 shim。
+
+## 附录 B — Task 0 javap 验证结果（真 2.0 jar，编码前）
+
+> 本机 m2 **确有** 2.0 jar + sources：`agentscope-harness-2.0.0.jar`(+sources)、`agentscope-core-2.0.0.jar`(+sources)、五个 `agentscope-extensions-model-*-2.0.0.jar`。以下经 `javap` + sources 交叉核对，**与文档假设一致，无实质性偏差** → 按计划推进。
+
+**B1 `io.agentscope.harness.agent.memory.MemoryConfig`（+ `Builder`）** — 字段/默认与文档一致：
+- `Builder`: `model(io.agentscope.core.model.Model)`（**接受 Model 实例，正是 OD8 所需**——pig 用自有 `ModelManager.modelFor` 注入 Doubao lite）、`model(String)`（走 `ModelRegistry.resolve`，pig 不用）、`flushPrompt(String)`、`consolidationPrompt(String)`（须含 2 个 `%d`）、`consolidationMaxTokens(int)`、`consolidationMinGap(Duration)`、`dailyFileRetentionDays(int)`、`sessionRetentionDays(int)`、`flushTrigger(FlushTrigger)`、`build()`；`MemoryConfig.defaults()`。
+- 默认：`DEFAULT_CONSOLIDATION_MAX_TOKENS=4000`、`DEFAULT_CONSOLIDATION_MIN_GAP=Duration.ofMinutes(30)`、`DEFAULT_DAILY_FILE_RETENTION_DAYS=90`、`DEFAULT_SESSION_RETENTION_DAYS=180`、`flushTrigger` 默认 `FlushTrigger.always()`；`model()` 默认 `null` → 用 agent 主模型。
+- `FlushTrigger`：`always()`/`never()`/`throttled(Duration)`（`Duration.ZERO`→`always`）；`FlushMode{ALWAYS,NEVER,THROTTLED}`。
+
+**B2 `HarnessAgent.Builder`** — `memory(MemoryConfig)`、`disableMemoryHooks()`、`disableMemoryTools()`、`workspace(Path)` 均确认。`build()` 内（`HarnessAgent.java:2132-2166`）：`Model memoryModel = memoryConfig.model()!=null ? memoryConfig.model() : model;` `if (memoryModel!=null && !disableMemoryHooks)` → 装 `MemoryFlushMiddleware`（flush，写日志层）+ `MemoryMaintenanceMiddleware`（consolidation，重写 `MEMORY.md`）；`if (!disableMemoryTools)`（`:2236-2240`）→ 注册 `memory_search`/`memory_get`/`memory_save`/`session_search`(+`session_list`/`session_history`)。**记忆钩子/工具装到 `agentToolkit = this.toolkit.copy()`（`:1959`）——即 pig 原 toolkit 的副本，故原生记忆工具不经 pig `ToolContractGuard` 包裹、也不入 pig 权限上下文的 tool-names（无 per-tool 规则→走 mode 默认；均为记忆文件读写，安全）**。
+
+**B3 记忆工具签名/工具名**（javap + sources）：`MemorySearchTool.memorySearch(RuntimeContext, String)` → `@Tool name="memory_search" readOnly=true`（关键词，扫 `listMemoryFilePaths`）；`MemoryGetTool.memoryGet(RuntimeContext, path, startLine, endLine)` → `memory_get`；`MemorySaveTool.memorySave(RuntimeContext, content)` → `memory_save`（**纯文件 append，无 LLM**：`appendUtf8WorkspaceRelative(rc, MEMORY.md, ...)` + 日志层 `memory/YYYY-MM-DD.md`）；`SessionSearchTool` → `session_search`/`session_list`/`session_history`。工具均为反射 `@Tool`（非 `ToolBase`）。
+
+**B4 落盘布局**（`WorkspaceConstants`）：`MEMORY_MD="MEMORY.md"`（工作区根）、`MEMORY_DIR="memory"`（日志层 `memory/YYYY-MM-DD.md`）；**工作区级、非按会话**——`memorySave(rcA)` 写、`memorySearch(rcB)` 读命中同一 `MEMORY.md`，即跨会话修复点。这使**确定性离线测试**成立：走真 `WorkspaceManager` + 原生 `MemorySave/SearchTool`（无 LLM），验证会话 A 写、会话 B 读召回。
+
+**B5 注入路径的关键发现（对计划的调整，已按 Task 0 指示记录）**：原生把 `MEMORY.md` 注入 system prompt 的**唯一路径是 `WorkspaceContextMiddleware`（`onSystemPrompt`），仅受 `!disableWorkspaceContext` 开关**（与记忆钩子无关）。但该中间件同时注入一大段 workspace/session/guidance 文本，其 `GUIDANCE_TEMPLATE`/workspace 段**引用原生工具名 `read_file`/`grep`/`glob`/`write_file`/`edit_file`——pig 并不注册这些（pig 用 `readFile`/`writeFile`/`listDirectory`/`executeCommand`）**，整体开启会向模型注入「不存在工具」的指引=质量回归。→ **调整**：pig **保留 `disableWorkspaceContext()`**（继续自控 system prompt），**采用原生存储（flush/consolidation 钩子 + memory 工具全开、写 `MEMORY.md`/日志层）**，但**注入由 pig 自有极简中间件 `NativeMemoryContextMiddleware.onSystemPrompt` 完成**——只把原生 `MEMORY.md` 内容追加进 system prompt（OD2-A 的忠实实现：会话内稳定、consolidation 后偶发一次失效），不带原生的错误工具指引。存储全原生、仅注入格式化归 pig，符合北极星与 spec「固化层为注入来源」。
+
+**B6 `/memory on|off` 语义映射**：`flushTrigger` 在 build 时固定、无法运行时改；故 `/memory` 切换 = 更新 `memory-enabled` 配置 + **重建 interactive/channel agent**（复用 `/mcp` 变更同款重建回调）。重建时按当前 `memory-enabled` 决定：开 → 传非 null `MemoryConfig`（记忆钩子/工具 + 注入中间件全上）；关 → 传 `null`（`disableMemoryHooks/Tools` + 无注入中间件）= 退役前的禁用态，**关闭即不注入、不 flush**（满足 spec）。
 
 ## Risks / Trade-offs
 
