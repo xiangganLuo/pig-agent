@@ -7,8 +7,10 @@ import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.permission.PermissionBehavior;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionMode;
+import io.agentscope.core.permission.PermissionRule;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.InMemoryAgentStateStore;
@@ -265,6 +267,78 @@ public final class PigAgent {
      */
     public void setPermissionMode(PermissionMode nativeMode, String sessionId) {
         harness.setPermissionMode(contextFor(sessionId), nativeMode);
+    }
+
+    /** {@code source} tag for the ALLOW rule an "always allow" (user pick {@code a}) writes. */
+    private static final String ALWAYS_ALLOW_SOURCE = "user:always";
+
+    /**
+     * Persist an "always allow" (user picked {@code a} at an ASK prompt) for one tool on one session,
+     * effective from the <em>next</em> turn (change {@code permission-always-allow-persist}).
+     *
+     * <p><b>Why this is needed.</b> Native {@code applyConfirmResults} adds an accepted ALLOW rule only
+     * to the in-flight invocation's engine — it never writes back to {@code AgentState.permissionContext}
+     * — and pig runs each user turn as a separate {@code stream()} that reconstructs the engine from the
+     * persisted slot context, so the choice is lost next turn.
+     *
+     * <p><b>Mechanism (session-scoped ASK→ALLOW swap).</b> On the session slot's persisted context we
+     * <em>remove that one tool's ASK rule and add an ALLOW rule</em> ({@code deny>ask>allow}: a retained
+     * ASK rule would shadow the ALLOW, so both halves are required). Every other tool's ASK rule is left
+     * intact (their first-ask is preserved) and deny rules are copied verbatim (never relaxed). We then
+     * refresh the per-slot permission-engine cache via {@link ReActAgent#setPermissionMode} (same mode —
+     * it does the {@code permissionEngineCache.put(...)} and persists the slot). Scope is this one
+     * session; cross-session / cross-restart persistence is the caller's config-allowlist concern.
+     * Idempotent: repeated calls yield exactly one {@code user:always} ALLOW and no ASK for the tool.
+     * Fault-tolerant: any failure is logged and swallowed (never breaks the turn).
+     *
+     * @param sessionId the pig session id (the current REPL session)
+     * @param toolName  the tool the user chose to always allow
+     */
+    public void allowToolForSession(String sessionId, String toolName) {
+        if (toolName == null || toolName.isBlank()) {
+            return;
+        }
+        try {
+            AgentState state = reactAgent.getAgentState(USER_ID, sessionId);
+            PermissionContextState updated = withToolAlwaysAllowed(state.getPermissionContext(), toolName);
+            state.setPermissionContext(updated);
+            // Refresh the per-slot engine cache (ReActAgent.permissionEngineCache is computeIfAbsent) and
+            // persist: setPermissionMode(sameMode) re-reads the just-set context (withMode preserves rules),
+            // does permissionEngineCache.put(...) and saveAgentState — so the NEXT turn honors the ALLOW.
+            reactAgent.setPermissionMode(USER_ID, sessionId, updated.getMode());
+        } catch (RuntimeException e) {
+            log.warn("Failed to persist always-allow for tool '{}' on session '{}': {}",
+                    toolName, sessionId, e.getMessage());
+        }
+    }
+
+    /**
+     * Rebuild {@code cur} with {@code toolName} switched from ASK to ALLOW (see
+     * {@link #allowToolForSession}). Copies mode + working dirs + allow/deny rules verbatim, copies all
+     * ASK rules <em>except</em> {@code toolName}'s, drops any prior {@code user:always} ALLOW for the tool
+     * (idempotency — no stacking), then adds exactly one {@code user:always} ALLOW for it. A {@code null}
+     * {@code cur} yields a minimal {@code DEFAULT} context carrying just the ALLOW.
+     */
+    private static PermissionContextState withToolAlwaysAllowed(PermissionContextState cur, String toolName) {
+        PermissionContextState.Builder b = PermissionContextState.builder()
+                .mode(cur == null ? PermissionMode.DEFAULT : cur.getMode());
+        if (cur != null) {
+            cur.getWorkingDirectories().forEach(b::addWorkingDirectory);
+            cur.getAllowRules().forEach((n, rs) -> rs.forEach(r -> {
+                if (n.equals(toolName) && ALWAYS_ALLOW_SOURCE.equals(r.source())) {
+                    return; // drop a prior user:always ALLOW so repeats don't stack (idempotent)
+                }
+                b.addAllowRule(n, r);
+            }));
+            cur.getDenyRules().forEach((n, rs) -> rs.forEach(r -> b.addDenyRule(n, r)));
+            cur.getAskRules().forEach((n, rs) -> {
+                if (!n.equals(toolName)) { // remove ONLY this tool's ASK rule (others keep their first-ask)
+                    rs.forEach(r -> b.addAskRule(n, r));
+                }
+            });
+        }
+        b.addAllowRule(toolName, new PermissionRule(toolName, null, PermissionBehavior.ALLOW, ALWAYS_ALLOW_SOURCE));
+        return b.build();
     }
 
     /**
