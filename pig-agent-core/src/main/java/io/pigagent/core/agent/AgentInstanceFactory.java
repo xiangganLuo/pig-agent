@@ -66,6 +66,7 @@ public final class AgentInstanceFactory {
     private final Path workspace; // nullable → PigAgent uses a shared temp workspace (av2 5b)
     private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
     private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
+    private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, LongTermMemory longTermMemory) {
@@ -129,6 +130,22 @@ public final class AgentInstanceFactory {
                                 int maxRetries,
                                 Path workspace, ToolResultEvictionConfig toolResultEviction,
                                 boolean subagentsEnabled) {
+        this(models, toolkits, middlewares, longTermMemory, stateStore, permissionContexts, maxRetries,
+                workspace, toolResultEviction, subagentsEnabled, PlanModeSettings.disabled());
+    }
+
+    /**
+     * @param planMode native Plan Mode settings applied to each per-agent (peer) instance (av2).
+     *        Interactive peers get Plan Mode when {@code enabled} so {@code /plan} works on whichever
+     *        peer is active; {@link PlanModeSettings#disabled()} (or {@code null}) keeps it off.
+     */
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                MiddlewareProvider middlewares, LongTermMemory longTermMemory,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries,
+                                Path workspace, ToolResultEvictionConfig toolResultEviction,
+                                boolean subagentsEnabled, PlanModeSettings planMode) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
@@ -139,6 +156,7 @@ public final class AgentInstanceFactory {
         this.workspace = workspace;
         this.toolResultEviction = toolResultEviction;
         this.subagentsEnabled = subagentsEnabled;
+        this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -158,6 +176,7 @@ public final class AgentInstanceFactory {
                 .workspace(workspace)
                 .toolResultEviction(toolResultEviction)
                 .subagents(subagentsEnabled)
+                .planMode(planMode)
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

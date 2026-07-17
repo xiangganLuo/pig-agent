@@ -1103,6 +1103,152 @@ through the production `CommandPermissionTool → GuardedAgentTool` chain + a re
 5 skipped** (1014 Phase-6a baseline **+20**: `GuardedToolPermissionTest` 2, `CommandPermissionToolTest` 7,
 `SubagentPermissionsTest` 8, `CommandKeysTest` +2, `PermissionContextFactoryTest` +1; the reused
 `SubagentDelegationTest` gap test was rewritten in place). `mvn -q -pl pig-agent-cli -am compile` green.
+
+## 16. Plan Mode execution log (branch `av2/20260717-plan-mode`)
+
+Adopt AgentScope 2.0's **native Plan Mode** ("think read-only → write `PLAN.md` → HITL-approve → execute")
+as a first-class pig capability, integrated with pig's UX. The headline finding: it drops in with **zero
+per-tool changes** because native enforcement keys off `AgentTool.isReadOnly()`, which pig's tools already
+report correctly.
+
+### Enable design (javap-grounded, `agentscope-harness-2.0.0`)
+
+Plan Mode is a `HarnessAgent`-only feature, so it rides the existing Phase-5b vehicle. `PigAgent.Builder`
+gained a `planMode(PlanModeSettings)` knob; when `enabled`, `build()` calls the three native builder
+methods on the vehicle:
+
+- `HarnessAgent$Builder.enablePlanMode()` / `enablePlanMode(boolean)` — installs the plan trio +
+  `PlanModeMiddleware`.
+- `HarnessAgent$Builder.planFileDirectory(String)` — plan-file root (workspace-relative; default `plans`).
+- `HarnessAgent$Builder.allowShellInPlanMode(boolean)` — opt-in shell during plan (default false).
+
+Runtime API on the instance (javap-confirmed): `HarnessAgent.enterPlanMode(RuntimeContext)` /
+`exitPlanMode(RuntimeContext)` / `isPlanModeActive(RuntimeContext)` (+ `(String userId, String sessionId)`
+overloads). `PigAgent` exposes session-keyed `enterPlanMode/exitPlanMode/isPlanModeActive(String sessionId)`
+delegating through `contextFor(sessionId)` (mirrors `setPermissionMode`). **Gotcha (javap-verified by a
+failing test):** unlike `call`/`stream` (which resolve `RuntimeContext.empty()`), the plan methods route
+through `getAgentState(userId, sessionId)` which requires a **non-null sessionId** — the REPL always supplies
+`SessionManager.getCurrentSessionId()`, so this is a non-issue in production and the `/plan` command +
+status-badge reads are wrapped in try/catch (degrade to "inactive").
+
+**How read-only is enforced (the crux, javap-decompiled).** `PlanModeMiddleware.onActing` permits a tool iff
+`ALWAYS_ALLOWED.contains(name)` (`plan_enter`/`plan_write`/`plan_exit`/`todo_write`) `||`
+`additionalAllowed.contains(name)` (`execute` only when `allowShellInPlanMode`) `||`
+`readOnlyResolver.test(name)`. The builder wires the resolver as a lambda over the (copied) toolkit:
+`name -> toolkit.getTool(name).isReadOnly()`. So Plan Mode enforces read-only **per tool's
+`AgentTool.isReadOnly()`** — and pig already declares `@Tool(readOnly = true)` on its read-only tools
+(`readFile`/`listDirectory`/`listSkills`/`loadSkill`/`tool_search`/compute tools/`mcp` list+test) while
+mutating tools default `false` (`writeFile`/`executeCommand`/`webSearch`/`fetchUrl`/…), and
+`GuardedAgentTool` **snapshots `delegate.isReadOnly()`**. Result: read-only pig tools pass, mutating pig
+tools are denied, **no per-tool change**. `HarnessAgent$Builder.toolkit(Toolkit)` **copies** the toolkit
+(`Toolkit.copy()`) and registers the plan trio into that copy before building the delegate — so a model-switch
+rebuild never duplicate-registers into pig's shared toolkit, and pig's per-agent `Toolkit.copy()` chain is
+unaffected.
+
+### `/plan` UX + config
+
+Config `plan-mode` block (`PigAgentConfig.PlanModeConfig`, all optional/default-safe): `enabled`
+(default **false**), `plan-dir` (default `plans`), `allow-shell` (default false). `AgentBootstrap` maps it to
+a `PlanModeSettings` value object and threads it into the **interactive** `AgentFactory` + the per-agent
+`AgentInstanceFactory` (so `/plan` works on any switchable peer). The **channel + autonomous** tracks stay
+OFF by construction (no confirmer → a `plan_exit` HITL would fail-closed and strand the run).
+
+`/plan enter|exit|status` (`PlanCommand`, mirrors `/permission`'s "act on the active agent via the holder"
+pattern — no kernel change): `enter` is **gated on `plan-mode.enabled`** (with Plan Mode off the vehicle has
+no plan tools + no enforcer, so entering would be an unenforced flag flip — the command refuses and points at
+the config); `status` shows enabled/active/plan-dir; `exit` is the operator's own exit (the operator IS the
+human approver, so it does **not** trigger HITL — that gate is reserved for the model's `plan_exit` tool).
+
+**Default OFF rationale.** Enabling installs the plan trio + `PlanModeMiddleware` (whose `onSystemPrompt`
+appends a plan hint), which changes the byte-stable system prompt. Keeping it OFF by default = zero behavior
+change / prefix-cache stable, and is the honest posture given the open question of whether a *small* model
+reliably self-drives `plan_enter`/`plan_write` (needs a live-model IT — see Limitations). Flipping to ON is a
+one-line config change once validated.
+
+### HITL exit — reuses the existing native-permission confirm path
+
+`PlanModeTools$PlanExitTool.checkPermissions(...)` returns `PermissionDecision.ask(...)`, so the model's
+`plan_exit` surfaces as a **`RequireUserConfirmEvent`** — exactly what `AgentRepl.renderTurn`/`confirm`
+already handle. So HITL exit works for free through the existing confirm/resume loop; the only addition is a
+plan-aware prompt ("Approve the plan and exit Plan Mode to begin execution? (y=approve / N=stay in plan)").
+Approve → resume with `ConfirmResult(true)` → `plan_exit` runs, mode flips to build. Reject → resume with
+`ConfirmResult(false)` → stays in plan mode. Both proven offline in `PlanModeTest`.
+
+### EXPLORE (`/permission mode plan`) vs native Plan Mode — reconciliation
+
+Two **orthogonal** read-only mechanisms that compose coherently:
+
+- `/permission mode plan` → native `PermissionMode.EXPLORE` (permission-engine read-only: every mutating tool
+  DENY via per-tool rules). A quick, permission-layer toggle.
+- `/plan enter` → native Plan Mode (structured plan file + HITL exit; read-only enforced independently by
+  `PlanModeMiddleware`).
+
+Entering/exiting Plan Mode does **not** change the permission mode, and vice versa — no conflicting states.
+Plan-mode read-only holds **regardless** of the permission mode (the middleware wraps `onActing` and denies
+before the permission engine even runs — so even under BYPASS, the plan phase stays read-only). After an
+approved `plan_exit`, execution proceeds under whatever permission mode is active (a user who *also* set
+`/permission mode plan` would still be read-only via EXPLORE — the two are independent knobs, documented).
+
+### CC-REPL indicator
+
+`StatusLine` gained a `planActive` overload appending a distinct `⏸ PLAN` badge (warn-colored) when the
+current session is plan-active; `AgentRepl` computes it per-prompt via `agentHolder.get().isPlanModeActive(sid)`
+(guarded → never breaks the prompt). The written plan renders through the existing tool-call formatter
+(`⏺ plan_write / └ …`); the HITL exit prompt is the plan-aware confirm line above. All existing CC-REPL
+rendering is preserved.
+
+### Subagent plan inheritance — still holds (moot by construction)
+
+pig's leaf children (`PigAgent.Builder.buildLeafChild`) deliberately do **not** enable Plan Mode. This is safe
+because `agent_spawn` is **not** read-only → it is denied by `PlanModeMiddleware` during the plan phase, so a
+subagent **cannot be spawned while the parent is plan-active** — the "child doesn't inherit plan mode" gap
+noted in the upstream doc is therefore moot for pig. (Children still inherit the parent's DENY permission
+context via `SubagentPermissions.deriveChildContext`, unchanged from Phase-6b.)
+
+### Design-pattern notes
+
+`PlanModeSettings` (immutable value object, `disabled()` baseline + blank-dir normalization) carries the
+three knobs so the factories don't grow three loose primitives. `PlanCommand` follows the existing
+picocli-subcommand + `ReplContext` pattern. No new SPI/abstraction invented — Plan Mode is a native harness
+feature; pig only wires + surfaces it.
+
+### javap signatures used (agentscope-harness-2.0.0)
+
+```
+HarnessAgent$Builder.enablePlanMode() : HarnessAgent$Builder
+HarnessAgent$Builder.enablePlanMode(boolean) : HarnessAgent$Builder
+HarnessAgent$Builder.planFileDirectory(String) : HarnessAgent$Builder
+HarnessAgent$Builder.allowShellInPlanMode() / allowShellInPlanMode(boolean) : HarnessAgent$Builder
+HarnessAgent.enterPlanMode(RuntimeContext) / (String,String) : void
+HarnessAgent.exitPlanMode(RuntimeContext) / (String,String) : void
+HarnessAgent.isPlanModeActive(RuntimeContext) / (String,String) : boolean
+PlanModeTools.PLAN_ENTER / PLAN_WRITE / PLAN_EXIT : String   (tool names)
+PlanModeTools$PlanExitTool.checkPermissions(Map, PermissionContextState) : Mono<PermissionDecision>  (ASK → HITL)
+PlanModeMiddleware(PlanModeManager, Predicate<String> readOnlyResolver, Set<String> additionalAllowed)
+  // readOnlyResolver wired as: name -> toolkit.getTool(name).isReadOnly()
+PlanModeManager.writePlan(RuntimeContext, AgentState, String) : String   (→ <workspace>/<plan-dir>/PLAN.md)
+```
+
+### Honest limitations
+
+- Read-only enforcement is proven; whether a **small** model reliably *chooses* to call
+  `plan_enter`/`plan_write` (vs narrating a plan) is model-dependent — needs a live-model `*IT` (offline tests
+  drive scripted tool calls). Config-gated OFF by default reflects this.
+- `allow-shell=true` is wired faithfully to `allowShellInPlanMode`, but it adds the **native** tool name
+  `execute` to the plan allow-list; pig disables the native shell and uses its own `executeCommand` (name
+  mismatch, and non-read-only), so for pig `allow-shell` is effectively a **no-op** (pig's shell stays denied
+  in the plan phase — the read-only guarantee is *stronger*, not weaker). Documented in `PlanModeConfig`.
+- Plan state is per-`(userId,sessionId)` on the native `AgentState`; a `/plan enter` with no current session
+  is caught and reported (production always has a session).
+
+### Acceptance (single-threaded surefire, 2.0)
+
+`mvn test` — whole reactor GREEN. **+13 tests** over the plan-mode baseline: `PlanModeTest` (8 —
+toggle on/off, `PlanModeSettings.disabled()`, programmatic enter/status/exit, read-only enforced
+(read-only tool allowed / mutating tool denied), `plan_write`→`PLAN.md`, `plan_exit` HITL approve→exit &
+reject→stay), `PlanCommandTest` (3 — status, enter gated-when-disabled, enter/exit drive state),
+`StatusLineTest` (+1 — plan badge), `ReplCommandsTest`/help (existing, `/plan` registered). All offline
+(scripted fake models + `@TempDir`). `mvn -q -pl pig-agent-cli -am compile` green.
 Security tests are genuine — real `PermissionEngine` + a real subagent spawn path, not mocked.
 
 ### Files

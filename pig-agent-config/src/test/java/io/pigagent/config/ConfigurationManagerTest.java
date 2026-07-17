@@ -58,6 +58,28 @@ class ConfigurationManagerTest {
     }
 
     @Test
+    void planMode_defaultsOffAndRoundTrips() throws Exception {
+        // Default: Plan Mode off, read-only default dir — exactly today's behavior.
+        PigAgentConfig def = new ConfigurationManager(tempDir.resolve("a.yaml")).getConfig();
+        assertThat(def.getPlanMode().isEnabled()).isFalse();
+        assertThat(def.getPlanMode().getPlanDir()).isEqualTo("plans");
+        assertThat(def.getPlanMode().isAllowShell()).isFalse();
+
+        // A configured plan-mode block binds (exercises the setters via deserialization).
+        Path yaml = tempDir.resolve("b.yaml");
+        Files.writeString(yaml, """
+                plan-mode:
+                  enabled: true
+                  plan-dir: my-plans
+                  allow-shell: true
+                """);
+        PigAgentConfig loaded = new ConfigurationManager(yaml).getConfig();
+        assertThat(loaded.getPlanMode().isEnabled()).isTrue();
+        assertThat(loaded.getPlanMode().getPlanDir()).isEqualTo("my-plans");
+        assertThat(loaded.getPlanMode().isAllowShell()).isTrue();
+    }
+
+    @Test
     void updateConfigPersistsAndNotifies() {
         ConfigurationManager manager = new ConfigurationManager(tempDir.resolve("app.yaml"));
         PigAgentConfig[] received = {null};

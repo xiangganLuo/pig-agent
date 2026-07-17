@@ -158,7 +158,8 @@ public final class AgentRepl {
             while (running.get()) {
                 try {
                     systemRegistry.cleanUp();
-                    Ansi.println(terminal, StatusLine.from(modelManager, sessionManager, configManager));
+                    Ansi.println(terminal,
+                            StatusLine.from(modelManager, sessionManager, configManager, planModeActive()));
                     String line = reader.readLine(prompt);
                     if (line == null || line.isBlank()) {
                         continue;
@@ -199,6 +200,27 @@ public final class AgentRepl {
 
     /** Bound on HITL confirm/resume rounds within a single turn (defence against a loop). */
     private static final int MAX_CONFIRM_ROUNDS = 20;
+
+    /** Native Plan Mode's exit tool (its {@code checkPermissions} returns ASK → surfaces as HITL). */
+    private static final String PLAN_EXIT_TOOL = "plan_exit";
+
+    /**
+     * Whether native Plan Mode is active for the current session (drives the {@code ⏸ PLAN} status
+     * badge). Reads through the active agent; any failure degrades to {@code false} so a status read
+     * never breaks the prompt (plan mode may simply not be enabled on this build).
+     */
+    private boolean planModeActive() {
+        try {
+            var agent = agentHolder == null ? null : agentHolder.get();
+            if (agent == null) {
+                return false;
+            }
+            String sid = sessionManager == null ? null : sessionManager.getCurrentSessionId();
+            return agent.isPlanModeActive(sid);
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     /**
      * Run one chat turn: record the user message, maybe compress, stream the answer through the
@@ -420,8 +442,13 @@ public final class AgentRepl {
                 results.add(new ConfirmResult(false, call)); // no reader → fail-closed
                 continue;
             }
-            String ans = reader.readLine(Ansi.warn(
-                    "Allow tool '" + call.getName() + "'? (y=once / a=always / N=deny) "));
+            // Plan Mode's exit is human-gated: render the HITL exit prompt distinctly so the user
+            // understands they are approving the written plan and leaving the read-only plan phase to
+            // begin execution (reject → stay in plan mode). Other tools keep the generic prompt.
+            String prompt = PLAN_EXIT_TOOL.equals(call.getName())
+                    ? "Approve the plan and exit Plan Mode to begin execution? (y=approve / N=stay in plan) "
+                    : "Allow tool '" + call.getName() + "'? (y=once / a=always / N=deny) ";
+            String ans = reader.readLine(Ansi.warn(prompt));
             String s = ans == null ? "" : ans.strip().toLowerCase();
             if (s.equals("a")) {
                 rememberTool(call.getName());

@@ -27,6 +27,7 @@ import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.AgentSpecRepository;
 import io.pigagent.core.agent.AgentSpecSubagentMapper;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.agent.PlanModeSettings;
 import io.pigagent.core.agent.kernel.AgentKernel;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.agent.runner.CompositeReportWriter;
@@ -436,6 +437,19 @@ public final class AgentBootstrap {
                     evictionConfig.getMaxResultChars(), evictionConfig.getEvictionPath());
         }
 
+        // av2 native Plan Mode (config-gated, default OFF → no plan tools, exactly today's behavior).
+        // Enabled → the INTERACTIVE agent + switchable peers install the plan trio (plan_enter/plan_write/
+        // plan_exit) + the PlanModeMiddleware read-only enforcer, writing plans under <workspace>/<plan-dir>
+        // (workspace-relative; the vehicle workspace is pig's root). The channel + autonomous tracks stay
+        // OFF (no confirmer → a plan_exit HITL would fail-closed and strand the run in plan mode).
+        PigAgentConfig.PlanModeConfig planCfg = config.getPlanMode();
+        PlanModeSettings planModeSettings = new PlanModeSettings(
+                planCfg.isEnabled(), planCfg.getPlanDir(), planCfg.isAllowShell());
+        if (planModeSettings.enabled()) {
+            log.info("Plan Mode enabled (plan-dir {}, allow-shell {}) — interactive + peer agents",
+                    planModeSettings.planDir(), planModeSettings.allowShell());
+        }
+
         // Native permission context (av2 Phase 4) — the 2.0 replacement for ToolPermissionHook. Built
         // lazily from the CURRENT mode + the toolkit's tool names on each agent (re)build, so a
         // model-switch rebuild (and an /mcp add rebuild, M-2) picks up the active mode + new tools.
@@ -503,7 +517,7 @@ public final class AgentBootstrap {
                 interactiveMiddlewares, memory,
                 maxRetries, null, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
-                subagentsEnabled, peerSubagents);
+                subagentsEnabled, peerSubagents, planModeSettings);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -530,7 +544,7 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled);
+                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings);
         for (AgentSpec s : declaredSpecs) {
             if (!"default".equals(s.id())) {
                 try {

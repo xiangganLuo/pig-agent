@@ -50,6 +50,7 @@ public final class AgentFactory {
     private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
     private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
     private final List<SubagentDeclaration> subagentDeclarations; // null/empty → built-in + workspace only
+    private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, LongTermMemory longTermMemory) {
@@ -104,6 +105,24 @@ public final class AgentFactory {
                         Supplier<PermissionContextState> permissionContextSupplier,
                         Path workspace, ToolResultEvictionConfig toolResultEviction,
                         boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations) {
+        this(name, sysPrompt, toolkit, middlewares, longTermMemory, maxRetries, fallbackModel, maxIters,
+                stateStore, permissionContextSupplier, workspace, toolResultEviction, subagentsEnabled,
+                subagentDeclarations, PlanModeSettings.disabled());
+    }
+
+    /**
+     * @param planMode native Plan Mode settings applied to every built agent (av2). When
+     *        {@code enabled}, the interactive agents install the plan trio + read-only enforcer.
+     *        {@link PlanModeSettings#disabled()} (or {@code null}) keeps Plan Mode off — used by the
+     *        channel / autonomous tracks (no confirmer for a {@code plan_exit} HITL).
+     */
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<MiddlewareBase> middlewares, LongTermMemory longTermMemory, int maxRetries,
+                        Model fallbackModel, int maxIters, AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier,
+                        Path workspace, ToolResultEvictionConfig toolResultEviction,
+                        boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations,
+                        PlanModeSettings planMode) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -118,6 +137,7 @@ public final class AgentFactory {
         this.toolResultEviction = toolResultEviction;
         this.subagentsEnabled = subagentsEnabled;
         this.subagentDeclarations = subagentDeclarations;
+        this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
     }
 
     /**
@@ -143,6 +163,7 @@ public final class AgentFactory {
                 .toolResultEviction(toolResultEviction)
                 .subagents(subagentsEnabled)
                 .subagentDeclarations(subagentDeclarations)
+                .planMode(planMode)
                 .build();
     }
 }

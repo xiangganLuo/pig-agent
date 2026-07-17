@@ -8,6 +8,7 @@ import io.pigagent.cli.repl.command.AgentCommand;
 import io.pigagent.cli.repl.command.McpCommand;
 import io.pigagent.cli.repl.command.NotifyCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
+import io.pigagent.cli.repl.command.PlanCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.protocol.ModelProtocol;
@@ -61,6 +62,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new SessionCommand(ctx));
         cmd.addSubcommand(new McpCommand(ctx));
         cmd.addSubcommand(new PermissionCommand(ctx));
+        cmd.addSubcommand(new PlanCommand(ctx));
         cmd.addSubcommand(new MemoryCommand(ctx));
         cmd.addSubcommand(new CompressCommand(ctx));
         cmd.addSubcommand(new NotifyCommand(ctx));
@@ -101,6 +103,7 @@ public final class ReplCommands {
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
             entry(t, "/permission <action>", "Tool permissions (status|mode|allow|revoke|reset|list)");
+            entry(t, "/plan <action>", "Native Plan Mode (enter|exit|status)");
             entry(t, "/memory <on|off>", "Toggle/show global + session memory loading");
             entry(t, "/compress <action>", "Context compression (now|status|off|on)");
             entry(t, "/notify <action>", "Proactive outreach (status|test)");

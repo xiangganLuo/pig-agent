@@ -37,6 +37,17 @@ class StatusLineTest {
     }
 
     @Test
+    void planBadgeShownOnlyWhenPlanModeActive() {
+        String active = StatusLine.format("openai / gpt-4o", "work", "ask", true);
+        String inactive = StatusLine.format("openai / gpt-4o", "work", "ask", false);
+
+        assertThat(active).contains("PLAN");
+        assertThat(inactive).doesNotContain("PLAN");
+        // The 3-arg overload defaults to no plan badge (backward compatible).
+        assertThat(StatusLine.format("openai / gpt-4o", "work", "ask")).doesNotContain("PLAN");
+    }
+
+    @Test
     void fromManagersUsesSafeLabelAndNeverLeaksApiKey() {
         StoredModel model = StoredModel.create("anthropic", "sk-SECRET-KEY-VALUE-123456", null,
                 "claude-sonnet-4-6");

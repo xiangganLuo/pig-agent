@@ -243,6 +243,34 @@ public final class PigAgent {
     }
 
     /**
+     * Enter native Plan Mode for a session's state slot (av2). Backs {@code /plan enter} and is the
+     * programmatic equivalent of the model calling {@code plan_enter}: the agent switches to a
+     * read-only plan phase (the native {@code PlanModeMiddleware} denies every non-read-only tool by
+     * {@code AgentTool.isReadOnly()}) until it exits. A {@code null}/blank {@code sessionId} targets the
+     * default slot. Requires the agent to have been built with Plan Mode enabled
+     * ({@link Builder#planMode(PlanModeSettings)} with {@code enabled=true}); otherwise the underlying
+     * {@code HarnessAgent} has no plan manager and this throws — the CLI gates the call on config first.
+     */
+    public void enterPlanMode(String sessionId) {
+        harness.enterPlanMode(contextFor(sessionId));
+    }
+
+    /**
+     * Exit native Plan Mode for a session's state slot (av2). Backs the operator-driven {@code /plan
+     * exit}: since the operator IS the human approver, a programmatic exit does NOT trigger HITL (that
+     * gate is reserved for the model's own {@code plan_exit} tool). After exit the agent may execute
+     * mutating tools again (subject to the active permission mode). {@code null}/blank targets default.
+     */
+    public void exitPlanMode(String sessionId) {
+        harness.exitPlanMode(contextFor(sessionId));
+    }
+
+    /** Whether native Plan Mode is active for the session's state slot (av2). {@code null}/blank = default. */
+    public boolean isPlanModeActive(String sessionId) {
+        return harness.isPlanModeActive(contextFor(sessionId));
+    }
+
+    /**
      * Release the {@link HarnessAgent} vehicle's resources (it is {@code AutoCloseable}). Safe to call
      * more than once; failures are logged and swallowed. Rebuild-driven lifecycle (model switch / MCP
      * change) does not auto-close superseded agents today — kept out of scope, as the {@code ReActAgent}
@@ -281,6 +309,7 @@ public final class PigAgent {
         private ToolResultEvictionConfig toolResultEviction; // null = eviction disabled
         private boolean subagentsEnabled; // false = native subagents disabled (today's behavior)
         private List<SubagentDeclaration> subagentDeclarations; // null/empty = built-in + workspace only
+        private PlanModeSettings planMode = PlanModeSettings.disabled(); // disabled = today's behavior
 
         private Builder() {}
 
@@ -422,6 +451,21 @@ public final class PigAgent {
             return this;
         }
 
+        /**
+         * Native Plan Mode settings for this agent (av2). When {@code settings.enabled()} the
+         * {@link HarnessAgent} vehicle installs the plan trio ({@code plan_enter}/{@code plan_write}/
+         * {@code plan_exit}) + the {@code PlanModeMiddleware} read-only enforcer, writing plans under
+         * {@code settings.planDir()} (workspace-relative). {@code null} or {@link PlanModeSettings#disabled()}
+         * leaves Plan Mode off — no plan tools, byte-stable system prompt, exactly today's behavior.
+         * Spawned leaf subagents deliberately do NOT get Plan Mode (they cannot be spawned while the
+         * parent is plan-active anyway — {@code agent_spawn} is not read-only → denied — and have no
+         * confirmer for a {@code plan_exit} HITL).
+         */
+        public Builder planMode(PlanModeSettings settings) {
+            this.planMode = settings == null ? PlanModeSettings.disabled() : settings;
+            return this;
+        }
+
         public PigAgent build() {
             Objects.requireNonNull(model, "model must be set before building");
 
@@ -485,6 +529,18 @@ public final class PigAgent {
                 hb.toolResultEviction(toolResultEviction);
             } else {
                 hb.disableToolResultEviction();
+            }
+
+            // av2 native Plan Mode (config-gated): install the plan trio + PlanModeMiddleware read-only
+            // enforcer on the vehicle. The harness copies the toolkit and registers plan_enter/plan_write/
+            // plan_exit into that copy before building the ReActAgent, and enforces the plan-phase
+            // read-only guarantee via toolkit.getTool(name).isReadOnly() — which pig's tools already
+            // report correctly (GuardedAgentTool snapshots the delegate's readOnly flag). Disabled (the
+            // default) → no plan tools, byte-stable system prompt, exactly today's behavior.
+            if (planMode.enabled()) {
+                hb.enablePlanMode()
+                        .planFileDirectory(planMode.planDir())
+                        .allowShellInPlanMode(planMode.allowShell());
             }
 
             // av2 Phase 6a/6b: native subagent delegation WITH pig-enforced permission inheritance.

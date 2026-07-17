@@ -24,6 +24,7 @@ public final class PigAgentConfig {
     @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
     @JsonProperty("subagents") private SubagentsConfig subagents = new SubagentsConfig();
+    @JsonProperty("plan-mode") private PlanModeConfig planMode = new PlanModeConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
     @JsonProperty("outreach") private OutreachConfig outreach = new OutreachConfig();
@@ -44,6 +45,8 @@ public final class PigAgentConfig {
     public ToolsConfig getTools() { return tools; }
     public SubagentsConfig getSubagents() { return subagents; }
     public void setSubagents(SubagentsConfig s) { this.subagents = s == null ? new SubagentsConfig() : s; }
+    public PlanModeConfig getPlanMode() { return planMode; }
+    public void setPlanMode(PlanModeConfig p) { this.planMode = p == null ? new PlanModeConfig() : p; }
     public WebConfig getWeb() { return web; }
     public MemoryConfig getMemory() { return memory; }
     public void setMemory(MemoryConfig m) { this.memory = m == null ? new MemoryConfig() : m; }
@@ -445,6 +448,43 @@ public final class PigAgentConfig {
         @JsonProperty("enabled") private boolean enabled = true;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
+    }
+
+    /**
+     * 原生 Plan Mode（{@code plan-mode}，av2）配置——「想清楚再动手」：开启后活跃 agent 可进入一个<b>只读</b>
+     * 计划阶段（模型自调 {@code plan_enter}，或 {@code /plan enter}），期间只有只读工具与
+     * {@code plan_enter}/{@code plan_write}/{@code plan_exit} 可用，其余（写文件 / 执行命令 / 联网 …）一律被
+     * {@code PlanModeMiddleware} 拒绝——判据是每个工具的 {@code AgentTool.isReadOnly()}，而 pig 的只读工具本就
+     * 如实声明（{@code readFile}/{@code listDirectory}/{@code loadSkill}/… = {@code readOnly=true}），故读只读工具
+     * 放行、可变工具拒绝，<b>零工具改动</b>即生效。计划经 {@code plan_write} 落盘到 {@code plan-dir}（工作区相对，
+     * 默认 {@code plans}）下的 {@code PLAN.md}；模型调 {@code plan_exit} 退出计划阶段会触发 <b>HITL 人工确认</b>
+     * （复用原生权限 ASK → REPL 的确认提示），批准后方可进入执行阶段——模型无法擅自跳过计划直接执行。
+     *
+     * <p><b>默认 {@code enabled=false}</b>（保守、零行为变更、逐字节保持系统提示稳定）：关闭时不注册任何 plan 工具、
+     * 不安装 {@code PlanModeMiddleware}，与今日行为完全一致；{@code /plan enter} 会提示先在配置里开启。开启后 plan
+     * 工具随即出现在<b>交互 agent（及可 {@code /agent use} 的 peer）</b>的 schema；渠道 / 自主数字员工轨道<b>不</b>
+     * 开启（无 confirmer，{@code plan_exit} 的 HITL 会 fail-closed，避免卡在计划阶段）。
+     *
+     * <p><b>与 {@code /permission mode plan}（EXPLORE）的关系</b>：两者是<em>正交</em>的只读机制。EXPLORE 是权限引擎
+     * 层的只读（{@code /permission mode plan} 一键把可变工具全部 DENY）；native Plan Mode 是「结构化计划 + 落盘 +
+     * HITL 退出」的流程（其只读由 {@code PlanModeMiddleware} 独立强制）。进 / 出 native Plan Mode <b>不</b>改动权限
+     * 模式，反之亦然——无冲突状态；plan-mode 的只读在<em>任何</em>权限模式下都成立（BYPASS 下计划阶段仍拒绝可变工具）。
+     *
+     * <p><b>{@code allow-shell}</b>（默认 false）忠实映射到原生 {@code allowShellInPlanMode(...)}：它把原生 shell 工具名
+     * {@code execute} 加入计划阶段白名单。<b>注意</b>：pig 禁用了原生 shell、改用自有 {@code executeCommand}，名称不
+     * 匹配，故对 pig 而言 {@code allow-shell=true} 实际<em>不</em>会在计划阶段放行 pig 的 shell（{@code executeCommand}
+     * 非只读，仍被拒绝）——只读保证更强，此项对 pig 基本为空操作（已如实文档化）。
+     */
+    public static final class PlanModeConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("plan-dir") private String planDir = "plans";
+        @JsonProperty("allow-shell") private boolean allowShell = false;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getPlanDir() { return planDir; }
+        public void setPlanDir(String d) { this.planDir = d; }
+        public boolean isAllowShell() { return allowShell; }
+        public void setAllowShell(boolean a) { this.allowShell = a; }
     }
 
     /** 内置工具配置。缺省全空，向后兼容。 */
