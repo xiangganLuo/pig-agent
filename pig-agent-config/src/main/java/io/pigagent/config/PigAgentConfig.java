@@ -30,6 +30,7 @@ public final class PigAgentConfig {
     @JsonProperty("skills") private SkillsConfig skills = new SkillsConfig();
     @JsonProperty("user-profile") private UserProfileConfig userProfile = new UserProfileConfig();
     @JsonProperty("outreach") private OutreachConfig outreach = new OutreachConfig();
+    @JsonProperty("repl") private ReplConfig repl = new ReplConfig();
     @JsonProperty("current-session-id") private String currentSessionId;
     @JsonProperty("memory-enabled") private boolean memoryEnabled = true;
 
@@ -58,6 +59,8 @@ public final class PigAgentConfig {
     public void setUserProfile(UserProfileConfig u) { this.userProfile = u == null ? new UserProfileConfig() : u; }
     public OutreachConfig getOutreach() { return outreach; }
     public void setOutreach(OutreachConfig o) { this.outreach = o == null ? new OutreachConfig() : o; }
+    public ReplConfig getRepl() { return repl; }
+    public void setRepl(ReplConfig r) { this.repl = r == null ? new ReplConfig() : r; }
     public String getCurrentSessionId() { return currentSessionId; }
     public void setCurrentSessionId(String id) { this.currentSessionId = id; }
     public boolean isMemoryEnabled() { return memoryEnabled; }
@@ -718,6 +721,17 @@ public final class PigAgentConfig {
         public void setHost(String h) { this.host = h; }
         public int getPort() { return port; }
         public void setPort(int p) { this.port = p; }
+    }
+
+    /**
+     * REPL 前端显示配置。{@code spinner}（默认 true）控制推理阶段的**动态**思考指示：开启且运行在真实
+     * 可交互 TTY 时，显示一个定时循环的 braille spinner + {@code thinking…} + 已用秒数（模仿 Claude Code）；
+     * 关闭或非 TTY 时降级为单条静态思考指示（今日行为）。缺省安全、向后兼容（缺 {@code repl} 块 → 启用）。
+     */
+    public static final class ReplConfig {
+        @JsonProperty("spinner") private boolean spinner = true;
+        public boolean isSpinner() { return spinner; }
+        public void setSpinner(boolean s) { this.spinner = s; }
     }
 
     public static final class McpConfig {

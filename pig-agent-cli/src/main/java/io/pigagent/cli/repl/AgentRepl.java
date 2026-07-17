@@ -60,6 +60,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -82,6 +84,18 @@ import java.util.function.Supplier;
 public final class AgentRepl {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRepl.class);
+
+    /**
+     * Single daemon scheduler shared by every turn's {@link ThinkingSpinner} to drive its repaint
+     * timer. Daemon so it never blocks JVM exit; {@link #run()} shuts it down on exit. Turns are
+     * user-paced and a spinner only schedules on a real TTY, so one thread is ample.
+     */
+    private final ScheduledExecutorService spinnerScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "pig-repl-spinner");
+                t.setDaemon(true);
+                return t;
+            });
 
     private final AgentHolder agentHolder;
     private final AgentKernel agentKernel;
@@ -189,6 +203,8 @@ public final class AgentRepl {
                     systemRegistry.trace(e);
                 }
             }
+        } finally {
+            spinnerScheduler.shutdownNow();
         }
     }
 
@@ -298,7 +314,7 @@ public final class AgentRepl {
      */
     RequireUserConfirmEvent renderStream(Flux<AgentEvent> stream, Terminal terminal) {
         StreamingMarkdownPrinter printer = new StreamingMarkdownPrinter();
-        AtomicBoolean spinnerOn = new AtomicBoolean(false);
+        ThinkingSpinner spinner = newSpinner(terminal);
         AtomicBoolean interrupted = new AtomicBoolean(false);
         AtomicReference<Throwable> error = new AtomicReference<>();
         AtomicReference<RequireUserConfirmEvent> confirm = new AtomicReference<>();
@@ -311,13 +327,13 @@ public final class AgentRepl {
         Ansi.println(terminal, "");
 
         Disposable sub = stream.subscribe(
-                event -> onEvent(event, terminal, printer, spinnerOn, toolResults, childText, confirm),
+                event -> onEvent(event, terminal, printer, spinner, toolResults, childText, confirm),
                 err -> {
                     error.set(err);
                     done.countDown();
                 },
                 () -> {
-                    clearSpinner(terminal, spinnerOn);
+                    spinner.stop();
                     printer.flush(line -> Ansi.println(terminal, line));
                     flushAllChildText(terminal, childText);
                     done.countDown();
@@ -340,7 +356,7 @@ public final class AgentRepl {
             sub.dispose();
         }
 
-        clearSpinner(terminal, spinnerOn);
+        spinner.stop();
         if (interrupted.get()) {
             Ansi.println(terminal, Ansi.warn("[interrupted]"));
             return null;
@@ -354,7 +370,7 @@ public final class AgentRepl {
     }
 
     private void onEvent(AgentEvent event, Terminal terminal, StreamingMarkdownPrinter printer,
-                         AtomicBoolean spinnerOn, Map<String, StringBuilder> toolResults,
+                         ThinkingSpinner spinner, Map<String, StringBuilder> toolResults,
                          Map<String, StringBuilder> childText,
                          AtomicReference<RequireUserConfirmEvent> confirm) {
         // av2 Phase 6a: a non-null source means this event was FORWARDED from a synchronous subagent
@@ -363,41 +379,41 @@ public final class AgentRepl {
         // reasons over, surfacing naturally as parent answer text on the next step.
         String source = event.getSource();
         if (source != null && !source.isBlank()) {
-            onChildEvent(event, source, terminal, spinnerOn, childText);
+            onChildEvent(event, source, terminal, spinner, childText);
             return;
         }
         if (event instanceof SubagentExposedEvent exposed) {
             // Phase 6b will bridge expose_to_user to a Channel (chat.sendToSubagent); for now, note it
             // (never a credential) so the operator sees a subagent was exposed. Graceful no-op otherwise.
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             String who = exposed.getLabel() != null ? exposed.getLabel() : exposed.getAgentId();
             Ansi.println(terminal, Ansi.dim("[subagent exposed: " + who + "]"));
             return;
         }
         if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
-            showSpinner(terminal, spinnerOn);
+            spinner.start();
         } else if (event instanceof TextBlockDeltaEvent delta) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             printer.accept(delta.getDelta(), line -> Ansi.println(terminal, line));
         } else if (event instanceof ToolCallStartEvent) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
         } else if (event instanceof ToolResultTextDeltaEvent d) {
             toolResults.computeIfAbsent(key(d.getToolCallId()), k -> new StringBuilder()).append(d.getDelta());
         } else if (event instanceof ToolResultEndEvent end) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             Ansi.println(terminal, ToolCallFormatter.format(
                     toolLabel(end.getToolCallName()), toolSummary(end, toolResults)));
         } else if (event instanceof ExceedMaxItersEvent) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             Ansi.println(terminal, Ansi.warn("[reached max reasoning iterations]"));
         } else if (event instanceof AllToolsDeniedEvent) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             Ansi.println(terminal, Ansi.warn("[all tool calls denied by permission policy]"));
         } else if (event instanceof RequireUserConfirmEvent ask) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             confirm.set(ask);
         } else if (event instanceof AgentEndEvent) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
         }
     }
 
@@ -408,17 +424,17 @@ public final class AgentRepl {
      * answer so it's clear which agent produced what.
      */
     private void onChildEvent(AgentEvent event, String source, Terminal terminal,
-                              AtomicBoolean spinnerOn, Map<String, StringBuilder> childText) {
+                              ThinkingSpinner spinner, Map<String, StringBuilder> childText) {
         if (event instanceof TextBlockDeltaEvent delta) {
             childText.computeIfAbsent(source, k -> new StringBuilder()).append(delta.getDelta());
         } else if (event instanceof TextBlockEndEvent || event instanceof AgentEndEvent) {
             flushChildText(terminal, source, childText);
         } else if (event instanceof ToolResultEndEvent end) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
             Ansi.println(terminal, SubagentEventRenderer.format(
                     source, "⏺ " + toolLabel(end.getToolCallName())));
         } else if (event instanceof AgentStartEvent) {
-            clearSpinner(terminal, spinnerOn);
+            spinner.stop();
         }
     }
 
@@ -507,16 +523,19 @@ public final class AgentRepl {
                 .build();
     }
 
-    private static void showSpinner(Terminal terminal, AtomicBoolean spinnerOn) {
-        if (spinnerOn.compareAndSet(false, true)) {
-            Ansi.print(terminal, "\r" + Ansi.dim("⋯ thinking"));
-        }
-    }
-
-    private static void clearSpinner(Terminal terminal, AtomicBoolean spinnerOn) {
-        if (spinnerOn.compareAndSet(true, false)) {
-            Ansi.print(terminal, "\r" + " ".repeat(12) + "\r");
-        }
+    /**
+     * Build a fresh {@link ThinkingSpinner} for one turn. It animates only on a real interactive TTY
+     * (same gate the REPL uses to install slash-completion) and only when {@code repl.spinner} is on
+     * (default; no config → on); otherwise it degrades to a single static thinking line. The sink
+     * writes through the JLine terminal; the repaint timer runs on the shared daemon scheduler.
+     */
+    private ThinkingSpinner newSpinner(Terminal terminal) {
+        boolean enabled = configManager == null
+                || configManager.getConfig().getRepl().isSpinner();
+        boolean animated = enabled
+                && io.pigagent.cli.repl.select.InlineSelector.isInteractive(terminal);
+        return new ThinkingSpinner(spinnerScheduler, System::nanoTime,
+                text -> Ansi.print(terminal, text), animated);
     }
 
     /** Best-effort tool name; falls back to a generic label for blank/role-like names. */
