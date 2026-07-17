@@ -56,4 +56,17 @@ class ChannelTypeTest {
         assertThat(ChannelType.DINGTALK.create(cfg()).channelId()).isEqualTo("dingtalk");
         assertThat(ChannelType.FEISHU.create(cfg()).channelId()).isEqualTo("feishu");
     }
+
+    @Test
+    void functionalFlagMarksWorkingChannelsAndStubs() {
+        // The working transports (round-trip a conversation).
+        assertThat(ChannelType.DINGTALK.isFunctional()).isTrue();
+        assertThat(ChannelType.FEISHU.isFunctional()).isTrue();
+        assertThat(ChannelType.WEBHOOK.isFunctional()).isTrue();
+        assertThat(ChannelType.STDIN.isFunctional()).isTrue();
+        // The stubs / reply-less placeholders (must be marked, not pretended-connected).
+        assertThat(ChannelType.TELEGRAM.isFunctional()).isFalse();
+        assertThat(ChannelType.DISCORD.isFunctional()).isFalse();
+        assertThat(ChannelType.SLACK.isFunctional()).isFalse();
+    }
 }

@@ -22,29 +22,38 @@ import java.util.function.Function;
  * enum — there is no ad-hoc string {@code switch} anywhere. <b>Adding a channel = adding one constant
  * here</b> (plus, for an HTTP robot, its strategy + codec); no edit to {@code ChannelFactory} or
  * {@code PigAgentCli} is needed.
+ *
+ * <p><b>Honesty flag ({@code functional}).</b> Not every constant is a working transport. DingTalk,
+ * Feishu, Webhook and Stdin round-trip for real (HTTP in + reply out). Telegram and Discord are pure
+ * <em>stubs</em> ({@code start}/{@code sendMessage} only log), and Slack has a real inbound but a
+ * stubbed outbound (it cannot post a reply) — none can hold a conversation, so they are flagged
+ * {@code functional=false}. Callers (the seed config, {@code /channel}) use {@link #isFunctional()}
+ * to mark them clearly and refuse to enable/test them, rather than pretending they connect.
  */
 public enum ChannelType {
 
-    TELEGRAM("telegram", "Telegram Bot", cfg -> new TelegramChannel(cfg.getToken())),
-    DISCORD("discord", "Discord Bot", cfg -> new DiscordChannel(cfg.getToken())),
-    WEBHOOK("webhook", "HTTP Webhook", cfg -> new WebhookChannel(cfg.getPort(), cfg.getPath(), cfg.getToken())),
-    SLACK("slack", "Slack Events", cfg -> new SlackChannel(cfg.getPort(), cfg.getPath(), cfg.getSigningSecret())),
-    STDIN("stdin", "CLI Stdin Pipe", cfg -> new StdinPipeChannel()),
-    DINGTALK("dingtalk", "DingTalk Robot", cfg -> new StrategyHttpChannel(
+    TELEGRAM("telegram", "Telegram Bot", false, cfg -> new TelegramChannel(cfg.getToken())),
+    DISCORD("discord", "Discord Bot", false, cfg -> new DiscordChannel(cfg.getToken())),
+    WEBHOOK("webhook", "HTTP Webhook", true, cfg -> new WebhookChannel(cfg.getPort(), cfg.getPath(), cfg.getToken())),
+    SLACK("slack", "Slack Events", false, cfg -> new SlackChannel(cfg.getPort(), cfg.getPath(), cfg.getSigningSecret())),
+    STDIN("stdin", "CLI Stdin Pipe", true, cfg -> new StdinPipeChannel()),
+    DINGTALK("dingtalk", "DingTalk Robot", true, cfg -> new StrategyHttpChannel(
             new DingTalkStrategy(cfg.getWebhookUrl(), cfg.getSignSecret(), WebhookSender.jdk()),
             cfg.getPort(), cfg.getPath())),
-    FEISHU("feishu", "Feishu/Lark Robot", cfg -> new StrategyHttpChannel(
+    FEISHU("feishu", "Feishu/Lark Robot", true, cfg -> new StrategyHttpChannel(
             new FeishuStrategy(cfg.getWebhookUrl(), cfg.getSignSecret(), cfg.getVerificationToken(),
                     WebhookSender.jdk()),
             cfg.getPort(), cfg.getPath()));
 
     private final String id;
     private final String displayName;
+    private final boolean functional;
     private final Function<ChannelConfig, Channel> builder;
 
-    ChannelType(String id, String displayName, Function<ChannelConfig, Channel> builder) {
+    ChannelType(String id, String displayName, boolean functional, Function<ChannelConfig, Channel> builder) {
         this.id = id;
         this.displayName = displayName;
+        this.functional = functional;
         this.builder = builder;
     }
 
@@ -56,6 +65,15 @@ public enum ChannelType {
     /** Human-readable name for logs / status. */
     public String displayName() {
         return displayName;
+    }
+
+    /**
+     * Whether this channel is a working transport (can round-trip a conversation). {@code false} for
+     * the stubs (Telegram/Discord) and the reply-less Slack outbound — those are placeholders, not
+     * usable channels, and callers should mark/refuse them rather than pretend they connect.
+     */
+    public boolean isFunctional() {
+        return functional;
     }
 
     /** Construct the channel adapter for this kind from its per-channel config. */

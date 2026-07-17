@@ -45,8 +45,11 @@ public interface ChannelStrategy {
     OutboundHttp ack();
 
     /**
-     * Deliver an agent reply out-of-band via the platform's signed custom-robot webhook. A no-op
-     * (debug log) when no outbound webhook is configured. MUST NOT throw.
+     * Deliver an agent reply out-of-band via the platform's signed custom-robot webhook. MUST NOT
+     * throw. Returns {@code true} only when the robot actually accepted the message (a real 2xx with
+     * the platform's {@code errcode}/{@code code} == 0); {@code false} on any transport failure, a
+     * non-zero robot error code, or when no outbound webhook is configured (a no-op, debug-logged).
+     * The inbound-reply path ignores this result; proactive outreach uses it to report real delivery.
      */
-    void send(String agentReply);
+    boolean send(String agentReply);
 }

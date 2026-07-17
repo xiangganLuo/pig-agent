@@ -39,6 +39,7 @@ public final class PigAgentConfig {
     public ModelConfig getModel() { return model; }
     public AgentConfig getAgent() { return agent; }
     public Map<String, ChannelConfig> getChannels() { return channels; }
+    public void setChannels(Map<String, ChannelConfig> c) { this.channels = c == null ? Map.of() : c; }
     public ChannelGatewayConfig getChannelGateway() { return channelGateway; }
     public McpConfig getMcp() { return mcp; }
     public CompressionConfig getCompression() { return compression; }

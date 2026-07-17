@@ -12,7 +12,12 @@ package io.pigagent.channel.http;
 @FunctionalInterface
 public interface WebhookSender {
 
-    /** POST {@code jsonBody} to {@code url} with a JSON content type; return {@code true} on a 2xx. */
+    /**
+     * POST {@code jsonBody} to {@code url} with a JSON content type. Return {@code true} only on a
+     * genuine success — a 2xx <em>and</em>, for a robot endpoint that answers 200 with a status body,
+     * a zero {@code errcode}/{@code code}/{@code StatusCode}. A transport failure or a non-zero robot
+     * error code returns {@code false} (see {@link JdkWebhookSender}).
+     */
     boolean post(String url, String jsonBody);
 
     /** The default JDK {@code HttpClient}-backed sender. */

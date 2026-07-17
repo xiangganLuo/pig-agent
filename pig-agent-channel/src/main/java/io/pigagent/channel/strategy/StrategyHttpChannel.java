@@ -105,22 +105,22 @@ public final class StrategyHttpChannel implements Channel, OutboundChannel {
 
     @Override
     public void sendMessage(String message) {
-        // Outbound travels the platform's webhook (out-of-band), not the inbound ack body.
+        // Outbound travels the platform's webhook (out-of-band), not the inbound ack body. The
+        // inbound-reply path does not need the delivery result, so it is intentionally ignored here.
         strategy.send(message);
     }
 
     /**
      * Proactive outreach ({@link OutboundChannel}): render the notification to text and send it over
-     * the platform's webhook. Best-effort — {@link ChannelStrategy#send} is fire-and-forget (it logs a
-     * webhook failure internally and never throws), so this returns {@code true} once dispatched. Real
-     * delivery confirmation would need the strategy send to report a status (out of scope; see design).
-     * The {@code recipient} is unused here because a robot webhook has a single fixed destination.
+     * the platform's webhook. Returns the strategy's real delivery result — {@code true} only when the
+     * robot actually accepted the message (a genuine 2xx with {@code errcode}/{@code code} == 0), so a
+     * caller (e.g. {@code /notify test}) never reports a delivery the robot rejected. The
+     * {@code recipient} is unused here because a robot webhook has a single fixed destination.
      */
     @Override
     public boolean send(String recipient, Notification notification) {
         try {
-            strategy.send(NotificationRenderer.render(notification));
-            return true;
+            return strategy.send(NotificationRenderer.render(notification));
         } catch (Exception e) {
             log.warn("{} outbound send failed: {}", strategy.channelId(), e.getClass().getSimpleName());
             return false;

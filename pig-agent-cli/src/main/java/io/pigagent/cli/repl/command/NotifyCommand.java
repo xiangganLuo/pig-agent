@@ -1,5 +1,7 @@
 package io.pigagent.cli.repl.command;
 
+import io.pigagent.channel.ChannelAgentBridge;
+import io.pigagent.channel.outreach.OutboundChannel;
 import io.pigagent.cli.Ansi;
 import io.pigagent.cli.repl.ReplContext;
 import io.pigagent.config.PigAgentConfig;
@@ -12,10 +14,17 @@ import org.jline.terminal.Terminal;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
+import java.util.List;
+
 /**
  * {@code /notify} — operator command for proactive outreach: {@code test [message]} sends a test
  * notification through the notification service and shows the result; {@code status} shows the outreach
  * configuration. Never displays the recipient value (only whether one is configured).
+ *
+ * <p>When the configured {@code outreach.channel} is a started but <em>inbound-only</em> channel (it
+ * has no {@link OutboundChannel} capability, e.g. a plain webhook / stdin), {@code status} flags it and
+ * {@code test} refuses up front — so the user gets a clear "该渠道无出站能力" line instead of a generic
+ * transport failure.
  */
 @Command(name = "/notify", description = "Proactive outreach (status|test)")
 public final class NotifyCommand implements Runnable {
@@ -54,6 +63,9 @@ public final class NotifyCommand implements Runnable {
         Ansi.println(t, line("Channel", o.getChannel().isBlank() ? "(none)" : o.getChannel()));
         // Never print the recipient value — only whether one is configured.
         Ansi.println(t, line("Recipient", o.getRecipient().isBlank() ? "(none)" : "(set)"));
+        if (inboundOnlyChannel() != null) {
+            Ansi.println(t, "  " + Ansi.warn("该渠道无出站能力 (inbound-only — cannot deliver notifications)"));
+        }
         PigAgentConfig.QuietHoursConfig q = o.getQuietHours();
         Ansi.println(t, line("Quiet hours", q.isEnabled()
                 ? q.getStart() + "–" + q.getEnd() : "off"));
@@ -78,6 +90,12 @@ public final class NotifyCommand implements Runnable {
                     + "(set outreach.channel + outreach.recipient)."));
             return;
         }
+        String inboundOnly = inboundOnlyChannel();
+        if (inboundOnly != null) {
+            Ansi.println(t, Ansi.warn("渠道 '" + inboundOnly
+                    + "' 无出站能力 (inbound-only) — 无法发送测试通知。"));
+            return;
+        }
         String body = (args == null || args.length == 0) ? "This is a test notification."
                 : String.join(" ", args).strip();
         Notification n = Notification.of(NotificationType.MESSAGE, Severity.NORMAL,
@@ -86,8 +104,29 @@ public final class NotifyCommand implements Runnable {
         if (r.delivered()) {
             Ansi.println(t, Ansi.success("Sent. ") + Ansi.dim(r.detail()));
         } else {
+            // A robot that answered 200 but rejected the message folds to FAILED here (the sender's
+            // errcode check), so we never claim "Sent" on a rejection.
             Ansi.println(t, Ansi.warn("Not sent [" + r.outcome() + "]. ") + Ansi.dim(r.detail()));
         }
+    }
+
+    /**
+     * The configured {@code outreach.channel} id if it is a started but inbound-only channel (no
+     * {@link OutboundChannel} capability), else {@code null}. Returns {@code null} when the channel is
+     * blank, not started (the notify path then reports {@code NO_CHANNEL}), or is outbound-capable.
+     */
+    private String inboundOnlyChannel() {
+        String channelId = ctx.configManager().getConfig().getOutreach().getChannel();
+        List<ChannelAgentBridge> bridges = ctx.bridges();
+        if (channelId == null || channelId.isBlank() || bridges == null) {
+            return null;
+        }
+        for (ChannelAgentBridge bridge : bridges) {
+            if (channelId.equals(bridge.getChannel().channelId())) {
+                return bridge.getChannel() instanceof OutboundChannel ? null : channelId;
+            }
+        }
+        return null;
     }
 
     private static void usage(Terminal t) {

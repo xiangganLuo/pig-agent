@@ -42,6 +42,24 @@ public final class WorkspaceManager {
         createIfAbsent(rootPath.resolve("AGENTS.md"), defaultAgentsMd());
         createIfAbsent(rootPath.resolve("INFO.md"), defaultInfoMd());
         createIfAbsent(rootPath.resolve("application.yaml"), defaultConfigYaml());
+        // application.yaml can hold channel credentials (token / signing secret) in plaintext, like
+        // models.json / mcp.json — restrict it to owner-only on POSIX (no-op on Windows). Applied every
+        // initialize (idempotent + cheap) so a pre-existing file is tightened too.
+        restrictToOwner(rootPath.resolve("application.yaml"));
+    }
+
+    /**
+     * Restrict a credential-bearing file to owner read/write ({@code 0600}) on POSIX file systems;
+     * a no-op on non-POSIX (e.g. Windows) or a transient error, where directory permissions apply.
+     * Mirrors {@code JsonModelStore} / {@code JsonMcpStore}.
+     */
+    static void restrictToOwner(Path file) {
+        try {
+            Files.setPosixFilePermissions(file,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // Non-POSIX file system or a transient error — the write already succeeded.
+        }
     }
 
     public Path getRootPath() { return rootPath; }
@@ -330,13 +348,38 @@ public final class WorkspaceManager {
                 #     threshold: 80000   # spool a single tool result larger than this to disk
 
                 # --- Channels --------------------------------------------------------------
+                # Manage channels at runtime with /channel (list|add|remove|enable|disable|test);
+                # this file is the source of truth. An enabled + functional channel starts on the next
+                # launch — the native `channel-gateway` kernel is NOT required for pig's own channels.
+                #
+                # WORKING channels (real transport — uncomment + fill in to use):
+                #   dingtalk:                       # DingTalk (钉钉) custom robot
+                #     enabled: true
+                #     webhook-url: "https://oapi.dingtalk.com/robot/send?access_token=..."
+                #     sign-secret: ""               # outbound + inbound signing secret
+                #   feishu:                         # Feishu / Lark (飞书) custom robot
+                #     enabled: true
+                #     webhook-url: "https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                #     sign-secret: ""
+                #     verification-token: ""        # inbound event-subscription verify token
+                #   webhook:                        # generic HTTP webhook (POST in, JSON reply out)
+                #     enabled: true
+                #     port: 8686
+                #     path: /webhook
+                #     token: ""                     # optional X-Auth-Token / Bearer
+                #   stdin:                          # pipe stdin -> agent (CLI integration)
+                #     enabled: true
+                #
+                # STUBS (未实现/占位 — not functional yet; start()/sendMessage() only log, cannot hold a
+                # conversation). Left disabled and documented as placeholders — do NOT expect them to work:
                 channels:
-                  telegram:
+                  telegram:                         # 未实现/占位 (stub — not functional yet)
                     enabled: false
                     token: ""
-                  discord:
+                  discord:                          # 未实现/占位 (stub — not functional yet)
                     enabled: false
                     token: ""
+                  # slack: also a stub (real inbound, but outbound cannot reply)
 
                 # --- Proactive outreach + notifications -----------------------------------
                 # outreach:

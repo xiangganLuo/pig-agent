@@ -76,18 +76,18 @@ public final class DingTalkStrategy implements ChannelStrategy {
     }
 
     @Override
-    public void send(String agentReply) {
+    public boolean send(String agentReply) {
         if (webhookUrl == null) {
             log.debug("DingTalk outbound skipped: no webhook-url configured ({} chars)",
                     agentReply == null ? 0 : agentReply.length());
-            return;
+            return false;
         }
         String payload = DingTalkCodec.buildTextPayload(agentReply);
         String url = webhookUrl;
         if (signSecret != null) {
             url = DingTalkCodec.signedUrl(webhookUrl, signSecret, String.valueOf(System.currentTimeMillis()));
         }
-        sender.post(url, payload);
+        return sender.post(url, payload);
     }
 
     private static String blankToNull(String s) {

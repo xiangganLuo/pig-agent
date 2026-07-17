@@ -30,11 +30,12 @@ class StrategyHttpChannelOutboundTest {
         @Override public OutboundHttp ack() { return OutboundHttp.json(200, "{}"); }
 
         @Override
-        public void send(String agentReply) {
+        public boolean send(String agentReply) {
             if (throwOnSend) {
                 throw new RuntimeException("boom");
             }
             sent.add(agentReply);
+            return true;
         }
     }
 

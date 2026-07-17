@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ConfigurationManagerTest {
@@ -87,5 +89,23 @@ class ConfigurationManagerTest {
         manager.updateConfig(cfg -> cfg.getModel().setProvider("openai"));
         assertThat(manager.getConfig().getModel().getProvider()).isEqualTo("openai");
         assertThat(received[0]).isNotNull();
+    }
+
+    @Test
+    void savedConfigIsOwnerOnlyOnPosix() {
+        // application.yaml can hold channel credentials in plaintext — it must be 0600 at rest, like
+        // models.json / mcp.json. On non-POSIX (Windows) restrictToOwner is a no-op, so guard the check.
+        Path yaml = tempDir.resolve("app.yaml");
+        new ConfigurationManager(yaml); // first run writes the default config
+        assertThat(Files.exists(yaml)).isTrue();
+        if (yaml.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            try {
+                Set<PosixFilePermission> perms = Files.getPosixFilePermissions(yaml);
+                assertThat(perms).containsExactlyInAnyOrder(
+                        PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        }
     }
 }
