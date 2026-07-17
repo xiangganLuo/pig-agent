@@ -92,6 +92,9 @@ public final class PigAgent {
     /** The built-in general-purpose subagent id (native {@code agent_spawn} target). */
     private static final String GENERAL_PURPOSE_ID = "general-purpose";
 
+    /** The pig hybrid memory-search tool name (hybrid-memory-search); its presence supersedes native memory tools. */
+    private static final String PIG_MEMORY_SEARCH_TOOL = "memory_search";
+
     /** Lazily-created shared temp workspace used only when no workspace is supplied (tests). */
     private static volatile Path fallbackWorkspace;
 
@@ -534,6 +537,15 @@ public final class PigAgent {
             // otherwise disable them (byte-for-byte the pre-feature behaviour).
             if (memoryEnabled) {
                 hb.memory(memoryConfig);
+                // hybrid-memory-search: when pig registered its own hybrid `memory_search` into the
+                // toolkit (memory.search.hybrid-enabled), suppress the native memory TOOLS so the two
+                // same-named tools never collide — pig's hybrid tool supersedes the native keyword scan.
+                // The native flush/consolidation HOOKS stay ON (MEMORY.md is still written); only the
+                // native memory tools (incl. memory_get/memory_save/session_search) are dropped — a
+                // documented, off-by-default trade-off of the hybrid search path.
+                if (toolkit != null && toolkit.getToolNames().contains(PIG_MEMORY_SEARCH_TOOL)) {
+                    hb.disableMemoryTools();
+                }
             } else {
                 hb.disableMemoryTools().disableMemoryHooks();
             }
