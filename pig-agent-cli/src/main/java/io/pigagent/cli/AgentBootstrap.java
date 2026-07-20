@@ -485,9 +485,7 @@ public final class AgentBootstrap {
             List<ToolInfo> inventory = buildToolInventory(toolkit, mcpManager);
             DeferralPlan plan = DeferredToolPlanner.plan(true, deferredCfg.getTools(),
                     deferredCfg.isAutoDeferMcp(), deferredCfg.getThreshold(), inventory);
-            DeferredToolGate.applyTo(toolkit, plan, inventory, deferredRegistry);
-            log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
-                    deferredRegistry.deferredNames().size());
+            applyDeferral(toolkit, plan, inventory, deferredRegistry);
         }
 
         // Fixed tool guidance (TOOL_GUIDANCE) appended to the (user-editable) AGENT.md + INFO.md. See
@@ -1078,6 +1076,26 @@ public final class AgentBootstrap {
      * MCP and names the group the gate deactivates to defer them. Reads only in-memory group state
      * (no MCP network calls).
      */
+    /**
+     * Backward-safe deferral application (smart default, D4): with a non-empty plan, hide the planned
+     * tools via {@link DeferredToolGate} (today's behavior). With an <b>empty</b> plan — nothing crossed
+     * the threshold and no explicit list matched — {@code tool_search} is removed from the toolkit so the
+     * initial schema stays <b>byte-identical to {@code enabled=false}</b> (MCP tools were only grouped
+     * into ACTIVE groups, which is schema-neutral, so nothing else needs undoing). This is what lets the
+     * feature default ON for large toolsets while a small toolset user sees no change.
+     */
+    static void applyDeferral(Toolkit toolkit, DeferralPlan plan, List<ToolInfo> inventory,
+                              DeferredToolRegistry registry) {
+        if (plan == null || plan.isEmpty()) {
+            toolkit.removeTool(DeferredToolPlanner.TOOL_SEARCH);
+            log.info("Deferred tools: nothing over threshold; tool_search removed (initial schema unchanged)");
+            return;
+        }
+        DeferredToolGate.applyTo(toolkit, plan, inventory, registry);
+        log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
+                registry.deferredNames().size());
+    }
+
     static List<ToolInfo> buildToolInventory(Toolkit toolkit, McpManager mcpManager) {
         java.util.Map<String, String> mcpToolGroup = new java.util.HashMap<>();
         for (String group : mcpManager.managedToolGroups()) {
