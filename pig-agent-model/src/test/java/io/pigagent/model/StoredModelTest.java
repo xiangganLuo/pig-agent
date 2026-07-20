@@ -28,4 +28,50 @@ class StoredModelTest {
         assertThat(changed.baseUrl()).isEqualTo("u2");
         assertThat(changed.modelName()).isEqualTo("gpt-4.1");
     }
+
+    @Test
+    void createDefaultsToChatKind() {
+        StoredModel m = StoredModel.create("openai", "k", null, "gpt-4o");
+        assertThat(m.kind()).isEqualTo(ModelKind.CHAT);
+        assertThat(m.isEmbedding()).isFalse();
+    }
+
+    @Test
+    void fiveArgConstructorDefaultsToChat() {
+        // backward-compat: pre-embedding call sites construct a 5-arg StoredModel
+        StoredModel m = new StoredModel("id1", "openai", "k", null, "gpt-4o");
+        assertThat(m.kind()).isEqualTo(ModelKind.CHAT);
+    }
+
+    @Test
+    void nullKindNormalizesToChat() {
+        StoredModel m = new StoredModel("id1", "openai", "k", null, "gpt-4o", null);
+        assertThat(m.kind()).isEqualTo(ModelKind.CHAT);
+    }
+
+    @Test
+    void createEmbeddingKind() {
+        StoredModel m = StoredModel.create("openai", "k", "https://api.x/v1", "text-embedding-3-small",
+                ModelKind.EMBEDDING);
+        assertThat(m.kind()).isEqualTo(ModelKind.EMBEDDING);
+        assertThat(m.isEmbedding()).isTrue();
+    }
+
+    @Test
+    void withKindIsImmutable() {
+        StoredModel chat = StoredModel.create("openai", "k", null, "m");
+        StoredModel emb = chat.withKind(ModelKind.EMBEDDING);
+
+        assertThat(chat.kind()).isEqualTo(ModelKind.CHAT); // original unchanged
+        assertThat(emb.kind()).isEqualTo(ModelKind.EMBEDDING);
+        assertThat(emb.id()).isEqualTo(chat.id());
+    }
+
+    @Test
+    void withMethodsPreserveKind() {
+        StoredModel emb = StoredModel.create("openai", "k", "u", "m", ModelKind.EMBEDDING);
+        assertThat(emb.withApiKey("k2").kind()).isEqualTo(ModelKind.EMBEDDING);
+        assertThat(emb.withBaseUrl("u2").kind()).isEqualTo(ModelKind.EMBEDDING);
+        assertThat(emb.withModelName("m2").kind()).isEqualTo(ModelKind.EMBEDDING);
+    }
 }

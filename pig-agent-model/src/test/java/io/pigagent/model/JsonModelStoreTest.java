@@ -94,4 +94,65 @@ class JsonModelStoreTest {
         assertThat(store.getDefaultId()).isNull();
         assertThat(dir.resolve("models.json.bak")).exists();
     }
+
+    @Test
+    void embeddingModelKindPersistsAcrossInstances() {
+        ModelStore store = new JsonModelStore(file());
+        StoredModel emb = store.save(StoredModel.create("openai", "k", "https://api.x/v1",
+                "text-embedding-3-small", ModelKind.EMBEDDING));
+
+        ModelStore reopened = new JsonModelStore(file());
+        assertThat(reopened.findById(emb.id())).get()
+                .extracting(StoredModel::kind).isEqualTo(ModelKind.EMBEDDING);
+    }
+
+    @Test
+    void defaultEmbeddingPointerIsIndependentOfDefaultChat() {
+        ModelStore store = new JsonModelStore(file());
+        StoredModel chat = store.save(StoredModel.create("openai", "k", null, "gpt-4o"));
+        StoredModel emb = store.save(StoredModel.create("openai", "k2", "https://x/v1", "emb",
+                ModelKind.EMBEDDING));
+
+        store.setDefaultEmbeddingModelId(emb.id());
+
+        // the two pointers do not interfere
+        assertThat(store.getDefaultId()).isEqualTo(chat.id());
+        assertThat(store.getDefaultEmbeddingModelId()).isEqualTo(emb.id());
+
+        ModelStore reopened = new JsonModelStore(file());
+        assertThat(reopened.getDefaultEmbeddingModelId()).isEqualTo(emb.id());
+        assertThat(reopened.getDefaultId()).isEqualTo(chat.id());
+    }
+
+    @Test
+    void oldModelsJsonWithoutKindReadsBackAsChat() throws IOException {
+        // Arrange — a pre-embedding models.json: no `kind` on entries, no defaultEmbeddingModelId
+        Files.writeString(file(), "{\n"
+                + "  \"defaultModelId\": \"m1\",\n"
+                + "  \"models\": [ { \"id\": \"m1\", \"protocolId\": \"openai\","
+                + " \"apiKey\": \"k\", \"baseUrl\": null, \"modelName\": \"gpt-4o\" } ]\n"
+                + "}");
+
+        // Act
+        ModelStore store = new JsonModelStore(file());
+
+        // Assert — back-compat: entry reads back as CHAT, no embedding pointer
+        assertThat(store.findById("m1")).get().extracting(StoredModel::kind).isEqualTo(ModelKind.CHAT);
+        assertThat(store.getDefaultEmbeddingModelId()).isNull();
+        assertThat(store.getDefaultId()).isEqualTo("m1");
+    }
+
+    @Test
+    void deletingDefaultEmbeddingModelClearsPointer() {
+        ModelStore store = new JsonModelStore(file());
+        store.save(StoredModel.create("openai", "k", null, "gpt-4o"));
+        StoredModel emb = store.save(StoredModel.create("openai", "k2", "https://x/v1", "emb",
+                ModelKind.EMBEDDING));
+        store.setDefaultEmbeddingModelId(emb.id());
+
+        store.deleteById(emb.id());
+
+        assertThat(store.getDefaultEmbeddingModelId()).isNull();
+        assertThat(store.findById(emb.id())).isEmpty();
+    }
 }

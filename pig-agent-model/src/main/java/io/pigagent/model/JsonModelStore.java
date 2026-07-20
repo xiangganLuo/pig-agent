@@ -111,6 +111,11 @@ public final class JsonModelStore implements ModelStore {
         if (id.equals(data.defaultModelId)) {
             data.defaultModelId = data.models.isEmpty() ? null : data.models.get(0).id;
         }
+        // Deleting the default embedding model clears its pointer (fall back to "no embedding model"
+        // → BM25-only) rather than leaving it dangling — mirrors the default-chat-model handling above.
+        if (id.equals(data.defaultEmbeddingModelId)) {
+            data.defaultEmbeddingModelId = null;
+        }
         persist();
     }
 
@@ -125,9 +130,21 @@ public final class JsonModelStore implements ModelStore {
         persist();
     }
 
+    @Override
+    public synchronized String getDefaultEmbeddingModelId() {
+        return data.defaultEmbeddingModelId;
+    }
+
+    @Override
+    public synchronized void setDefaultEmbeddingModelId(String id) {
+        data.defaultEmbeddingModelId = id;
+        persist();
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     static final class Data {
         public String defaultModelId;
+        public String defaultEmbeddingModelId;
         public List<Entry> models = new ArrayList<>();
     }
 
@@ -138,6 +155,8 @@ public final class JsonModelStore implements ModelStore {
         public String apiKey;
         public String baseUrl;
         public String modelName;
+        /** Serialized model category; a missing field (older files) deserializes to null → CHAT. */
+        public String kind;
 
         static Entry from(StoredModel m) {
             Entry e = new Entry();
@@ -146,11 +165,12 @@ public final class JsonModelStore implements ModelStore {
             e.apiKey = m.apiKey();
             e.baseUrl = m.baseUrl();
             e.modelName = m.modelName();
+            e.kind = m.kind().name();
             return e;
         }
 
         StoredModel toModel() {
-            return new StoredModel(id, protocolId, apiKey, baseUrl, modelName);
+            return new StoredModel(id, protocolId, apiKey, baseUrl, modelName, ModelKind.fromString(kind));
         }
     }
 }
