@@ -9,6 +9,7 @@ import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.core.memory.injection.MemoryInjection;
+import io.pigagent.core.tool.RevealTargets;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -63,6 +64,9 @@ public final class AgentFactory {
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
     // memory-retrieval-injection: RAG-style injection (pinned + query-aware); null → today's whole-file.
     private final MemoryInjection memoryInjection;
+    // deferred-tools: reveal broadcaster so a spawned subagent child's tool_search reveal reaches the
+    // child's own Toolkit.copy(); null → children not registered (today's behavior).
+    private final RevealTargets revealTargets;
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
@@ -160,6 +164,26 @@ public final class AgentFactory {
                         Path workspace, ToolResultEvictionConfig toolResultEviction,
                         boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations,
                         PlanModeSettings planMode, MemoryInjection memoryInjection) {
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, fallbackModel, maxIters,
+                stateStore, permissionContextSupplier, workspace, toolResultEviction, subagentsEnabled,
+                subagentDeclarations, planMode, memoryInjection, null);
+    }
+
+    /**
+     * @param revealTargets reveal broadcaster ({@code deferred-tools}) into which the built agent's
+     *        spawned subagent child toolkits register, so a {@code tool_search} reveal from a child
+     *        activates the group on the child's own {@code Toolkit.copy()}. {@code null} (default) keeps
+     *        children unregistered (today's behavior).
+     */
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
+                        Model fallbackModel, int maxIters, AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier,
+                        Path workspace, ToolResultEvictionConfig toolResultEviction,
+                        boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations,
+                        PlanModeSettings planMode, MemoryInjection memoryInjection,
+                        RevealTargets revealTargets) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -176,6 +200,7 @@ public final class AgentFactory {
         this.subagentDeclarations = subagentDeclarations;
         this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
         this.memoryInjection = memoryInjection;
+        this.revealTargets = revealTargets;
     }
 
     /**
@@ -203,6 +228,7 @@ public final class AgentFactory {
                 .subagents(subagentsEnabled)
                 .subagentDeclarations(subagentDeclarations)
                 .planMode(planMode)
+                .revealTargets(revealTargets)
                 .build();
     }
 }

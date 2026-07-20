@@ -769,13 +769,15 @@ public final class PigAgentConfig {
     }
 
     /**
-     * 延迟工具（{@code deferred-tools}）配置。默认 {@code enabled=false} → 一切照旧（不隐藏任何工具、
-     * 不注册 {@code tool_search}、不对 MCP 工具分组）。启用后：{@code tools} 显式清单 + 阈值规则
-     * （{@code auto-defer-mcp} 且总工具数超 {@code threshold} 时自动延迟全部 MCP 工具）决定隐藏哪些工具，
-     * 模型经 {@code tool_search} 按需发现并揭示，省提示词 token。
+     * 延迟工具（{@code deferred-tools}）配置。默认 {@code enabled=true} 且「随规模智能开」：
+     * {@code tools} 显式清单 + 阈值规则（{@code auto-defer-mcp} 且总工具数超 {@code threshold} 时
+     * 自动延迟全部 MCP 工具）决定隐藏哪些工具，模型经 {@code tool_search} 按需发现并揭示，省提示词 token。
+     * <b>backward-safe（阈值制）</b>：当延迟计划为空——工具总数未超阈值且显式清单无命中——时，接线层
+     * MUST 不注册 {@code tool_search}、不隐藏任何工具，初始 schema 与引入本能力前逐字节一致（见
+     * {@code AgentBootstrap.applyDeferral}）。显式关闭 {@code enabled=false} 则完全禁用。
      */
     public static final class DeferredToolsConfig {
-        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("enabled") private boolean enabled = true;
         @JsonProperty("tools") private java.util.List<String> tools = java.util.List.of();
         @JsonProperty("auto-defer-mcp") private boolean autoDeferMcp = true;
         @JsonProperty("threshold") private int threshold = 25;

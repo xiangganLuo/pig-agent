@@ -38,6 +38,18 @@ class DeferredToolRegistryTest {
     }
 
     @Test
+    void chineseKeywordMatchesChineseDescription() {
+        // 语料常为中文：CJK unigram+bigram 分词（与 memory_search 同源）应让中文 query 命中中文描述
+        DeferredToolRegistry reg = new DeferredToolRegistry();
+        reg.add(tool("chaTianQi", "查询城市天气预报", "g1", "天气"));
+        reg.add(tool("faYouJian", "发送电子邮件", "g2", "邮件"));
+
+        List<DeferredTool> hits = reg.search("天气", 5);
+
+        assertThat(hits).extracting(DeferredTool::name).containsExactly("chaTianQi");
+    }
+
+    @Test
     void blankQueryReturnsEmpty() {
         DeferredToolRegistry reg = new DeferredToolRegistry();
         reg.add(tool("getWeather", "weather", "g1", "weather"));

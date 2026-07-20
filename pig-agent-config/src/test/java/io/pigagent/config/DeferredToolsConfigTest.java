@@ -6,15 +6,16 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** tools.deferred 配置：默认禁用/清单空/阈值 25/auto-defer-mcp 开；YAML 反序列化;容错。 */
+/** tools.deferred 配置：默认「随规模智能开」(enabled=true)/清单空/阈值 25/auto-defer-mcp 开；YAML 反序列化;容错。 */
 class DeferredToolsConfigTest {
 
     private final ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
 
     @Test
     void defaults_whenNoDeferredBlock() {
+        // 默认智能开：enabled=true + auto-defer-mcp + threshold 25（backward-safe 由阈值制在接线层保证）
         PigAgentConfig.DeferredToolsConfig d = new PigAgentConfig().getTools().getDeferred();
-        assertThat(d.isEnabled()).isFalse();
+        assertThat(d.isEnabled()).isTrue();
         assertThat(d.getTools()).isEmpty();
         assertThat(d.isAutoDeferMcp()).isTrue();
         assertThat(d.getThreshold()).isEqualTo(25);
@@ -23,8 +24,15 @@ class DeferredToolsConfigTest {
     @Test
     void missingBlock_yieldsDefaults() throws Exception {
         PigAgentConfig cfg = yaml.readValue("agent:\n  name: X\n", PigAgentConfig.class);
-        assertThat(cfg.getTools().getDeferred().isEnabled()).isFalse();
+        assertThat(cfg.getTools().getDeferred().isEnabled()).isTrue();
         assertThat(cfg.getTools().getDeferred().getThreshold()).isEqualTo(25);
+    }
+
+    @Test
+    void explicitlyDisabled_isHonoured() throws Exception {
+        // 显式关闭是完全禁用逃生口
+        PigAgentConfig cfg = yaml.readValue("tools:\n  deferred:\n    enabled: false\n", PigAgentConfig.class);
+        assertThat(cfg.getTools().getDeferred().isEnabled()).isFalse();
     }
 
     @Test

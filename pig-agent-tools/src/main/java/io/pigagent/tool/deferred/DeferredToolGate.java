@@ -2,6 +2,7 @@ package io.pigagent.tool.deferred;
 
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.Toolkit;
+import io.pigagent.core.tool.RevealTargets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,6 +112,25 @@ public final class DeferredToolGate {
                 return false;
             }
             toolkit.updateToolGroups(List.of(dt.get().groupName()), true);
+            registry.markRevealed(toolName);
+            return true;
+        };
+    }
+
+    /**
+     * Build the reveal seam over a {@link RevealTargets} broadcaster instead of a single toolkit — the
+     * fix for reveal state not propagating across {@code Toolkit.copy()}. Because peers/subagents run on
+     * independent-group-state copies, revealing must activate the tool's group on <em>every</em> live
+     * toolkit (base + peer/subagent copies), so the tool becomes visible+callable in whichever copy the
+     * current agent runs. Otherwise identical to {@link #reveal(Toolkit, DeferredToolRegistry)}.
+     */
+    public static DeferredToolReveal reveal(RevealTargets targets, DeferredToolRegistry registry) {
+        return toolName -> {
+            Optional<DeferredTool> dt = registry.find(toolName);
+            if (dt.isEmpty()) {
+                return false;
+            }
+            targets.activateGroup(dt.get().groupName());
             registry.markRevealed(toolName);
             return true;
         };

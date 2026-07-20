@@ -1,25 +1,39 @@
 package io.pigagent.tool.deferred;
 
+import io.pigagent.core.search.Bm25Index;
+import io.pigagent.core.search.HybridRanker;
+
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Holds the metadata of the tools currently <em>deferred</em> (hidden from the model's initial
  * schema) and answers {@code tool_search} queries against them. Thread-safe: {@code tool_search}
  * runs during a reasoning turn while the registry may be mutated by reveals.
  *
- * <p>Search matches a query's keyword tokens against each deferred tool's keywords / name /
- * description and ranks by overlap. Once a tool is <em>revealed</em> it is removed from the
- * searchable set (it is already back in the schema, no need to rediscover it); revealing a tool
- * also reveals any sibling sharing its {@code groupName} (a whole group is activated at once).
+ * <p>Search ranks the still-deferred tools with the <b>shared kernel retrieval primitives</b>
+ * ({@code io.pigagent.core.search}: {@link Bm25Index} + {@link HybridRanker} + CJK tokenizer) — the
+ * same ranker {@code memory_search} uses — so tool search and memory search never drift apart in
+ * scoring (no bespoke keyword count here). Each deferred tool is projected onto a {@link ToolDocument}
+ * ({@code id}=name, {@code text}=name+description+keywords); BM25 scores are routed through
+ * {@link HybridRanker} with an empty vector map (BM25-only degradation, the memory line's fusion exit).
+ * Once a tool is <em>revealed</em> it is removed from the searchable set (it is already back in the
+ * schema, no need to rediscover it); revealing a tool also reveals any sibling sharing its
+ * {@code groupName} (a whole group is activated at once).
  */
 public final class DeferredToolRegistry {
+
+    /**
+     * Weight on the (normalized) BM25 component when routing through {@link HybridRanker}. Tool search
+     * is BM25-only (no embeddings — tool metadata is short and few; see design D2), so the vector
+     * weight is 0 and the vector map is empty; this weight only needs to be positive to preserve the
+     * normalized BM25 ordering.
+     */
+    private static final double BM25_WEIGHT = 1.0;
 
     private final Map<String, DeferredTool> deferred = new LinkedHashMap<>();
     private final Map<String, DeferredTool> revealed = new LinkedHashMap<>();
@@ -36,32 +50,41 @@ public final class DeferredToolRegistry {
     }
 
     /**
-     * Rank still-deferred tools by relevance to {@code query}; returns at most {@code limit}
-     * (most relevant first). A blank query returns an empty list (the caller surfaces a hint).
+     * Rank still-deferred tools by relevance to {@code query} using the shared BM25 ranker; returns at
+     * most {@code limit} (most relevant first). A blank query, empty registry, or no in-vocabulary
+     * match returns an empty list (the caller surfaces a hint).
      */
     public List<DeferredTool> search(String query, int limit) {
         if (query == null || query.isBlank() || limit <= 0) {
             return List.of();
         }
-        Set<String> qTokens = Keywords.tokenize(query);
-        String qLower = query.toLowerCase(Locale.ROOT);
-        List<Scored> scored = new ArrayList<>();
+        List<DeferredTool> snapshot;
         synchronized (lock) {
-            for (DeferredTool t : deferred.values()) {
-                int s = score(t, qTokens, qLower);
-                if (s > 0) {
-                    scored.add(new Scored(t, s));
-                }
-            }
+            snapshot = new ArrayList<>(deferred.values());
         }
-        scored.sort(Comparator.comparingInt((Scored x) -> x.score).reversed()
-                .thenComparing(x -> x.tool.name()));
-        List<DeferredTool> out = new ArrayList<>();
-        for (Scored x : scored) {
-            if (out.size() >= limit) {
-                break;
+        if (snapshot.isEmpty()) {
+            return List.of();
+        }
+        List<ToolDocument> docs = new ArrayList<>(snapshot.size());
+        Map<String, DeferredTool> byId = new HashMap<>();
+        for (DeferredTool t : snapshot) {
+            docs.add(ToolDocument.of(t));
+            byId.put(t.name(), t);
+        }
+        Bm25Index index = new Bm25Index();
+        index.index(docs);
+        Map<String, Double> bm25 = index.score(query);
+        if (bm25.isEmpty()) {
+            return List.of();
+        }
+        List<HybridRanker.Scored> ranked =
+                HybridRanker.rank(bm25, Map.of(), BM25_WEIGHT, 0.0, 0.0, limit);
+        List<DeferredTool> out = new ArrayList<>(ranked.size());
+        for (HybridRanker.Scored s : ranked) {
+            DeferredTool t = byId.get(s.id());
+            if (t != null) {
+                out.add(t);
             }
-            out.add(x.tool);
         }
         return out;
     }
@@ -123,28 +146,5 @@ public final class DeferredToolRegistry {
         synchronized (lock) {
             return deferred.isEmpty() && revealed.isEmpty();
         }
-    }
-
-    private static int score(DeferredTool t, Set<String> qTokens, String qLower) {
-        int score = 0;
-        String nameLower = t.name().toLowerCase(Locale.ROOT);
-        // Strong signal: the whole query is a substring of the name (or vice-versa).
-        if (nameLower.contains(qLower) || qLower.contains(nameLower)) {
-            score += 5;
-        }
-        for (String q : qTokens) {
-            if (t.keywords().contains(q)) {
-                score += 3;
-            } else if (nameLower.contains(q)) {
-                score += 2;
-            } else if (t.description() != null
-                    && t.description().toLowerCase(Locale.ROOT).contains(q)) {
-                score += 1;
-            }
-        }
-        return score;
-    }
-
-    private record Scored(DeferredTool tool, int score) {
     }
 }

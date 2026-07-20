@@ -94,6 +94,7 @@ import io.pigagent.tool.deferred.DeferredToolRegistry;
 import io.pigagent.tool.deferred.DeferredToolReveal;
 import io.pigagent.tool.deferred.ToolInfo;
 import io.pigagent.tool.deferred.ToolSearchTool;
+import io.pigagent.core.tool.RevealTargets;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.memory.HybridMemorySearchTool;
@@ -431,8 +432,14 @@ public final class AgentBootstrap {
         PigAgentConfig.DeferredToolsConfig deferredCfg = config.getTools().getDeferred();
         boolean deferredEnabled = deferredCfg.isEnabled();
         DeferredToolRegistry deferredRegistry = new DeferredToolRegistry();
+        // deferred-tools: reveal broadcaster — a tool_search reveal must activate the group on the toolkit
+        // the current agent actually runs on, including peer/subagent Toolkit.copy() instances (which have
+        // INDEPENDENT group active-state). The base toolkit + every peer copy register here; subagent child
+        // copies register via PigAgent.Builder.revealTargets (threaded through the factories below).
+        RevealTargets revealTargets = new RevealTargets();
         if (deferredEnabled) {
-            DeferredToolReveal reveal = DeferredToolGate.reveal(toolkit, deferredRegistry);
+            revealTargets.register(toolkit);
+            DeferredToolReveal reveal = DeferredToolGate.reveal(revealTargets, deferredRegistry);
             toolkit.registration().tool(new ToolSearchTool(deferredRegistry, reveal)).apply();
             mcpManager.setToolGroupNamer(name -> "mcp:" + name);
         }
@@ -485,9 +492,7 @@ public final class AgentBootstrap {
             List<ToolInfo> inventory = buildToolInventory(toolkit, mcpManager);
             DeferralPlan plan = DeferredToolPlanner.plan(true, deferredCfg.getTools(),
                     deferredCfg.isAutoDeferMcp(), deferredCfg.getThreshold(), inventory);
-            DeferredToolGate.applyTo(toolkit, plan, inventory, deferredRegistry);
-            log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
-                    deferredRegistry.deferredNames().size());
+            applyDeferral(toolkit, plan, inventory, deferredRegistry);
         }
 
         // Fixed tool guidance (TOOL_GUIDANCE) appended to the (user-editable) AGENT.md + INFO.md. See
@@ -638,7 +643,7 @@ public final class AgentBootstrap {
                 interactiveMiddlewares, memoryConfigSupplier,
                 maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
-                subagentsEnabled, peerSubagents, planModeSettings, memoryInjection);
+                subagentsEnabled, peerSubagents, planModeSettings, memoryInjection, revealTargets);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -655,7 +660,13 @@ public final class AgentBootstrap {
                 // av2 Phase 5a: the model is passed through untouched — retry + interrupt are native
                 // (maxRetries below; ReActAgent.interrupt driven by the kernel). No Model decorators.
                 spec -> modelManager.modelFor(spec.modelId()),
-                spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
+                spec -> {
+                    // Register the peer's toolkit (a Toolkit.copy when the peer whitelists a subset) so a
+                    // tool_search reveal fired from this peer activates the group on the peer's own copy.
+                    Toolkit peerToolkit = AgentWiring.toolkitFor(toolkit, spec.toolNames());
+                    revealTargets.register(peerToolkit);
+                    return peerToolkit;
+                },
                 // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
                 // are logging-only (loop detection is instance-stateful → interactive/channel tracks) +
                 // the shared user-profile injector (user-profile) so peers also "know who you are".
@@ -669,7 +680,8 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings, memoryInjection);
+                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings, memoryInjection,
+                revealTargets);
         for (AgentSpec s : declaredSpecs) {
             if (!"default".equals(s.id())) {
                 try {
@@ -1090,6 +1102,26 @@ public final class AgentBootstrap {
      * MCP and names the group the gate deactivates to defer them. Reads only in-memory group state
      * (no MCP network calls).
      */
+    /**
+     * Backward-safe deferral application (smart default, D4): with a non-empty plan, hide the planned
+     * tools via {@link DeferredToolGate} (today's behavior). With an <b>empty</b> plan — nothing crossed
+     * the threshold and no explicit list matched — {@code tool_search} is removed from the toolkit so the
+     * initial schema stays <b>byte-identical to {@code enabled=false}</b> (MCP tools were only grouped
+     * into ACTIVE groups, which is schema-neutral, so nothing else needs undoing). This is what lets the
+     * feature default ON for large toolsets while a small toolset user sees no change.
+     */
+    static void applyDeferral(Toolkit toolkit, DeferralPlan plan, List<ToolInfo> inventory,
+                              DeferredToolRegistry registry) {
+        if (plan == null || plan.isEmpty()) {
+            toolkit.removeTool(DeferredToolPlanner.TOOL_SEARCH);
+            log.info("Deferred tools: nothing over threshold; tool_search removed (initial schema unchanged)");
+            return;
+        }
+        DeferredToolGate.applyTo(toolkit, plan, inventory, registry);
+        log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
+                registry.deferredNames().size());
+    }
+
     static List<ToolInfo> buildToolInventory(Toolkit toolkit, McpManager mcpManager) {
         java.util.Map<String, String> mcpToolGroup = new java.util.HashMap<>();
         for (String group : mcpManager.managedToolGroups()) {
