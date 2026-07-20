@@ -8,6 +8,7 @@ import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.pigagent.core.memory.injection.MemoryInjection;
+import io.pigagent.core.tool.RevealTargets;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -73,6 +74,9 @@ public final class AgentInstanceFactory {
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
     // memory-retrieval-injection: RAG-style injection (pinned + query-aware); null → today's whole-file.
     private final MemoryInjection memoryInjection;
+    // deferred-tools: reveal broadcaster so a peer's spawned subagent child registers its Toolkit.copy();
+    // null → children not registered (today's behavior).
+    private final RevealTargets revealTargets;
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
@@ -166,6 +170,23 @@ public final class AgentInstanceFactory {
                                 Path workspace, ToolResultEvictionConfig toolResultEviction,
                                 boolean subagentsEnabled, PlanModeSettings planMode,
                                 MemoryInjection memoryInjection) {
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, maxRetries,
+                workspace, toolResultEviction, subagentsEnabled, planMode, memoryInjection, null);
+    }
+
+    /**
+     * @param revealTargets reveal broadcaster ({@code deferred-tools}) into which each peer's spawned
+     *        subagent child toolkits register, so a child's {@code tool_search} reveal activates the group
+     *        on its own {@code Toolkit.copy()}. {@code null} (default) keeps children unregistered.
+     */
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries,
+                                Path workspace, ToolResultEvictionConfig toolResultEviction,
+                                boolean subagentsEnabled, PlanModeSettings planMode,
+                                MemoryInjection memoryInjection, RevealTargets revealTargets) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
@@ -178,6 +199,7 @@ public final class AgentInstanceFactory {
         this.subagentsEnabled = subagentsEnabled;
         this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
         this.memoryInjection = memoryInjection;
+        this.revealTargets = revealTargets;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -199,6 +221,7 @@ public final class AgentInstanceFactory {
                 .toolResultEviction(toolResultEviction)
                 .subagents(subagentsEnabled)
                 .planMode(planMode)
+                .revealTargets(revealTargets)
                 .build();
         return new AgentInstance(spec.id(), spec, agent);
     }

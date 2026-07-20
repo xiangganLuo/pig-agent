@@ -94,6 +94,7 @@ import io.pigagent.tool.deferred.DeferredToolRegistry;
 import io.pigagent.tool.deferred.DeferredToolReveal;
 import io.pigagent.tool.deferred.ToolInfo;
 import io.pigagent.tool.deferred.ToolSearchTool;
+import io.pigagent.core.tool.RevealTargets;
 import io.pigagent.tool.filesystem.FileSystemTools;
 import io.pigagent.tool.loop.LoopDetectedTool;
 import io.pigagent.tool.memory.HybridMemorySearchTool;
@@ -431,8 +432,14 @@ public final class AgentBootstrap {
         PigAgentConfig.DeferredToolsConfig deferredCfg = config.getTools().getDeferred();
         boolean deferredEnabled = deferredCfg.isEnabled();
         DeferredToolRegistry deferredRegistry = new DeferredToolRegistry();
+        // deferred-tools: reveal broadcaster — a tool_search reveal must activate the group on the toolkit
+        // the current agent actually runs on, including peer/subagent Toolkit.copy() instances (which have
+        // INDEPENDENT group active-state). The base toolkit + every peer copy register here; subagent child
+        // copies register via PigAgent.Builder.revealTargets (threaded through the factories below).
+        RevealTargets revealTargets = new RevealTargets();
         if (deferredEnabled) {
-            DeferredToolReveal reveal = DeferredToolGate.reveal(toolkit, deferredRegistry);
+            revealTargets.register(toolkit);
+            DeferredToolReveal reveal = DeferredToolGate.reveal(revealTargets, deferredRegistry);
             toolkit.registration().tool(new ToolSearchTool(deferredRegistry, reveal)).apply();
             mcpManager.setToolGroupNamer(name -> "mcp:" + name);
         }
@@ -636,7 +643,7 @@ public final class AgentBootstrap {
                 interactiveMiddlewares, memoryConfigSupplier,
                 maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
-                subagentsEnabled, peerSubagents, planModeSettings, memoryInjection);
+                subagentsEnabled, peerSubagents, planModeSettings, memoryInjection, revealTargets);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -653,7 +660,13 @@ public final class AgentBootstrap {
                 // av2 Phase 5a: the model is passed through untouched — retry + interrupt are native
                 // (maxRetries below; ReActAgent.interrupt driven by the kernel). No Model decorators.
                 spec -> modelManager.modelFor(spec.modelId()),
-                spec -> AgentWiring.toolkitFor(toolkit, spec.toolNames()),
+                spec -> {
+                    // Register the peer's toolkit (a Toolkit.copy when the peer whitelists a subset) so a
+                    // tool_search reveal fired from this peer activates the group on the peer's own copy.
+                    Toolkit peerToolkit = AgentWiring.toolkitFor(toolkit, spec.toolNames());
+                    revealTargets.register(peerToolkit);
+                    return peerToolkit;
+                },
                 // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
                 // are logging-only (loop detection is instance-stateful → interactive/channel tracks) +
                 // the shared user-profile injector (user-profile) so peers also "know who you are".
@@ -667,7 +680,8 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings, memoryInjection);
+                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings, memoryInjection,
+                revealTargets);
         for (AgentSpec s : declaredSpecs) {
             if (!"default".equals(s.id())) {
                 try {

@@ -431,6 +431,10 @@ public final class PigAgent {
         private boolean subagentsEnabled; // false = native subagents disabled (today's behavior)
         private List<SubagentDeclaration> subagentDeclarations; // null/empty = built-in + workspace only
         private PlanModeSettings planMode = PlanModeSettings.disabled(); // disabled = today's behavior
+        // deferred-tools: broadcaster so a tool_search reveal fired from a subagent child (a Toolkit.copy)
+        // activates the group on that child too. null = not registered (today's behavior; no subagents or
+        // deferred tools off).
+        private io.pigagent.core.tool.RevealTargets revealTargets;
 
         private Builder() {}
 
@@ -595,6 +599,18 @@ public final class PigAgent {
          */
         public Builder subagentDeclarations(List<SubagentDeclaration> subagentDeclarations) {
             this.subagentDeclarations = subagentDeclarations;
+            return this;
+        }
+
+        /**
+         * Register this agent's spawned subagent child toolkits (each a {@code Toolkit.copy()}) into a
+         * shared {@link io.pigagent.core.tool.RevealTargets} so a {@code tool_search} reveal fired during a
+         * child's turn activates the tool group on that child's own (independent-group-state) copy —
+         * fixing the deferred-tools "reveal does not propagate across copy()" limitation. {@code null}
+         * (default) = children are not registered (today's behavior). Only meaningful with subagents on.
+         */
+        public Builder revealTargets(io.pigagent.core.tool.RevealTargets revealTargets) {
+            this.revealTargets = revealTargets;
             return this;
         }
 
@@ -785,20 +801,37 @@ public final class PigAgent {
             Model parentModel = model;
             int childIters = maxIters;
             int childRetries = maxRetries;
-            hb.subagentFactory(GENERAL_PURPOSE_ID, ignoredName -> buildLeafChild(
-                    GENERAL_PURPOSE_ID, parentPrompt, parentToolkit.copy(), childCtx,
-                    parentModel, childWorkspace, childIters, childRetries));
+            io.pigagent.core.tool.RevealTargets targets = revealTargets;
+            hb.subagentFactory(GENERAL_PURPOSE_ID, ignoredName -> {
+                Toolkit childTk = registerReveal(parentToolkit.copy(), targets);
+                return buildLeafChild(GENERAL_PURPOSE_ID, parentPrompt, childTk, childCtx,
+                        parentModel, childWorkspace, childIters, childRetries);
+            });
             if (subagentDeclarations != null) {
                 for (SubagentDeclaration d : subagentDeclarations) {
                     String childName = d.getName();
                     String body = d.getInlineAgentsBody();
                     String childPrompt = (body != null && !body.isBlank()) ? body : parentPrompt;
                     List<String> tools = d.getTools();
-                    hb.subagentFactory(childName, ignoredName -> buildLeafChild(
-                            childName, childPrompt, childToolkit(parentToolkit, tools), childCtx,
-                            parentModel, childWorkspace, childIters, childRetries));
+                    hb.subagentFactory(childName, ignoredName -> {
+                        Toolkit childTk = registerReveal(childToolkit(parentToolkit, tools), targets);
+                        return buildLeafChild(childName, childPrompt, childTk, childCtx,
+                                parentModel, childWorkspace, childIters, childRetries);
+                    });
                 }
             }
+        }
+
+        /**
+         * Register a freshly-created subagent child toolkit into the reveal broadcaster (so a
+         * {@code tool_search} reveal from the child activates the group on this copy too), then return it.
+         * No-op when {@code targets} is null (subagents/deferred off) — returns the toolkit unchanged.
+         */
+        private static Toolkit registerReveal(Toolkit childToolkit, io.pigagent.core.tool.RevealTargets targets) {
+            if (targets != null) {
+                targets.register(childToolkit);
+            }
+            return childToolkit;
         }
 
         /**
