@@ -4,6 +4,7 @@ import io.pigagent.tool.skills.Skill;
 import io.pigagent.tool.skills.SkillManifestParser;
 import io.pigagent.tool.skills.SkillRegistry;
 import io.pigagent.tool.skills.WorkspaceSkillSource;
+import io.pigagent.tool.skills.curator.SkillPromotionReviewer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,13 +41,31 @@ public final class SkillGate {
     private final SkillRegistry existingSkills;
     private final WorkspaceSkillSource workspaceSource;
     private final SkillManifestParser parser = SkillManifestParser.defaults();
+    private final SkillPromotionReviewer reviewer;
+    private final boolean umbrellaMergeEnabled;
 
     public SkillGate(SkillStagingArea staging, SkillContentScanner scanner,
                      SkillRegistry existingSkills, WorkspaceSkillSource workspaceSource) {
+        this(staging, scanner, existingSkills, workspaceSource,
+                SkillPromotionReviewer.alwaysApprove(), false);
+    }
+
+    /**
+     * Full constructor (skill-curator-and-graded-promotion, S3): additionally wire the graded promotion
+     * {@code reviewer} (the native {@code SkillPromotionGate} decision; default {@code alwaysApprove()}
+     * reproduces today's {@code /skill approve}) and {@code umbrellaMergeEnabled} — when true the
+     * curator's semantic umbrella-merge replaces the hand-rolled Jaccard description warning, so the
+     * legacy Jaccard warning is suppressed here.
+     */
+    public SkillGate(SkillStagingArea staging, SkillContentScanner scanner,
+                     SkillRegistry existingSkills, WorkspaceSkillSource workspaceSource,
+                     SkillPromotionReviewer reviewer, boolean umbrellaMergeEnabled) {
         this.staging = staging;
         this.scanner = scanner == null ? SkillContentScanner.defaults() : scanner;
         this.existingSkills = existingSkills;
         this.workspaceSource = workspaceSource;
+        this.reviewer = reviewer == null ? SkillPromotionReviewer.alwaysApprove() : reviewer;
+        this.umbrellaMergeEnabled = umbrellaMergeEnabled;
     }
 
     /** Staged drafts awaiting review, each with its description, size and current scan verdict. */
@@ -90,8 +109,17 @@ public final class SkillGate {
             return PromotionResult.of(PromotionResult.Status.REJECTED_CONFLICT,
                     List.of("a workspace skill named '" + name + "' already exists"));
         }
+        // Graded promotion gate (S3): after scan + dedup, delegate the accept decision to the reviewer.
+        // A non-Approve (defer/reject) is fail-closed → REJECTED_GATE. Default reviewer approves, so the
+        // interactive /skill approve behavior is unchanged.
+        String description = parser.parse(content, name).metadata().description();
+        if (!reviewer.approve(name, description, content)) {
+            return PromotionResult.of(PromotionResult.Status.REJECTED_GATE,
+                    List.of("promotion gate did not approve '" + name + "'"));
+        }
         boolean overridesBuiltin = allNames().contains(name);
-        List<String> warnings = similarityWarnings(name, content);
+        // Umbrella-merge (S3) supersedes the hand-rolled Jaccard description warning when enabled.
+        List<String> warnings = umbrellaMergeEnabled ? List.of() : similarityWarnings(name, content);
         try {
             staging.promote(name);
             return PromotionResult.promoted(overridesBuiltin, warnings);

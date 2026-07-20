@@ -1,5 +1,6 @@
 package io.pigagent.tool.skills.authoring;
 
+import io.agentscope.harness.agent.skill.curator.SkillSecurityScanner;
 import io.pigagent.tool.contract.CredentialSanitizer;
 import io.pigagent.tool.skills.SkillLimits;
 import io.pigagent.tool.skills.SkillManifest;
@@ -22,20 +23,35 @@ import java.util.List;
  *   <li><b>structure</b> — the front-matter MUST parse and {@code name}/{@code description}/{@code body}
  *       be non-blank.</li>
  * </ol>
- * Never throws: any internal failure becomes a rejection reason.
+ *
+ * <p><b>Unified security model (skill-curator-and-graded-promotion, S3, D8).</b> When
+ * {@code nativeScanEnabled} (curator on), the native {@link SkillSecurityScanner} is folded into the
+ * SAME verdict rather than run as a second, possibly-conflicting judgement: the candidate is scanned at
+ * the {@code AGENT_CREATED} trust level and a native-disallowed verdict adds a rejection reason (its
+ * findings are summarized by category only — no secret / sensitive value echoed). Default off → the
+ * four pig checks are byte-identical to before.
+ *
+ * <p>Never throws: any internal failure becomes a rejection reason.
  */
 public final class DefaultSkillContentScanner implements SkillContentScanner {
 
     private final SkillLimits limits;
     private final SkillManifestParser parser;
+    private final boolean nativeScanEnabled;
 
     public DefaultSkillContentScanner() {
-        this(SkillLimits.defaults(), SkillManifestParser.defaults());
+        this(SkillLimits.defaults(), SkillManifestParser.defaults(), false);
     }
 
     public DefaultSkillContentScanner(SkillLimits limits, SkillManifestParser parser) {
+        this(limits, parser, false);
+    }
+
+    public DefaultSkillContentScanner(SkillLimits limits, SkillManifestParser parser,
+                                      boolean nativeScanEnabled) {
         this.limits = limits == null ? SkillLimits.defaults() : limits;
         this.parser = parser == null ? SkillManifestParser.defaults() : parser;
+        this.nativeScanEnabled = nativeScanEnabled;
     }
 
     @Override
@@ -63,11 +79,37 @@ public final class DefaultSkillContentScanner implements SkillContentScanner {
             if (manifest.body().isBlank()) {
                 reasons.add("empty skill body");
             }
+            if (nativeScanEnabled) {
+                addNativeVerdict(name, text, reasons);
+            }
         } catch (RuntimeException e) {
             // Fail-safe: any scanner error is a rejection, never an exception to the caller.
             reasons.add("scan error");
         }
         return reasons.isEmpty() ? SkillScanResult.ok() : SkillScanResult.rejected(reasons);
+    }
+
+    /**
+     * Fold the native security scanner into the same verdict (D8): reject when the native scanner
+     * disallows the content at the {@code AGENT_CREATED} trust level. The reason names the native
+     * verdict category only — never a matched secret / sensitive value.
+     */
+    private static void addNativeVerdict(String name, String text, List<String> reasons) {
+        try {
+            SkillSecurityScanner.ScanResult scan =
+                    SkillSecurityScanner.scanSingleFile(name == null ? "" : name, text);
+            if (scan == null || scan.verdict() == null) {
+                return;
+            }
+            if (!SkillSecurityScanner.shouldAllow(
+                    SkillSecurityScanner.TrustLevel.AGENT_CREATED, scan.verdict())) {
+                reasons.add("native security scan: " + scan.verdict()
+                        + " (skill content not allowed at agent-created trust level)");
+            }
+        } catch (RuntimeException e) {
+            // Fail-safe: a scanner error is a rejection, never a leak.
+            reasons.add("native security scan error");
+        }
     }
 
     /** True iff sanitizing the text changes it — i.e. it contained a secret-looking value. */

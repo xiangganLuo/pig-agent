@@ -117,6 +117,7 @@ import io.pigagent.tool.skills.authoring.SkillGate;
 import io.pigagent.tool.skills.authoring.SkillStagingArea;
 import io.pigagent.tool.skills.curator.NativeSkillUsageRecorder;
 import io.pigagent.tool.skills.curator.SkillCuratorService;
+import io.pigagent.tool.skills.curator.SkillPromotionReviewer;
 import io.pigagent.tool.skills.curator.SkillUsageRecorder;
 import io.pigagent.tool.spi.ToolContext;
 import io.pigagent.tool.spi.ToolRegistrar;
@@ -336,12 +337,24 @@ public final class AgentBootstrap {
         PigAgentConfig.AutonomousSkillsConfig autoSkillsCfg = config.getSkills().getAutonomous();
         SkillStagingArea skillStaging = new SkillStagingArea(
                 workspace.getSkillsDir(), autoSkillsCfg.getStagingDir(), SkillLimits.defaults());
-        SkillContentScanner skillScanner = new DefaultSkillContentScanner();
+        // skill-curator-and-graded-promotion (S3): when the curator is enabled, (a) fold the native
+        // SkillSecurityScanner into the SAME content-scan verdict (D8), (b) delegate the promote accept
+        // decision to a native SkillPromotionGate — interactive → LocalApprovalGate mapping the
+        // operator's /skill approve to Approve (channel/autonomous never hold a SkillGate → fail-closed),
+        // (c) let the curator's umbrella-merge supersede the hand-rolled Jaccard warning. Default off →
+        // today's SkillGate (pig scan + dedup + Jaccard, alwaysApprove).
+        boolean curatorOn = config.getSkills().getCurator().isEnabled();
+        SkillContentScanner skillScanner = new DefaultSkillContentScanner(
+                SkillLimits.defaults(), io.pigagent.tool.skills.SkillManifestParser.defaults(), curatorOn);
+        SkillPromotionReviewer promotionReviewer = curatorOn
+                ? new io.pigagent.tool.skills.curator.NativeSkillPromotionReviewer(interactiveApprovalGate())
+                : SkillPromotionReviewer.alwaysApprove();
         SkillGate skillGate = new SkillGate(skillStaging, skillScanner,
                 new SkillRegistry(List.of(
                         new WorkspaceSkillSource(workspace.getSkillsDir()),
                         new ClasspathSkillSource())),
-                new WorkspaceSkillSource(workspace.getSkillsDir()));
+                new WorkspaceSkillSource(workspace.getSkillsDir()),
+                promotionReviewer, curatorOn);
         // User profile (user-profile): the curated USER.md distinct from MEMORY.md. Resolve its path
         // (config-overridable), a live enabled supplier (so /config edits + the disabled path apply),
         // and its injection size cap. The path + enabled flow into ToolContext (updateProfile tool) and
@@ -1186,6 +1199,23 @@ public final class AgentBootstrap {
             }
         }
         return new SkillsTool(new SkillRegistry(sources), SkillLimits.defaults(), recorder);
+    }
+
+    /**
+     * The interactive-track promotion gate (skill-curator-and-graded-promotion, S3): a native
+     * {@code LocalApprovalGate} whose prompter reflects the operator's already-issued {@code /skill
+     * approve} — it returns {@code Approve} immediately (reusing the existing HITL operator decision, no
+     * second stdin prompt). channel/autonomous tracks never hold a {@code SkillGate}, so they are
+     * fail-closed by construction (conceptually a {@code RejectAllGate}).
+     */
+    private static io.agentscope.harness.agent.skill.curator.LocalApprovalGate interactiveApprovalGate() {
+        io.agentscope.harness.agent.skill.curator.LocalApprovalGate.Prompter approve = candidate ->
+                java.util.concurrent.CompletableFuture.completedFuture(
+                        new io.agentscope.harness.agent.skill.curator.SkillPromotionGate
+                                .PromotionDecision.Approve("operator", java.util.List.of(),
+                                java.time.Instant.now()));
+        return new io.agentscope.harness.agent.skill.curator.LocalApprovalGate(
+                java.time.Duration.ofSeconds(30), approve, java.util.List.of());
     }
 
     /**

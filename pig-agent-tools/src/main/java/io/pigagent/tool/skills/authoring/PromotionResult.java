@@ -24,6 +24,8 @@ public record PromotionResult(Status status, List<String> reasons, List<String> 
         REJECTED_SCAN,
         /** Rejected because an active workspace skill of the same name exists. */
         REJECTED_CONFLICT,
+        /** Rejected by the graded promotion gate (non-Approve decision — fail-closed). */
+        REJECTED_GATE,
         /** No staged draft with that name. */
         NOT_FOUND,
         /** An unexpected error during promotion (e.g. a move failure). */
