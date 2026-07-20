@@ -1,0 +1,47 @@
+# Tasks — skill-curator-and-graded-promotion
+
+> 内环 TDD：每个可测单元先写测试（RED）→ 实现（GREEN）→ `mvn test` → 勾选。分组后 `mvn -q -pl pig-agent-cli -am compile`。
+> **第 1 组是承重 spike（安全相关），门整条 S3**：不过则停下升级人工、本 spec 不进编码（design.md「承重 Spike 结论」已给 javap 签名级判据；S1 spike B 已证三件套可当纯库驱动，本组坐实 S3 特有的接入点：usage 自喂 / `.archive` 兼容 / fail-closed 映射）。
+
+## 1. 承重 spike（门整条 S3，安全相关）—— `pig-agent-tools`（补 harness 依赖后）
+
+- [ ] 1.1 **usage 自喂 spike**（"不当嘴 → 自喂"）：`SkillCuratorSpikeTest.usageSelfFed_*`——`LocalFilesystem(@TempDir)` + `SkillUsageStore`，断言：（a）`markAgentCreated(name,"agent",envs)` → `bumpUse(name)` → `get(name).useCount()` 递增；（b）对**未注册**名直接 `bumpUse` **no-op 安全**（不抛、不新建 record）——坐实「原生 usage 假设走 `SkillLoadTool`，pig 可从 `loadSkill` 手动自喂，且 `bumpUse` 只增已存在记录」的 S3 接入判据。全程无 Model/Agent/原生 middleware。
+- [ ] 1.2 **`.archive` 归档兼容 spike**：`SkillCuratorSpikeTest.archiveNotSurfaced_*`——temp `workspace/skills/<name>/SKILL.md`（含 front-matter），构 `SkillCurator(fs, store, WorkspaceSkillRepository, config)`；断言 `runUmbrellaDryRunReport(now)` **非破坏**（技能仍在），`runOnce(now)`（配 `archiveAfterDays` 触发）把陈旧技能移入 `skills/.archive/`，且随后 pig `WorkspaceSkillSource.discover()` + `NativeRepositorySkillSource.discover()` **均不列出**归档技能（点前缀跳过 `:71-73`/S1 D5）。坐实「归档目录 = `.archive`、与 pig 点前缀跳过不冲突、归档不再浮现为 active」。
+- [ ] 1.3 **fail-closed 映射 spike**（安全相关）：`SkillCuratorSpikeTest.failClosedMapping_*`——`RejectAllGate().review(candidate, RuntimeContext.empty()).block()` 断言 **非 `PromotionDecision.Approve`**（含 S1 R-Spike-1 的 `Defer` 语义）；`LocalApprovalGate(approve-prompter).review(...)` → `Approve`、`LocalApprovalGate(reject/defer-prompter)` → 非 `Approve`。坐实「非交互轨永不 Approve、交互轨可授权 Approve」的 1:1 映射判据。
+- [ ] 1.4 spike 汇总：三项结论（+ 与 S1 spike B/R-Spike-1/R-Spike-2 的衔接）写回 design.md「承重 Spike 结论」（如与签名级有出入则精化，非矛盾）。**GREEN → 进入第 2 组编码；任一不过 → 停下升级人工。**
+
+## 2. 依赖 + 配置（`pig-agent-tools` / `pig-agent-config`）
+
+- [ ] 2.1 `pig-agent-tools/pom.xml` 显式声明 `agentscope-harness`（compile，兑现 S1 design D11）；`mvn -q -pl pig-agent-tools -am compile` 绿，确认无环（tools→core→harness）。
+- [ ] 2.2 `PigAgentConfig.SkillsConfig` 加 `curator` 子块（`CuratorConfig`：`enabled` 默认 false、`usage-recording` 默认 true、`schedule` 默认 `0 3 * * 0`、`stale-after-days` 30、`archive-after-days` 90、`min-idle-hours` 2、`auto-archive` 默认 false、`umbrella-pass-mode` 默认 `dry_run_only`、`backup-retention` 3、`canary` 子块 `enabled` false/`percent` 10/`ramp-up-days` 0）+ 访问器（null/缺块安全、非法值 clamp）。`CuratorConfigTest`：默认值（`enabled=false`/`auto-archive=false`/`umbrella-pass-mode=dry_run_only`）+ 解析 + null setter 容错 + canary 默认关。
+
+## 3. 使用分析 seam（`pig-agent-tools`，`io.pigagent.tool.skills.curator` + `SkillsTool`）
+
+- [ ] 3.1 `SkillUsageRecorder`（接口，`record(String)`；静态 `noop()`）+ `NativeSkillUsageRecorder`（包 `SkillUsageStore(LocalFilesystem(workspaceRoot))`：`get` 存在→`bumpUse`+`save`，不存在→no-op；容错吞异常）。`SkillUsageRecorderTest`：no-op 默认不抛；native recorder 对已注册名递增、未注册名 no-op、store 抛异常时吞掉。
+- [ ] 3.2 `SkillsTool` 构造多接 `SkillUsageRecorder`（默认 `noop()`）；`loadSkill` 命中后调 `recorder.record(name)`（try/catch 容错，永不影响返回）。`SkillsToolTest` 保持绿（`@Tool` 名/签名/返回语义**逐字不变**：空列表/未知名/读错兜底/无支持文件）；加一例断言「命中触发一次 record、读错/未知名不 record」（用 fake recorder）。
+
+## 4. curator 采纳 + 调度（`pig-agent-tools` / `pig-agent-cli`）
+
+- [ ] 4.1 `CuratorRunSummary`（值对象/record：checked/markedStale/archived/reactivated + dryRun 标记 + 老化候选名单 + ranAt）。`SkillCuratorService`（持 `LocalFilesystem`+`SkillUsageStore`+`WorkspaceSkillRepository`+`SkillCuratorConfig`+`auto-archive`/`canary` 标记）：`runOnce()`（`auto-archive=false`→`runUmbrellaDryRunReport`+读 usage 派生老化候选，非破坏；`true`→`SkillCurator.runOnce(now)` 真迁移）、`status()`（只读：`agentCreatedReport()`+候选+上次运行+配置）。`SkillCuratorServiceTest`（fake/real `SkillUsageStore` + temp fs）：dry-run 非破坏、apply 迁移计数、status 只读、pig config→`SkillCuratorConfig` 映射 + `umbrellaPassMode` 取代 Jaccard 的开关。
+- [ ] 4.2 （可选）`CanaryFilter` 读栈应用 seam（默认关）：`canary.enabled=true` 时在 `SkillRegistry`/读栈输出上按 `SkillUsageStore` canary 状态过滤新提升技能（作用于 pig 读栈，非原生 prompt）。`SkillCuratorCanaryTest`：默认关→读栈不变；开启→新技能按 % 逐步可见。（若复杂度过高，退化为「设 seam + 默认关 + 标注延后深度实现」，不阻塞主线。）
+- [ ] 4.3 `AgentBootstrap`：`skills.curator.enabled=true` 时构 `SkillCuratorService`（`LocalFilesystem(workspace.getRootPath())` + `RuntimeContext::empty`）并 `taskScheduler.schedule("skill:curator", TaskSchedule.cron(schedule), service::runScheduled)`（镜像 `user-profile:consolidation`/`outreach:briefing`）；默认关 → 不装、不调度。`SkillsTool` 装配注入 recorder（enabled→`NativeSkillUsageRecorder`，else `noop()`）。`mvn -pl pig-agent-cli -am compile` 绿。
+
+## 5. 分级晋级门 + 安全模型统一（`pig-agent-tools` / `pig-agent-cli`）
+
+- [ ] 5.1 `SkillPromotionReviewer` seam（`review(...)→Decision`；默认 `alwaysApprove()` = 今日 `/skill approve`）+ `NativeSkillPromotionReviewer`（包原生 `SkillPromotionGate`，把 pig 暂存草稿构造成 `SkillCandidate`，`review` 返回 → pig `Decision`；**非 `Approve` 即拒**，含 `Defer`）。`SkillGate` 构造多接 reviewer（默认 `alwaysApprove()`）；`promote` 在 scan+dedup 后、原子提升前调 `reviewer.review(...)`——Approve→`SkillStagingArea.promote`，非 Approve→`PromotionResult` 拒绝 + 脱敏原因。`SkillGateGradedGateTest`（fake reviewer）：alwaysApprove→今日行为；reject/defer reviewer→拒绝、草稿留暂存、原子提升未发生。
+- [ ] 5.2 安全模型统一：`DefaultSkillContentScanner` 在 curator 启用时并入 native `SkillSecurityScanner.scanSingleFile`（pig 四检 AND native `Verdict`，任一拒即拒，findings 脱敏）；默认关时逐字不变。`DefaultSkillContentScannerTest` 扩：native `DANGEROUS`→拒、`SAFE`→沿用 pig 判定、凭据原因不回显。
+- [ ] 5.3 `umbrellaPassMode` 取代 Jaccard：curator 启用时 `SkillGate.similarityWarnings`/`jaccard`（`:139-164`）下沉给 curator umbrella；curator 关（默认）时保留今日 Jaccard 告警。`SkillGateTest` 扩：默认关→今日 Jaccard 告警；curator 开→告警来自 umbrella（或移除 Jaccard、由 `/skill curator status` 出建议）。
+- [ ] 5.4 `AgentBootstrap` 按轨注入 reviewer：**interactive** → `NativeSkillPromotionReviewer(LocalApprovalGate(approve-prompter))`（复用现有 `/skill approve` HITL）；**channel/autonomous** → **不注入 `SkillGate`**（by-construction，AgentBootstrap 只把 `SkillGate` 给 `ReplContext`）。默认（curator 关）→ reviewer 未注入 → 今日 `/skill approve` 行为不变。
+
+## 6. 命令 + fail-closed 守卫（`pig-agent-cli`）
+
+- [ ] 6.1 `SkillCommand` 加子命 `curator run|status`：`run`→`SkillCuratorService.runOnce()` 打印 `CuratorRunSummary`；`status`→只读 usage 报告+候选+上次运行+配置；curator 未启用→提示。`SkillCommandTest`：`curator status` 只读（无迁移副作用）、未启用提示、`curator run` 调 service。
+- [ ] 6.2 **渠道态永不晋级守卫**（安全相关，锁死）：`ChannelPromotionFailClosedTest`（cli/core）——channel/autonomous 装配下**无 `SkillGate`**、agent 只有 `proposeSkill`/`skillManage`（stage-only），断言不存在任何调用序列让草稿进 `workspace/skills/<name>/` 或被 `WorkspaceSkillSource` 发现；即使误注入 `RejectAllGate` reviewer，`review` 返回 `Defer` → 判定「非 Approve」→ 拒。守卫 `autonomous-skills` 的 fail-closed 契约在 S3 下不被削弱。
+
+## 7. 收尾
+
+- [ ] 7.1 新增测试全绿：`SkillCuratorSpikeTest`(3+) + `SkillUsageRecorderTest` + `SkillCuratorServiceTest`(+Canary) + `SkillGateGradedGateTest` + `DefaultSkillContentScannerTest`(扩) + `SkillGateTest`(扩) + `CuratorConfigTest` + `SkillCommandTest`(扩) + `ChannelPromotionFailClosedTest`；既有 `SkillsToolTest`/`SkillGate`/`NativeRepositorySkillSourceTest` 保持绿（模型面/读栈零回归）。
+- [ ] 7.2 `mvn -pl pig-agent-cli -am compile` 绿；`mvn verify` 覆盖率地板不回退。
+- [ ] 7.3 更新 `CLAUDE.md` builtin-skills 段落（技能新陈代谢：usage/curator/分级晋级门当纯库采纳、仍 `disableDynamicSkills()` 不当嘴、`skills.curator` 默认关先只读、S1 基座之上、fail-closed 映射）。
+- [ ] 7.4 提交（分组提交：spike / 依赖+配置 / usage seam / curator+调度 / 分级门+安全统一 / 命令+守卫）。
+- [ ] 7.5 归档：同步主 spec → `openspec/specs/skill-curator-and-graded-promotion/`，change 移 `openspec/changes/archive/<date>-skill-curator-and-graded-promotion/`（**人工确认门，不在本轮**）。
