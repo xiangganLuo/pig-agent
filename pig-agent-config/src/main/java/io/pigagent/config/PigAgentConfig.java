@@ -379,6 +379,7 @@ public final class PigAgentConfig {
     public static final class SkillsConfig {
         @JsonProperty("autonomous") private AutonomousSkillsConfig autonomous = new AutonomousSkillsConfig();
         @JsonProperty("native") private NativeSkillConfig nativeSkills = new NativeSkillConfig();
+        @JsonProperty("curator") private CuratorConfig curator = new CuratorConfig();
         public AutonomousSkillsConfig getAutonomous() { return autonomous; }
         public void setAutonomous(AutonomousSkillsConfig a) {
             this.autonomous = a == null ? new AutonomousSkillsConfig() : a;
@@ -386,6 +387,10 @@ public final class PigAgentConfig {
         public NativeSkillConfig getNative() { return nativeSkills; }
         public void setNative(NativeSkillConfig n) {
             this.nativeSkills = n == null ? new NativeSkillConfig() : n;
+        }
+        public CuratorConfig getCurator() { return curator; }
+        public void setCurator(CuratorConfig c) {
+            this.curator = c == null ? new CuratorConfig() : c;
         }
     }
 
@@ -421,6 +426,72 @@ public final class PigAgentConfig {
         public void setClasspathResourceDir(String d) {
             this.classpathResourceDir = d == null ? "" : d;
         }
+    }
+
+    /**
+     * {@code skills.curator} 子块（skill-curator-and-graded-promotion，S3）。技能「新陈代谢」：使用分析
+     * （{@code loadSkill} 自喂 usage）+ 老化归档（原生 {@code SkillCurator}，stale→{@code .archive}）+
+     * {@code umbrellaPassMode} 语义 umbrella-merge（取代手搓 Jaccard）+ 分级晋级门。
+     *
+     * <p><b>默认 {@code enabled=false}</b> → 不装任何 seam、逐字节等价今天。开启也**先只读**：默认
+     * {@code auto-archive=false} + {@code umbrella-pass-mode=dry_run_only} → 只记录 usage + 产出建议，
+     * 真晋级仍走现有 {@code /skill approve} 人工门、真归档需 opt-in {@code auto-archive=true}。全部字段可选、
+     * null/缺块安全、非法数值 clamp。
+     */
+    public static final class CuratorConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("usage-recording") private boolean usageRecording = true;
+        @JsonProperty("schedule") private String schedule = "0 3 * * 0";
+        @JsonProperty("stale-after-days") private int staleAfterDays = 30;
+        @JsonProperty("archive-after-days") private int archiveAfterDays = 90;
+        @JsonProperty("min-idle-hours") private int minIdleHours = 2;
+        @JsonProperty("auto-archive") private boolean autoArchive = false;
+        @JsonProperty("umbrella-pass-mode") private String umbrellaPassMode = "dry_run_only";
+        @JsonProperty("backup-retention") private int backupRetention = 3;
+        @JsonProperty("canary") private CanaryConfig canary = new CanaryConfig();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public boolean isUsageRecording() { return usageRecording; }
+        public void setUsageRecording(boolean u) { this.usageRecording = u; }
+        public String getSchedule() { return schedule; }
+        public void setSchedule(String s) {
+            this.schedule = (s == null || s.isBlank()) ? "0 3 * * 0" : s;
+        }
+        public int getStaleAfterDays() { return staleAfterDays; }
+        public void setStaleAfterDays(int d) { this.staleAfterDays = Math.max(1, d); }
+        public int getArchiveAfterDays() { return archiveAfterDays; }
+        public void setArchiveAfterDays(int d) { this.archiveAfterDays = Math.max(1, d); }
+        public int getMinIdleHours() { return minIdleHours; }
+        public void setMinIdleHours(int h) { this.minIdleHours = Math.max(0, h); }
+        public boolean isAutoArchive() { return autoArchive; }
+        public void setAutoArchive(boolean a) { this.autoArchive = a; }
+        public String getUmbrellaPassMode() { return umbrellaPassMode; }
+        public void setUmbrellaPassMode(String m) {
+            this.umbrellaPassMode = (m == null || m.isBlank()) ? "dry_run_only" : m;
+        }
+        public int getBackupRetention() { return backupRetention; }
+        public void setBackupRetention(int r) { this.backupRetention = Math.max(0, r); }
+        public CanaryConfig getCanary() { return canary; }
+        public void setCanary(CanaryConfig c) {
+            this.canary = c == null ? new CanaryConfig() : c;
+        }
+    }
+
+    /**
+     * {@code skills.curator.canary} 子块——新晋级技能的灰度放量（默认关）。因 pig「不当嘴」，灰度作用于
+     * pig 读栈而非原生 {@code <available_skills>} 视图。全部可选、默认安全。
+     */
+    public static final class CanaryConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("percent") private int percent = 10;
+        @JsonProperty("ramp-up-days") private int rampUpDays = 0;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getPercent() { return percent; }
+        public void setPercent(int p) { this.percent = Math.min(100, Math.max(0, p)); }
+        public int getRampUpDays() { return rampUpDays; }
+        public void setRampUpDays(int d) { this.rampUpDays = Math.max(0, d); }
     }
 
     /**
