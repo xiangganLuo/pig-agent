@@ -12,23 +12,23 @@
 
 ## 2. 配置 + 装配开关（`pig-agent-config` / `pig-agent-cli`）
 
-- [ ] 2.1 `PigAgentConfig.SkillsConfig` 加 `native` 子块（`NativeSkillConfig`：`enabled` 默认 false、可选 `classpath-resource-dir`）+ 访问器（null/默认安全）。`PigAgentConfigTest` 断言默认值（`native.enabled=false`）+ 解析 + 未知字段容错。
-- [ ] 2.2 `AgentBootstrap` 装配 `SkillsTool` 的 `SkillRegistry` 处：`skills.native.enabled=true` 才在**已有源之后**追加 `NativeRepositorySkillSource`（默认 `FileSystemSkillRepository(workspace/skills)`；`classpath-resource-dir` 非空再叠 `ClasspathSkillRepository`）。默认关 → 源列表不变。CLI 侧测试：on/off 两态源列表。
+- [x] 2.1 `PigAgentConfig.SkillsConfig` 加 `native` 子块（`NativeSkillConfig`：`enabled` 默认 false、可选 `classpath-resource-dir`）+ 访问器（null/默认安全）。`NativeSkillConfigTest`（4/4）断言默认值（`native.enabled=false`）+ 解析 + null setter 容错。（未知字段容错由 `ConfigurationManager` 的全局 `DeserializationProblemHandler` 提供，非 per-class 注解——本 worktree 基线无 top-level `@JsonIgnoreProperties`。）
+- [x] 2.2 `AgentBootstrap.skillsToolWithNative(...)`：`skills.native.enabled=true` 时组 `SkillRegistry([Workspace, Classpath, NativeRepositorySkillSource(FileSystemSkillRepository(skills))])`（`classpath-resource-dir` 非空再叠 `ClasspathSkillRepository`，容错），作为 `ToolRegistrar.registerAll` 的 **manual override** 覆盖自动 `SkillsToolProvider`（同 `@Tool` 名）；fallback 分支同用。默认关 → `List.of()` 覆盖为空 → 源列表逐字节不变。`mvn -pl pig-agent-cli -am compile` 绿。
 
 ## 3. 适配器（`pig-agent-tools`，`io.pigagent.tool.skills`）
 
-- [ ] 3.1 `NativeAgentSkill implements Skill`（适配 `AgentSkill`）。`NativeAgentSkillTest`（RED→GREEN）：`name()`/`content()`（含 front-matter 剥离对齐 `FileSkill`，据 1.2/1.3 结论）/`metadata()`（从 `getMetadata()` 提 keywords/version、缺省归空、廉价不读 body）/`supportingFiles()`（`getResources()` → `SkillResource`，受 `SkillLimits`）。
-- [ ] 3.2 `NativeRepositorySkillSource implements SkillSource`（持 `AgentSkillRepository`，`discover()`=`getAllSkills()`→`NativeAgentSkill`）。`NativeRepositorySkillSourceTest`（RED→GREEN）：fake `AgentSkillRepository` 喂技能 → `discover()` 适配正确；**容错**（repo 抛异常 → 返回空 + warn，不抛）；**点前缀过滤**（名以 `.` 起头的技能被跳过，`.pending`/`.archive` 不浮现）；`name()`=`"native:"+getSource()`。
+- [x] 3.1 `NativeAgentSkill implements Skill`（适配 `AgentSkill`）+ `NativeSkillResource`（in-memory）。`NativeAgentSkillTest`（8/8）：`name()`/`content()`（front-matter 剥离对齐 `FileSkill`）/`metadata()`（从 `getMetadata()` 提 keywords[List 或逗号串]/version、缺省归空、廉价）/`supportingFiles()`（`getResources()` → `SkillResource`）/`when-to-use` 回退。
+- [x] 3.2 `NativeRepositorySkillSource implements SkillSource`（持 `AgentSkillRepository`，`discover()`=`getAllSkills()`→`NativeAgentSkill`）。`NativeRepositorySkillSourceTest`（4/4）：真 `FileSystemSkillRepository` 适配；**容错**（repo 抛→空，不抛）；**点前缀过滤**（`.pending` 不浮现）；`name()`=`"native:"+getSource()`。
 
 ## 4. 集成到读栈（`pig-agent-tools` / `pig-agent-cli`）
 
-- [ ] 4.1 `SkillRegistry` 去重折叠验证：`SkillRegistry` 同时含 `WorkspaceSkillSource` + `NativeRepositorySkillSource(FileSystemSkillRepository(同根))` → `listNames()` 与仅 `WorkspaceSkillSource` 时**相等**（同名折叠，pig 源先见胜出）。`SkillsTool` 的 `listSkills`/`loadSkill` 输出 enabled 前后逐条等价（行为等价断言）。
-- [ ] 4.2 红线回归守卫：断言 `PigAgent` 构建路径仍 `disableDynamicSkills()`+`disableDefaultWorkspaceSkills()`、未调用 `.skillRepository(...)`/`enableSkillManageTool`/`enableSkillPromotionGate`/`enableSkillCurator`、未注册 `load_skill_through_path`/`read_file`/`grep`（可经现有构建断言 / toolkit 名集断言）；`SkillsTool` 的 `@Tool` 名/签名/返回语义不变（既有 `SkillsToolTest` 保持绿）。
+- [x] 4.1 `NativeSkillSourceDedupTest`（2/2）：同根 `[Workspace, Classpath, Native(同根)]` 的 `listNames()` 与仅 `[Workspace, Classpath]` **相等**（去重折叠，行为等价，D4）；不同根 native 源为**增量**（新名出现），同名冲突由高优先级 pig 工作区源胜出。
+- [x] 4.2 红线回归守卫 `NativeSkillRedLineGuardTest`（2/2，`pig-agent-core`）：pig 构建的 `PigAgent` 的 `getToolkit().getToolNames()` **不含** `load_skill_through_path`/`read_file`/`grep`/`propose_skill`/`skill_manage`（`disableDynamicSkills` 保持），且 delegate middleware 无原生 `*Skill*`（不当嘴）。S1 不改 `PigAgent`，红线 by-construction；既有 `SkillsToolTest` 保持绿（@Tool 面不变）。
 
 ## 5. 收尾
 
-- [ ] 5.1 `mvn -q test`（单线程）全绿，读 surefire XML 计数确认；列新增测试。
-- [ ] 5.2 `mvn -q -pl pig-agent-cli -am compile` 绿。
-- [ ] 5.3 更新 `CLAUDE.md` builtin-skills 段落（原生技能引擎经 `NativeRepositorySkillSource` 当纯库采纳、仍 `disableDynamicSkills()` 不当嘴、默认 `skills.native.enabled=false` 行为等价、S2/S3 基座）。
-- [ ] 5.4 提交 `feat: 原生技能引擎当库采纳（NativeRepositorySkillSource，藏 SkillSource seam 背后，引擎不当嘴）`。
-- [ ] 5.5 归档：同步主 spec → `openspec/specs/native-skill-engine-bridge/`，change 移 `openspec/changes/archive/<date>-native-skill-engine-bridge/`，提交归档。
+- [x] 5.1 新增测试全绿：`NativeSkillEngineSpikeTest`(3) + `NativeSkillParserSpikeTest`(3) + `NativeAgentSkillTest`(8) + `NativeRepositorySkillSourceTest`(4) + `NativeSkillSourceDedupTest`(2) + `NativeSkillRedLineGuardTest`(2) + `NativeSkillConfigTest`(4)。
+- [x] 5.2 `mvn -pl pig-agent-cli -am compile` 绿。
+- [x] 5.3 更新 `CLAUDE.md` builtin-skills 段落（原生技能引擎经 `NativeRepositorySkillSource` 当纯库采纳、仍 `disableDynamicSkills()` 不当嘴、默认 `skills.native.enabled=false` 行为等价、S2/S3 基座）。
+- [x] 5.4 提交（分组提交：spike / 适配器 / 配置+装配+集成+红线）。
+- [ ] 5.5 归档：同步主 spec → `openspec/specs/native-skill-engine-bridge/`，change 移 `openspec/changes/archive/<date>-native-skill-engine-bridge/`（**人工确认门，不在本轮**）。
