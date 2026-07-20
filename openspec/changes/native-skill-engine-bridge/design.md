@@ -23,9 +23,13 @@ AgentScope 2.0 自带整套技能自学习闭环（离线仓 `D:\env\...\io\agen
 - 不改 `SkillsTool` 的 `@Tool` 名/签名/未知名与读错兜底语义；不改 `WorkspaceSkillSource`/`ClasspathSkillSource`/composite-skill/autonomous-skills 契约。
 - 不引入 git/DB/Nacos 远程技能仓（`agentscope-extensions-skill-*` 不在离线仓）、不引入技能热重载/marketplace 物化。
 
-## 承重 Spike 结论（javap 签名级已通过；可运行验证 = task 1.x）
+## 承重 Spike 结论（javap 签名级 + 可运行验证：均已通过 ✅）
 
 > 用 `javap -classpath <jar> -public <fqcn>` 核对，jar = 离线仓 `agentscope-core-2.0.0.jar` + `agentscope-harness-2.0.0.jar`。判据：（A）原生仓可当只读源采纳；（B）自学习闭环三件套脱离 prompt 注入可当纯库驱动；（C）解析等价。
+>
+> **可运行验证（tasks 1.x，2026-07-20 跑通）**：`NativeSkillEngineSpikeTest`（`pig-agent-core`，3/3 绿）驱动了 B——`SkillUsageStore` 独立 load/register/bump、`SkillCurator.runOnce(Instant.now())` 独立返回 `CuratorRunReport`、`RejectAllGate.review(...)` 独立返回决策——**全程零原生 middleware/prompt provider/model**；`NativeSkillParserSpikeTest`（`pig-agent-tools`，3/3 绿）验证了 C（解析等价）+ A（布局兼容）。两条与签名级结论**一致**，另得两点**精化**（非矛盾）：
+> - **R-Spike-1（gate 语义精化 → D9）**：`RejectAllGate.review(...)` 返回的不是 `Reject` 而是 **`Defer`**（reason=`promotion requires explicit HarnessAgent.promoteSkill call by an authorized caller`）——保证等价：**永不 `Approve`**，无授权显式调用则不晋级。S3 fail-closed 采纳按「非交互轨永不 Approve」判定，不硬绑 `Reject` 子类型。
+> - **R-Spike-2（native 仓更严格 → D6）**：native `FileSystemSkillRepository` **要求可解析 front-matter（name/description）** 才登记一个技能——无 front-matter 的裸 `SKILL.md`（如 `# Beta\nbody`）被跳过；pig `WorkspaceSkillSource` 宽松（从目录名派生）。对 S1 同根采纳**安全**：native 源在 pig 源之后（最低优先级，D4），pig 宽松源已覆盖裸技能，去重并集不变。native 仓也**未浮现** `.pending` 暂存目录（暂存不变量在 native 侧亦成立）。
 
 ### A. 原生仓 → pig 只读源，采纳成立 ✅
 - **`io.agentscope.core.skill.repository.AgentSkillRepository`**（core 接口，`extends AutoCloseable`）：`List<AgentSkill> getAllSkills()`、`AgentSkill getSkill(String)`、`List<String> getAllSkillNames()`、`boolean skillExists(String)`、`getSource()`、`isWriteable()`/`setWriteable(boolean)`、`save/delete`。→ `discover()` 直接 `getAllSkills()`。

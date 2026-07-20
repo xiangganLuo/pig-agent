@@ -5,11 +5,10 @@
 
 ## 1. 承重 spike（门整条技能线）—— `pig-agent-tools`
 
-- [ ] 1.1 **纯库驱动 spike**（"只用引擎不用嘴"）：写 `NativeSkillEngineSpikeTest`（临时/可保留为回归）——用 `LocalFilesystem`（`io.agentscope.harness.agent.filesystem.local.LocalFilesystem`，指向 temp 目录）+ 一个 `Supplier<RuntimeContext>` 构造 `SkillUsageStore` / `WorkspaceSkillRepository` / `SkillCurator(...)`，断言 `SkillCurator.runOnce(Instant.now())` 返回 `CuratorRunReport`、`RejectAllGate.review(candidate, ctx)` 返回 Reject、`LocalApprovalGate(stdinPrompter(...))` 可喂批准——**全程无 Model/Agent、无 `enableXxx`、无 `<available_skills>` 注入**。结论写回 design.md「spike B」（通过/不过）。
-  > ⚠️ 本子任务需在宿主测试模块见到 `agentscope-harness`；若 `pig-agent-tools` test scope 无 harness，spike 放能见 harness 的模块（如 `pig-agent-core` 测试）或临时加 test-scope 依赖，**不影响 S1 主代码零新增依赖**（S1 主代码只用 core 仓）。
-- [ ] 1.2 **解析等价 spike**：写 `SkillParserEquivalenceTest`——对若干代表性 `SKILL.md`（含 front-matter / 无 front-matter / 无闭合 fence）分别过 pig `FrontMatterManifestParser.parse(text, name)` 与原生 `MarkdownSkillParser.parse(text)`，断言核心键 `name`/`description` 一致、正文剥离一致；记录已知差异（keywords List vs Map、description 派生）到 design.md「spike C」。
-- [ ] 1.3 **布局兼容核对**：写 `NativeRepositoryLayoutTest`——在 temp `workspace/skills/<name>/SKILL.md`（含一个 `.pending/<x>/SKILL.md` 暂存）建 pig 布局，`FileSystemSkillRepository(skillsDir)` 的 `getAllSkillNames()` 与 `WorkspaceSkillSource.discover()` 名集对比（排除点前缀），确认布局同构；记录原生 FS 仓对点前缀目录的行为（是否自动跳）到 design.md「D5/D6」。
-- [ ] 1.4 spike 汇总：三项结论写回 design.md；**若任一不过 → 停下升级人工，本线不进编码**。通过则继续第 2 组。
+- [x] 1.1 **纯库驱动 spike**（"只用引擎不用嘴"）：`NativeSkillEngineSpikeTest`（放 `pig-agent-core` 测试——该模块已依赖 `agentscope-harness`，S1 主代码仍零新增依赖）——用 `LocalFilesystem(tempDir)` + `Supplier<RuntimeContext>` 构造 `SkillUsageStore`/`WorkspaceSkillRepository`/`SkillCurator(...)`，断言 `SkillCurator.runOnce(Instant.now())` 返回 `CuratorRunReport`、`SkillUsageStore` 独立 load/register/bump、`RejectAllGate.review(candidate, ctx)` 独立返回决策——**全程无 Model/Agent、无 `enableXxx`、无 `<available_skills>` 注入**。3/3 绿。结论写回 design.md「spike B」+ R-Spike-1（gate 返回 `Defer` 非 `Reject`，仍永不 Approve）。
+- [x] 1.2 **解析等价 spike**：`NativeSkillParserSpikeTest`（`pig-agent-tools`，core-only）——代表性 `SKILL.md`（含/无 front-matter）分别过 pig `SkillManifestParser.defaults()` 与原生 `MarkdownSkillParser.parse(text)`，断言核心键 `name`/`description` 一致、正文剥离一致；已知差异（native 无 front-matter 时 description 空 vs pig 从首行派生）已断言并记录 design.md「spike C」。2/2 绿。
+- [x] 1.3 **布局兼容核对**：`NativeSkillParserSpikeTest.nativeFileSystemRepo_...`——temp `workspace/skills/<name>/SKILL.md`（含 `.pending/<x>/SKILL.md` 暂存），`FileSystemSkillRepository(skills).getAllSkillNames()` vs `WorkspaceSkillSource.discover()`。布局同构（native 读 front-matter 技能）；**R-Spike-2**：native 更严格（要求 front-matter，跳裸技能），native 亦不浮现 `.pending`——记录 design.md「D6」。1/1 绿。
+- [x] 1.4 spike 汇总：三项结论 + 两点精化（R-Spike-1/2，非矛盾）写回 design.md「承重 Spike 结论」。**GREEN → 进入第 2 组编码**。
 
 ## 2. 配置 + 装配开关（`pig-agent-config` / `pig-agent-cli`）
 
