@@ -3,12 +3,12 @@
 > 内环 TDD：每个可测单元先写测试（RED）→ 实现（GREEN）→ `mvn test` → 勾选。分组后 `mvn -q -pl pig-agent-cli -am compile`。
 > **第 1 组是承重 spike（安全相关），门整条 S3**：不过则停下升级人工、本 spec 不进编码（design.md「承重 Spike 结论」已给 javap 签名级判据；S1 spike B 已证三件套可当纯库驱动，本组坐实 S3 特有的接入点：usage 自喂 / `.archive` 兼容 / fail-closed 映射）。
 
-## 1. 承重 spike（门整条 S3，安全相关）—— `pig-agent-tools`（补 harness 依赖后）
+## 1. 承重 spike（门整条 S3，安全相关）—— `pig-agent-core`（该模块已依赖 harness，spike 先于 tools 补依赖，真正"门在前"）
 
-- [ ] 1.1 **usage 自喂 spike**（"不当嘴 → 自喂"）：`SkillCuratorSpikeTest.usageSelfFed_*`——`LocalFilesystem(@TempDir)` + `SkillUsageStore`，断言：（a）`markAgentCreated(name,"agent",envs)` → `bumpUse(name)` → `get(name).useCount()` 递增；（b）对**未注册**名直接 `bumpUse` **no-op 安全**（不抛、不新建 record）——坐实「原生 usage 假设走 `SkillLoadTool`，pig 可从 `loadSkill` 手动自喂，且 `bumpUse` 只增已存在记录」的 S3 接入判据。全程无 Model/Agent/原生 middleware。
-- [ ] 1.2 **`.archive` 归档兼容 spike**：`SkillCuratorSpikeTest.archiveNotSurfaced_*`——temp `workspace/skills/<name>/SKILL.md`（含 front-matter），构 `SkillCurator(fs, store, WorkspaceSkillRepository, config)`；断言 `runUmbrellaDryRunReport(now)` **非破坏**（技能仍在），`runOnce(now)`（配 `archiveAfterDays` 触发）把陈旧技能移入 `skills/.archive/`，且随后 pig `WorkspaceSkillSource.discover()` + `NativeRepositorySkillSource.discover()` **均不列出**归档技能（点前缀跳过 `:71-73`/S1 D5）。坐实「归档目录 = `.archive`、与 pig 点前缀跳过不冲突、归档不再浮现为 active」。
-- [ ] 1.3 **fail-closed 映射 spike**（安全相关）：`SkillCuratorSpikeTest.failClosedMapping_*`——`RejectAllGate().review(candidate, RuntimeContext.empty()).block()` 断言 **非 `PromotionDecision.Approve`**（含 S1 R-Spike-1 的 `Defer` 语义）；`LocalApprovalGate(approve-prompter).review(...)` → `Approve`、`LocalApprovalGate(reject/defer-prompter)` → 非 `Approve`。坐实「非交互轨永不 Approve、交互轨可授权 Approve」的 1:1 映射判据。
-- [ ] 1.4 spike 汇总：三项结论（+ 与 S1 spike B/R-Spike-1/R-Spike-2 的衔接）写回 design.md「承重 Spike 结论」（如与签名级有出入则精化，非矛盾）。**GREEN → 进入第 2 组编码；任一不过 → 停下升级人工。**
+- [x] 1.1 **usage 自喂 spike**（"不当嘴 → 自喂"）：`SkillCuratorSpikeTest.usageSelfFed_bumpUseIncrementsExisting_unknownIsNoOp`——`LocalFilesystem(@TempDir)` + `SkillUsageStore`，断言：（a）`markAgentCreated(name,"agent",envs)` → `bumpUse(name)`×2 → `get(name).useCount()` ≥2；（b）对**未注册**名直接 `bumpUse` **no-op 安全**（不抛、`get` 仍空、无幻影 record）。**绿** ✅ 全程无 Model/Agent/原生 middleware。
+- [x] 1.2 **`.archive` 归档兼容 spike**：`SkillCuratorSpikeTest.curatorArchive_landsInDotArchive_notSurfacedByNativeRepo`——temp `workspace/skills/<name>/SKILL.md`（含 front-matter）+ `markAgentCreated`，构**可写** `WorkspaceSkillRepository(fs,"skills",ctx,"workspace",true)`（R-Spike-S3-1：只读仓 delete 被静默忽略）+ `SkillCurator`；断言 `runUmbrellaDryRunReport(now)` **非破坏**（技能仍 active），`runOnce(now+200d)` 把陈旧 agent-created 技能移入 `skills/.archive/`，且随后 `FileSystemSkillRepository(skills).getAllSkillNames()`（pig S1 默认原生源）**不列出**它。**绿** ✅ 坐实「归档 = `.archive`、与 pig 点前缀/直接子目录扫描不冲突、归档不复现为 active」。
+- [x] 1.3 **fail-closed 映射 spike**（安全相关）：`SkillCuratorSpikeTest.failClosedMapping_rejectAllNeverApproves_localApprovalCanApprove`——`RejectAllGate().review(candidate, RuntimeContext.empty()).block()` **非 `PromotionDecision.Approve`**（返回 `Defer`，S1 R-Spike-1）；`LocalApprovalGate(Duration, approve-prompter, envs).review(...)` → `Approve`、reject-prompter → 非 `Approve`。**绿** ✅ 坐实「非交互轨永不 Approve、交互轨可授权 Approve」1:1 映射。
+- [x] 1.4 spike 汇总：三项结论 + 精化 **R-Spike-S3-1（archive 需可写仓）** 写回 design.md「承重 Spike 结论」。**GREEN → 进入第 2 组编码。**
 
 ## 2. 依赖 + 配置（`pig-agent-tools` / `pig-agent-config`）
 

@@ -25,9 +25,14 @@ pig 现有技能写路径（`autonomous-skills`，`io.pigagent.tool.skills.autho
 - 不做 S2（skill matching / 检索 ranker）——正交、后续。
 - CanaryFilter 的**深度灰度**（多环境编排、逐步 ramp-up 自动化）不做；本 spec 只留默认关的读栈 seam + 单一 canary %。
 
-## 承重 Spike 结论（javap 签名级 + 待 task 1.x 可运行坐实）
+## 承重 Spike 结论（javap 签名级 + 可运行坐实：均已通过 ✅）
 
 > jar = 离线仓 `agentscope-harness-2.0.0.jar` + `agentscope-core-2.0.0.jar`（`D:\env\apache-maven-3.9.10\repository\io\agentscope`）。判据：（1）usage 可由 pig 侧自喂；（2）curator 归档目录 = `.archive`，与 pig 点前缀跳过兼容且归档不再浮现为 active；（3）fail-closed 映射 1:1（非交互轨永不 Approve、交互轨复用 HITL）。S1 spike B 已证三件套可脱离 prompt 当纯库驱动（本 spec 复用该结论），本组坐实 **S3 特有的接入点**。
+>
+> **可运行验证（tasks 1.x，2026-07-20 跑通）**：`SkillCuratorSpikeTest`（`pig-agent-core`，3/3 绿）用 `LocalFilesystem(@TempDir)` 全程无 Model/Agent/原生 middleware 坐实三点，与签名级结论**一致**，另得一点**精化**（非矛盾）：
+> - **R-Spike-S3-1（archive 需可写仓 → D3）**：`SkillCurator` 归档走 `mainRepo.delete(name)`（`WorkspaceSkillRepository.delete` 非破坏地把技能目录 move 到 `skills/.archive/<name>-<ts>/`）。但 **3 参 `WorkspaceSkillRepository(fs, dir, ctx)` 构造默认 `writable=false`**——只读仓的 `delete` 被静默忽略（`archived++` 仍自增，因异常被 catch 吞），技能留在盘上、仍被 `getAllSkillNames()` 列出。**故 `SkillCuratorService` MUST 用可写仓**（5 参 `WorkspaceSkillRepository(fs, "skills", ctx, "workspace", true)` 或 `setWriteable(true)`）。坐实后：陈旧 agent-created 技能被移入 `skills/.archive/`，且 pig S1 默认原生源 `FileSystemSkillRepository(skills).getAllSkillNames()` **不再列出**它（`.archive` 深一层、不在直接子目录扫描面 → 归档不复现为 active，与 pig 点前缀跳过一致）。
+> - usage 自喂坐实：`markAgentCreated(name,"agent",envs)` → `bumpUse` → `useCount` 递增；未注册名 `bumpUse` **no-op 安全**（不抛、`get` 仍空、无幻影记录）。
+> - fail-closed 坐实：`RejectAllGate.review(...).block()` **非 `Approve`**（返回 `Defer`，S1 R-Spike-1）；`LocalApprovalGate(Duration, approve-prompter, envs)` → `Approve`，reject-prompter → 非 `Approve`。
 
 ### Spike-1 — usage 可由 pig 侧（`loadSkill`）自喂 ✅（javap；task 1.x 可运行坐实）
 - javap `SkillUsageStore(AbstractFilesystem)`：`load(): Map<String,SkillUsageRecord>`、`save(map)`、`get(name): Optional<SkillUsageRecord>`、`bumpView/bumpUse/bumpPatch(name)`、`markAgentDraft(name, agent)`、`markAgentCreated(name, agent, List<env>)`、`setState/setPinned/forget`、`agentCreatedReport()`。构造仅需 `AbstractFilesystem`——离线地板 = `LocalFilesystem(Path)`（S1 spike 已用）。
