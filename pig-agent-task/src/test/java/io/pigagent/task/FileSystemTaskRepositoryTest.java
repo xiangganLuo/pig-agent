@@ -123,6 +123,49 @@ class FileSystemTaskRepositoryTest {
     }
 
     @Test
+    void roundTrip_resultAndLastRunAt_preservedIncludingNewlines() {
+        // Arrange — a task carrying a multi-line run summary + a last-run timestamp
+        FileSystemTaskRepository repo = new FileSystemTaskRepository(tasksDir);
+        Instant ranAt = Instant.parse("2026-07-20T02:00:05Z");
+        // Construct directly (10-arg) so updatedAt is fixed — withResult/withLastRunAt intentionally
+        // bump updatedAt (like withStatus), which would otherwise mask the persistence round-trip here.
+        Task task = new Task("r1", "Nightly", "run the nightwatch", TaskStatus.COMPLETED,
+                TaskSchedule.cron("0 2 * * *"),
+                Instant.parse("2026-07-14T10:15:30Z"), Instant.parse("2026-07-20T02:00:05Z"), null,
+                "[SUCCESS] line one\nline two\nwith **Updated**: bait", ranAt);
+
+        // Act
+        repo.save(task);
+        Task loaded = repo.findById("r1").orElseThrow();
+
+        // Assert — result (with embedded newlines + a decoy marker) and lastRunAt round-trip
+        assertThat(loaded.result()).isEqualTo("[SUCCESS] line one\nline two\nwith **Updated**: bait");
+        assertThat(loaded.lastRunAt()).isEqualTo(ranAt);
+        // The decoy "**Updated**:" inside the result must NOT corrupt schedule/description parsing.
+        assertThat(loaded.schedule().cronExpression()).isEqualTo("0 2 * * *");
+        assertThat(loaded.description()).isEqualTo("run the nightwatch");
+        assertThat(loaded.updatedAt()).isEqualTo(Instant.parse("2026-07-20T02:00:05Z"));
+    }
+
+    @Test
+    void oldFile_withoutResultOrLastRun_readsNull_andKeepsScheduleAndDescription() throws IOException {
+        // Arrange — a legacy file with NO LastRun/Result lines (pre task-executor-wiring format)
+        FileSystemTaskRepository repo = new FileSystemTaskRepository(tasksDir);
+        writeRaw("old", "# Old\n\n- **ID**: old\n- **Status**: TODO\n- **Schedule**: CRON:0 2 * * *\n"
+                + "- **Created**: 2026-07-14T00:00:00Z\n- **Updated**: 2026-07-14T00:00:00Z\n\nlegacy body\n");
+
+        // Act
+        Task loaded = repo.findById("old").orElseThrow();
+
+        // Assert — new fields default to null, existing round-trip unaffected
+        assertThat(loaded.result()).isNull();
+        assertThat(loaded.lastRunAt()).isNull();
+        assertThat(loaded.schedule().type()).isEqualTo(TaskSchedule.ScheduleType.CRON);
+        assertThat(loaded.schedule().cronExpression()).isEqualTo("0 2 * * *");
+        assertThat(loaded.description()).isEqualTo("legacy body");
+    }
+
+    @Test
     void oldFormat_scheduleTypeOnly_degradesToOnce() throws IOException {
         // Arrange — legacy file: Schedule line has only the type, no cron value
         FileSystemTaskRepository repo = new FileSystemTaskRepository(tasksDir);

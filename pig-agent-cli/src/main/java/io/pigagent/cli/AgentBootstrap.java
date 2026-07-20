@@ -30,6 +30,7 @@ import io.pigagent.core.agent.AgentSpecSubagentMapper;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.agent.PlanModeSettings;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.core.agent.runner.AgentReport;
 import io.pigagent.core.agent.runner.AgentRunner;
 import io.pigagent.core.agent.runner.CompositeReportWriter;
 import io.pigagent.core.agent.runner.FileReportWriter;
@@ -78,6 +79,7 @@ import io.pigagent.session.SessionLineageWriter;
 import io.pigagent.session.SessionManager;
 import io.pigagent.session.SessionRepository;
 import io.pigagent.task.FileSystemTaskRepository;
+import io.pigagent.task.Task;
 import io.pigagent.task.TaskManager;
 import io.pigagent.task.TaskSchedule;
 import io.pigagent.task.TaskScheduler;
@@ -123,6 +125,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -692,6 +695,16 @@ public final class AgentBootstrap {
             }
         }
 
+        // Task execution (task-executor-wiring): when tasks.execute is on, a fired scheduled task runs its
+        // intent (title + description) through the SAME fail-closed one-shot isolated agent as the
+        // digital-employee runner (non-interactive, DONT_ASK base + per-tool ASK→DENY; no HITL confirmer),
+        // and its outcome is recorded onto the task (surfaced by /tasks). Default off → the executor stays
+        // unwired → reminder-only status flip (backward compatible). NB: this consumes model tokens per fire.
+        if (config.getTasks().isExecute()) {
+            taskScheduler.setTaskExecutor(buildTaskExecutor(agentRunner, taskManager));
+            log.info("Task execution enabled (fired scheduled tasks run their intent via a fail-closed one-shot agent).");
+        }
+
         // Background user-profile consolidation (user-profile), default OFF. When enabled, a throttled,
         // fault-tolerant service distills durable identity/preferences from MEMORY.md into a deduped
         // USER.md via a CHEAP model (consolidation.model-id → memory.model-id → the primary model),
@@ -787,9 +800,19 @@ public final class AgentBootstrap {
                     configManager.getConfig().isMemoryEnabled() ? "on" : "off");
         });
 
+        // task-executor-wiring: wire /session clear → compression snapshot reset. CompressionService is
+        // built AFTER SessionManager (below), so bridge it via an AtomicReference the hook dereferences
+        // (purely additive — no block reordering). Null-safe until the ref is set right after build.
+        AtomicReference<CompressionService> compressionRef = new AtomicReference<>();
         SessionManager sessionManager = new SessionManager(
                 agentHolder, modelManager, sessionRepository,
-                configManager, workspace.getSessionsDir(), memoryToggleHook);
+                configManager, workspace.getSessionsDir(), memoryToggleHook,
+                sessionId -> {
+                    CompressionService cs = compressionRef.get();
+                    if (cs != null) {
+                        cs.resetSnapshot(sessionId);
+                    }
+                });
         sessionManager.initialize();
         sessionManager.getCurrentSession().ifPresent(s ->
                 log.info("Session: {} [{}]", s.name(), s.id()));
@@ -803,6 +826,7 @@ public final class AgentBootstrap {
         CompressionService compressionService = new CompressionService(
                 agentHolder, comp.getMaxContextTokens(), comp.getThreshold(), comp.isEnabled(),
                 new SessionLineageWriter(sessionRepository), engineeringOptions);
+        compressionRef.set(compressionService); // now /session clear resets this session's snapshot
 
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
@@ -1031,6 +1055,37 @@ public final class AgentBootstrap {
                 .evictionPath(dir)
                 .excludedToolNames(ToolResultEvictionConfig.DEFAULT_EXCLUDED_TOOLS)
                 .build();
+    }
+
+    /**
+     * Build the task executor (task-executor-wiring): a {@link Consumer} the {@code TaskScheduler}
+     * invokes when a scheduled task fires. It runs the task's intent (title, plus the description when
+     * non-blank) through {@link AgentRunner#runMandate} — reusing the fail-closed one-shot isolated
+     * agent (no HITL confirmer) — and records the outcome summary onto the task ({@link
+     * TaskManager#recordRun}). Extracted static so it is unit-testable with a real {@code AgentRunner}
+     * (fake builder) + a real {@code TaskManager}. Runner failures come back as a report (never thrown),
+     * so a failed agent run is recorded and the task still completes; only an executor-internal error
+     * (e.g. a persistence failure) escapes → the scheduler reverts the task to TODO (its seam contract).
+     */
+    static Consumer<Task> buildTaskExecutor(AgentRunner runner, TaskManager taskManager) {
+        return task -> {
+            String desc = task.description();
+            String mandate = (desc == null || desc.isBlank()) ? task.title() : task.title() + "\n\n" + desc;
+            AgentReport report = runner.runMandate("task:" + task.id(), mandate);
+            taskManager.recordRun(task.id(), taskOutcomeSummary(report));
+        };
+    }
+
+    /** Compact one-line summary of an ad-hoc run for storage on the task: {@code [OUTCOME] body|note}. */
+    static String taskOutcomeSummary(AgentReport report) {
+        if (report == null) {
+            return "";
+        }
+        String detail = report.outcome() == AgentReport.Outcome.SUCCESS ? report.body() : report.note();
+        if (detail == null || detail.isBlank()) {
+            detail = report.outcome() == AgentReport.Outcome.SUCCESS ? "(no output)" : "";
+        }
+        return ("[" + report.outcome() + "] " + detail).strip();
     }
 
     /** A permission config whose command allowlist merges the global list with an agent's own

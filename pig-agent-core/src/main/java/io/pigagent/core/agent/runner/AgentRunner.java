@@ -75,6 +75,42 @@ public final class AgentRunner {
         this.clock = clock == null ? System::currentTimeMillis : clock;
     }
 
+    /** Default best-effort timeout (seconds) for an ad-hoc mandate run when the caller passes none. */
+    public static final int DEFAULT_MANDATE_TIMEOUT_SECONDS = 300;
+
+    /**
+     * Run an <em>ad-hoc</em> mandate string once, unattended, reusing the same fail-closed one-shot
+     * machinery as {@link #run(AgentSpec)} (isolated agent via the {@link AgentBuilder}, reentrancy
+     * guard, best-effort timeout, post-hoc DENIED scan) — but WITHOUT the morning-report write /
+     * {@code lastRunAt} persistence, because an ad-hoc run has no persistent {@link AgentSpec}. Used to
+     * execute a scheduled task's intent (task-executor-wiring). Never throws: a run failure/timeout
+     * comes back as a {@link AgentReport} with the matching outcome. Uses {@link
+     * #DEFAULT_MANDATE_TIMEOUT_SECONDS}.
+     */
+    public AgentReport runMandate(String id, String mandate) {
+        return runMandate(id, mandate, DEFAULT_MANDATE_TIMEOUT_SECONDS);
+    }
+
+    /** {@link #runMandate(String, String)} with an explicit best-effort timeout ({@code <= 0} = none). */
+    public AgentReport runMandate(String id, String mandate, int timeoutSeconds) {
+        Objects.requireNonNull(id, "id");
+        AgentSpec spec = AgentSpec.create(id, id)
+                .withMandate(mandate == null ? "" : mandate)
+                .withTimeoutSeconds(Math.max(0, timeoutSeconds));
+        if (!running.add(id)) {
+            // A run for this id is already in progress — report it rather than double-running.
+            return new AgentReport(id, id, AgentReport.Outcome.FAILURE, "",
+                    java.util.List.of(), "a run for this id is already in progress");
+        }
+        try {
+            DeniedActionRecorder recorder = new DeniedActionRecorder();
+            PigAgent agent = builder.build(spec, recorder);
+            return execute(spec, agent, recorder);
+        } finally {
+            running.remove(id);
+        }
+    }
+
     /**
      * Run the agent's mandate once. Returns the produced report, or empty if skipped due to a
      * reentrant run already in progress for this agent.

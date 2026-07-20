@@ -155,8 +155,27 @@ public final class ReplCommands {
             }
             tasks.stream()
                     .sorted(Comparator.comparing(Task::createdAt).thenComparing(Task::id))
-                    .forEach(task -> Ansi.println(t, "  " + Ansi.info(task.title())
-                            + Ansi.dim(" [" + task.status() + "]  [" + task.id() + "]")));
+                    .forEach(task -> {
+                        Ansi.println(t, "  " + Ansi.info(task.title())
+                                + Ansi.dim(" [" + task.status() + "]  [" + task.id() + "]"));
+                        String summary = taskResultSummary(task);
+                        if (summary != null) {
+                            Ansi.println(t, Ansi.dim("    └ " + summary));
+                        }
+                    });
+        }
+
+        /** One-line, truncated last-run summary for the listing, or null when the task never ran. */
+        static String taskResultSummary(Task task) {
+            String result = task.result();
+            if (result == null || result.isBlank()) {
+                return null;
+            }
+            String oneLine = result.replace("\r", " ").replace("\n", " ").strip();
+            if (oneLine.length() > 100) {
+                oneLine = oneLine.substring(0, 100) + "…";
+            }
+            return oneLine;
         }
     }
 

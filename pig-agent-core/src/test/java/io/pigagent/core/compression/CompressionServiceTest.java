@@ -161,6 +161,28 @@ class CompressionServiceTest {
     }
 
     @Test
+    void resetSnapshot_clearsRecordedCompressionState() {
+        // task-executor-wiring: the target of the /session clear snapshotResetHook wired in
+        // AgentBootstrap — after a compression, resetSnapshot must clear this session's snapshot so a
+        // later maybeCompress()/status() no longer reasons over the pre-clear compression point.
+        Memory memory = memoryWith(10);
+        CompressionService service = service(memory, new RecordingRecorder(false));
+        assertThat(service.compressNow("sess-1")).isTrue();
+        assertThat(service.status("sess-1").lastCompressedEpochMs()).isGreaterThan(0L);
+
+        service.resetSnapshot("sess-1");
+
+        assertThat(service.status("sess-1").lastCompressedEpochMs()).isEqualTo(0L);
+    }
+
+    @Test
+    void resetSnapshot_nullSessionId_isNoOp() {
+        CompressionService service = service(memoryWith(3), new RecordingRecorder(false));
+        // Must not throw for a null session id (defensive; the hook may be invoked with no active id).
+        service.resetSnapshot(null);
+    }
+
+    @Test
     void noCompressionWhenNothingToCompress() {
         Memory memory = memoryWith(3); // <= KEEP_RECENT, nothing to summarize
         RecordingRecorder recorder = new RecordingRecorder(false);
