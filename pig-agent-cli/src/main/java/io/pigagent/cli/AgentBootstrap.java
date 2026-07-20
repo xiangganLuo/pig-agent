@@ -115,6 +115,9 @@ import io.pigagent.tool.skills.authoring.DefaultSkillContentScanner;
 import io.pigagent.tool.skills.authoring.SkillContentScanner;
 import io.pigagent.tool.skills.authoring.SkillGate;
 import io.pigagent.tool.skills.authoring.SkillStagingArea;
+import io.pigagent.tool.skills.curator.NativeSkillUsageRecorder;
+import io.pigagent.tool.skills.curator.SkillCuratorService;
+import io.pigagent.tool.skills.curator.SkillUsageRecorder;
 import io.pigagent.tool.spi.ToolContext;
 import io.pigagent.tool.spi.ToolRegistrar;
 import io.pigagent.tool.availability.ToolAvailabilityGate;
@@ -199,6 +202,8 @@ public final class AgentBootstrap {
         public final ChannelRegistry outreachRegistry;
         /** Autonomous-skills gate: scan + dedup + atomic promote for the /skill human gate + auto-promote. */
         public final SkillGate skillGate;
+        /** Skill curator service (S3), nullable — non-null only when {@code skills.curator.enabled}. */
+        public final SkillCuratorService skillCuratorService;
         private final TaskScheduler taskScheduler;
 
         private Services(WorkspaceManager workspace, ConfigurationManager configManager, PigAgentConfig config,
@@ -208,7 +213,8 @@ public final class AgentBootstrap {
                          CompressionService compressionService, ToolAvailabilityReport availabilityReport,
                          AtomicReference<LineReader> readerRef,
                          ChannelNotificationService notificationService, ChannelRegistry outreachRegistry,
-                         SkillGate skillGate, TaskScheduler taskScheduler) {
+                         SkillGate skillGate, SkillCuratorService skillCuratorService,
+                         TaskScheduler taskScheduler) {
             this.workspace = workspace;
             this.configManager = configManager;
             this.config = config;
@@ -226,6 +232,7 @@ public final class AgentBootstrap {
             this.notificationService = notificationService;
             this.outreachRegistry = outreachRegistry;
             this.skillGate = skillGate;
+            this.skillCuratorService = skillCuratorService;
             this.taskScheduler = taskScheduler;
         }
 
@@ -364,12 +371,22 @@ public final class AgentBootstrap {
         // over the same skills dir, lowest priority). Default off → the auto SkillsToolProvider's
         // [workspace, classpath] SkillsTool is used unchanged (byte-identical to today).
         PigAgentConfig.NativeSkillConfig nativeSkillsCfg = config.getSkills().getNative();
+        // skill-curator-and-graded-promotion (S3): when the curator + usage-recording are on, self-feed
+        // a usage signal from loadSkill via a native-backed recorder (pig "doesn't use the native mouth",
+        // so the SkillUsageMiddleware never feeds it). Default off → noop() = zero behavior change.
+        PigAgentConfig.CuratorConfig curatorCfg = config.getSkills().getCurator();
+        boolean usageRecordingOn = curatorCfg.isEnabled() && curatorCfg.isUsageRecording();
+        SkillUsageRecorder skillUsageRecorder = usageRecordingOn
+                ? new NativeSkillUsageRecorder(workspace.getRootPath())
+                : SkillUsageRecorder.noop();
+        boolean skillsOverrideNeeded = nativeSkillsCfg.isEnabled() || usageRecordingOn;
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
-            // When native skills are on, register a native-aware SkillsTool as a manual override so it
-            // supersedes the auto-registered default (same @Tool names); off → empty overrides.
-            List<Object> skillsOverride = nativeSkillsCfg.isEnabled()
-                    ? List.of(skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg))
+            // Register a native/usage-aware SkillsTool as a manual override so it supersedes the
+            // auto-registered default (same @Tool names) whenever native sources OR a usage recorder are
+            // needed; otherwise → empty overrides (the auto SkillsToolProvider default, unchanged).
+            List<Object> skillsOverride = skillsOverrideNeeded
+                    ? List.of(skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg, skillUsageRecorder))
                     : List.of();
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, skillsOverride);
             log.info("Tools auto-registered: {}", reg.registered);
@@ -382,7 +399,7 @@ public final class AgentBootstrap {
                     new TaskTool(taskManager),
                     new ShellTools(sandboxPolicy),
                     new FileSystemTools(),
-                    skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg),
+                    skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg, skillUsageRecorder),
                     new LoopDetectedTool());
             for (Object tool : builtinTools) {
                 toolkit.registration().tool(tool).apply();
@@ -778,6 +795,20 @@ public final class AgentBootstrap {
                             ? "cheap/primary" : upCfg.getConsolidation().getModelId());
         }
 
+        // Skill curator (skill-curator-and-graded-promotion, S3): schedule periodic skill aging/archival
+        // on the existing TaskScheduler (mirrors user-profile consolidation / outreach briefing). Default
+        // off → no service, no schedule. Enabled + auto-archive=false → the scheduled pass is a
+        // non-destructive dry-run (suggestions only); auto-archive=true → real stale→.archive moves.
+        SkillCuratorService skillCuratorService = null;
+        if (curatorCfg.isEnabled()) {
+            skillCuratorService = SkillCuratorService.forWorkspace(
+                    workspace.getRootPath(), buildCuratorConfig(curatorCfg), curatorCfg.isAutoArchive());
+            taskScheduler.schedule("skill:curator", TaskSchedule.cron(curatorCfg.getSchedule()),
+                    skillCuratorService::runScheduled);
+            log.info("Skill curator scheduled ({}), auto-archive={}",
+                    curatorCfg.getSchedule(), curatorCfg.isAutoArchive());
+        }
+
         // Scheduled outreach (proactive-outreach): a cron-driven daily briefing pushed to the default
         // channel. Armed via the OutreachScheduler seam adapted to the existing TaskScheduler; the fire
         // resolves the channel lazily (channels are registered by the CLI after build). Default off.
@@ -870,7 +901,7 @@ public final class AgentBootstrap {
         return new Services(workspace, configManager, config, registry, modelManager, taskManager, mcpManager,
                 agentHolder, channelAgentHolder, agentKernel, sessionManager, compressionService,
                 availabilityReport, readerRef, notificationService, outreachRegistry,
-                skillGate, taskScheduler);
+                skillGate, skillCuratorService, taskScheduler);
     }
 
     /**
@@ -1132,9 +1163,13 @@ public final class AgentBootstrap {
      * adds a native {@code ClasspathSkillRepository}; a source that fails to construct is skipped (warn).
      */
     static SkillsTool skillsToolWithNative(java.nio.file.Path skillsDir,
-                                           PigAgentConfig.NativeSkillConfig nativeCfg) {
+                                           PigAgentConfig.NativeSkillConfig nativeCfg,
+                                           SkillUsageRecorder usageRecorder) {
+        SkillUsageRecorder recorder = usageRecorder == null ? SkillUsageRecorder.noop() : usageRecorder;
         if (nativeCfg == null || !nativeCfg.isEnabled()) {
-            return new SkillsTool(skillsDir);
+            return new SkillsTool(new SkillRegistry(List.of(
+                    new WorkspaceSkillSource(skillsDir),
+                    new ClasspathSkillSource())), SkillLimits.defaults(), recorder);
         }
         List<SkillSource> sources = new ArrayList<>();
         sources.add(new WorkspaceSkillSource(skillsDir));
@@ -1150,7 +1185,31 @@ public final class AgentBootstrap {
                         cpDir, e.toString());
             }
         }
-        return new SkillsTool(new SkillRegistry(sources));
+        return new SkillsTool(new SkillRegistry(sources), SkillLimits.defaults(), recorder);
+    }
+
+    /**
+     * Map the pig {@code skills.curator} config to a native {@link io.agentscope.harness.agent.skill.curator.SkillCuratorConfig}
+     * (skill-curator-and-graded-promotion, S3). {@code umbrella-pass-mode} string → enum (unknown →
+     * {@code DRY_RUN_ONLY}, the safe default).
+     */
+    static io.agentscope.harness.agent.skill.curator.SkillCuratorConfig buildCuratorConfig(
+            PigAgentConfig.CuratorConfig cfg) {
+        io.agentscope.harness.agent.skill.curator.SkillCuratorConfig.UmbrellaPassMode mode;
+        try {
+            mode = io.agentscope.harness.agent.skill.curator.SkillCuratorConfig.UmbrellaPassMode
+                    .valueOf(cfg.getUmbrellaPassMode().trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            mode = io.agentscope.harness.agent.skill.curator.SkillCuratorConfig.UmbrellaPassMode.DRY_RUN_ONLY;
+        }
+        return io.agentscope.harness.agent.skill.curator.SkillCuratorConfig.builder()
+                .enabled(true)
+                .staleAfterDays(cfg.getStaleAfterDays())
+                .archiveAfterDays(cfg.getArchiveAfterDays())
+                .minIdleHours(cfg.getMinIdleHours())
+                .backupRetention(cfg.getBackupRetention())
+                .umbrellaPassMode(mode)
+                .build();
     }
 
     /**
