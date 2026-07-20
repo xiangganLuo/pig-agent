@@ -7,6 +7,7 @@ import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
+import io.pigagent.core.memory.injection.MemoryInjection;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -70,6 +71,8 @@ public final class AgentInstanceFactory {
     private final ToolResultEvictionConfig toolResultEviction; // null → eviction disabled (av2 5b)
     private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
+    // memory-retrieval-injection: RAG-style injection (pinned + query-aware); null → today's whole-file.
+    private final MemoryInjection memoryInjection;
 
     public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
                                 MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
@@ -145,6 +148,24 @@ public final class AgentInstanceFactory {
                                 int maxRetries,
                                 Path workspace, ToolResultEvictionConfig toolResultEviction,
                                 boolean subagentsEnabled, PlanModeSettings planMode) {
+        this(models, toolkits, middlewares, memoryConfigSupplier, stateStore, permissionContexts, maxRetries,
+                workspace, toolResultEviction, subagentsEnabled, planMode, null);
+    }
+
+    /**
+     * @param memoryInjection RAG-style memory injection ({@code memory-retrieval-injection}) applied to
+     *        each per-agent (peer) instance: a pinned core in the system prompt + query-aware top-K facts
+     *        in a trailing ephemeral message. Only applied when native long-term memory is enabled.
+     *        {@code null} (the default) keeps the whole-{@code MEMORY.md} injection (byte-identical).
+     */
+    public AgentInstanceFactory(ModelResolver models, ToolkitProvider toolkits,
+                                MiddlewareProvider middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                                AgentStateStore stateStore,
+                                PermissionContextProvider permissionContexts,
+                                int maxRetries,
+                                Path workspace, ToolResultEvictionConfig toolResultEviction,
+                                boolean subagentsEnabled, PlanModeSettings planMode,
+                                MemoryInjection memoryInjection) {
         this.models = Objects.requireNonNull(models, "models");
         this.toolkits = Objects.requireNonNull(toolkits, "toolkits");
         this.middlewares = Objects.requireNonNull(middlewares, "middlewares");
@@ -156,6 +177,7 @@ public final class AgentInstanceFactory {
         this.toolResultEviction = toolResultEviction;
         this.subagentsEnabled = subagentsEnabled;
         this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
+        this.memoryInjection = memoryInjection;
     }
 
     public AgentInstance create(AgentSpec spec) {
@@ -168,6 +190,7 @@ public final class AgentInstanceFactory {
                 .toolkit(toolkit)
                 .middlewares(middlewares.middlewaresFor(spec))
                 .memory(memoryConfigSupplier == null ? null : memoryConfigSupplier.get())
+                .memoryInjection(memoryInjection)
                 .maxIters(spec.maxIters())
                 .maxRetries(maxRetries)
                 .stateStore(stateStore)

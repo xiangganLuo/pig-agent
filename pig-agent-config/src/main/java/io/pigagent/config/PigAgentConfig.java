@@ -257,6 +257,7 @@ public final class PigAgentConfig {
         @JsonProperty("consolidation-max-tokens") private int consolidationMaxTokens = 4000;
         @JsonProperty("model-id") private String modelId = "";
         @JsonProperty("search") private SearchConfig search = new SearchConfig();
+        @JsonProperty("injection") private InjectionConfig injection = new InjectionConfig();
 
         public String getFlush() { return flush; }
         public void setFlush(String f) { this.flush = f == null || f.isBlank() ? "always" : f; }
@@ -270,6 +271,56 @@ public final class PigAgentConfig {
         public void setModelId(String id) { this.modelId = id == null ? "" : id; }
         public SearchConfig getSearch() { return search; }
         public void setSearch(SearchConfig s) { this.search = s == null ? new SearchConfig() : s; }
+        public InjectionConfig getInjection() { return injection; }
+        public void setInjection(InjectionConfig i) { this.injection = i == null ? new InjectionConfig() : i; }
+    }
+
+    /**
+     * 检索即注入（{@code memory.injection}，能力 {@code memory-retrieval-injection}）——把长期记忆的注入从
+     * 「整份 {@code MEMORY.md} 塞进 system prompt」改为 RAG 式按需注入：<b>pinned 核心</b>常驻 system prompt
+     * （进缓存前缀、query-无关、字节稳定），<b>query-aware top-K 相关事实</b>以 ephemeral 非缓存位（trailing
+     * reasoning message、每步重建不持久化）按需注入。检索经既有 {@code MemorySearchIndex} 稳定门面
+     * （BM25-only 即可）。
+     *
+     * <p><b>默认 {@code enabled=false}</b>：关闭时保持今日行为——整份 {@code MEMORY.md} 注入 system prompt、
+     * 无 query-aware 注入，逐字节等于本能力引入前。全部字段可选、默认安全。
+     * <ul>
+     *   <li>{@code top-k}：每回合注入的 query-aware 相关事实条数上限（默认 6）。</li>
+     *   <li>{@code pinned.source}：pinned 来源（{@code heading}=从 {@code MEMORY.md} 的标记段提取，默认；
+     *       {@code head}=前 N 字符兜底）。</li>
+     *   <li>{@code pinned.heading}：{@code source=heading} 时被 pin 的 Markdown 标题名（默认 {@code Pinned}）。</li>
+     *   <li>{@code pinned.max-chars}：注入 system prompt 的 pinned 块字符上限（默认 800；0=不注 pinned）。</li>
+     *   <li>{@code embedder-model-id}：可选向量嵌入模型 id（空 → BM25-only；本能力默认 BM25-only，离线可测）。</li>
+     * </ul>
+     */
+    public static final class InjectionConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("top-k") private int topK = 6;
+        @JsonProperty("pinned") private PinnedConfig pinned = new PinnedConfig();
+        @JsonProperty("embedder-model-id") private String embedderModelId = "";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getTopK() { return topK; }
+        public void setTopK(int k) { this.topK = k; }
+        public PinnedConfig getPinned() { return pinned; }
+        public void setPinned(PinnedConfig p) { this.pinned = p == null ? new PinnedConfig() : p; }
+        public String getEmbedderModelId() { return embedderModelId; }
+        public void setEmbedderModelId(String id) { this.embedderModelId = id == null ? "" : id; }
+    }
+
+    /** {@code memory.injection.pinned} 子块——pinned 核心的来源/标题/上限。缺省全安全（heading/Pinned/800）。 */
+    public static final class PinnedConfig {
+        @JsonProperty("source") private String source = "heading";
+        @JsonProperty("heading") private String heading = "Pinned";
+        @JsonProperty("max-chars") private int maxChars = 800;
+
+        public String getSource() { return source; }
+        public void setSource(String s) { this.source = (s == null || s.isBlank()) ? "heading" : s; }
+        public String getHeading() { return heading; }
+        public void setHeading(String h) { this.heading = (h == null || h.isBlank()) ? "Pinned" : h; }
+        public int getMaxChars() { return maxChars; }
+        public void setMaxChars(int c) { this.maxChars = c; }
     }
 
     /**

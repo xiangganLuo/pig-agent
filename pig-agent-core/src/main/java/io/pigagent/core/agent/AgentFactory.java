@@ -8,6 +8,7 @@ import io.agentscope.core.tool.Toolkit;
 import io.agentscope.harness.agent.memory.MemoryConfig;
 import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
+import io.pigagent.core.memory.injection.MemoryInjection;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -60,6 +61,8 @@ public final class AgentFactory {
     private final boolean subagentsEnabled; // false → native subagents disabled (av2 6a)
     private final List<SubagentDeclaration> subagentDeclarations; // null/empty → built-in + workspace only
     private final PlanModeSettings planMode; // never null → PlanModeSettings.disabled() (av2 plan-mode)
+    // memory-retrieval-injection: RAG-style injection (pinned + query-aware); null → today's whole-file.
+    private final MemoryInjection memoryInjection;
 
     public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
                         List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier) {
@@ -138,6 +141,25 @@ public final class AgentFactory {
                         Path workspace, ToolResultEvictionConfig toolResultEviction,
                         boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations,
                         PlanModeSettings planMode) {
+        this(name, sysPrompt, toolkit, middlewares, memoryConfigSupplier, maxRetries, fallbackModel, maxIters,
+                stateStore, permissionContextSupplier, workspace, toolResultEviction, subagentsEnabled,
+                subagentDeclarations, planMode, null);
+    }
+
+    /**
+     * @param memoryInjection RAG-style memory injection ({@code memory-retrieval-injection}): a pinned
+     *        core in the system prompt + query-aware top-K facts in a trailing ephemeral message. Only
+     *        applied when native long-term memory is enabled. {@code null} (the default) keeps the
+     *        whole-{@code MEMORY.md}-into-system-prompt behavior (byte-identical to before).
+     */
+    public AgentFactory(String name, String sysPrompt, Toolkit toolkit,
+                        List<MiddlewareBase> middlewares, Supplier<MemoryConfig> memoryConfigSupplier,
+                        int maxRetries,
+                        Model fallbackModel, int maxIters, AgentStateStore stateStore,
+                        Supplier<PermissionContextState> permissionContextSupplier,
+                        Path workspace, ToolResultEvictionConfig toolResultEviction,
+                        boolean subagentsEnabled, List<SubagentDeclaration> subagentDeclarations,
+                        PlanModeSettings planMode, MemoryInjection memoryInjection) {
         this.name = name;
         this.sysPrompt = sysPrompt;
         this.toolkit = toolkit;
@@ -153,6 +175,7 @@ public final class AgentFactory {
         this.subagentsEnabled = subagentsEnabled;
         this.subagentDeclarations = subagentDeclarations;
         this.planMode = planMode == null ? PlanModeSettings.disabled() : planMode;
+        this.memoryInjection = memoryInjection;
     }
 
     /**
@@ -169,6 +192,7 @@ public final class AgentFactory {
                 .toolkit(toolkit)
                 .middlewares(middlewares)
                 .memory(memoryConfigSupplier == null ? null : memoryConfigSupplier.get())
+                .memoryInjection(memoryInjection)
                 .maxIters(maxIters)
                 .maxRetries(maxRetries)
                 .fallbackModel(fallbackModel)

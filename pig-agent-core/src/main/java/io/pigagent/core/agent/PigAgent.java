@@ -21,6 +21,7 @@ import io.agentscope.harness.agent.memory.compaction.ToolResultEvictionConfig;
 import io.agentscope.harness.agent.subagent.SubagentDeclaration;
 import io.pigagent.core.memory.ConversationMemory;
 import io.pigagent.core.memory.NativeMemoryContextMiddleware;
+import io.pigagent.core.memory.injection.MemoryInjection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -419,6 +420,7 @@ public final class PigAgent {
         private Toolkit toolkit;
         private List<MiddlewareBase> middlewares;
         private MemoryConfig memoryConfig; // null = native long-term memory disabled (today's behavior)
+        private MemoryInjection memoryInjection; // null = whole-file MEMORY.md injection (today's behavior)
         private AgentStateStore stateStore;
         private PermissionContextState permissionContext;
         private int maxIters; // 0 = do not set (keep AgentScope's default)
@@ -478,6 +480,20 @@ public final class PigAgent {
          */
         public Builder memory(MemoryConfig memoryConfig) {
             this.memoryConfig = memoryConfig;
+            return this;
+        }
+
+        /**
+         * Enable RAG-style memory injection ({@code memory-retrieval-injection}). Only takes effect when
+         * native long-term memory is also enabled ({@link #memory(MemoryConfig)} non-null), since it
+         * refines how {@code MEMORY.md} is surfaced. When non-null <em>and</em> {@code settings.enabled()},
+         * the {@code NativeMemoryContextMiddleware} injects only a stable pinned core into the system
+         * prompt and injects query-aware top-K facts as a trailing ephemeral message. {@code null} (the
+         * default) keeps the whole-{@code MEMORY.md}-into-system-prompt behavior — byte-identical to
+         * before this capability.
+         */
+        public Builder memoryInjection(MemoryInjection memoryInjection) {
+            this.memoryInjection = memoryInjection;
             return this;
         }
 
@@ -615,8 +631,14 @@ public final class PigAgent {
             }
             boolean memoryEnabled = memoryConfig != null;
             if (memoryEnabled) {
-                effectiveMiddlewares.add(new NativeMemoryContextMiddleware(
-                        resolvedWorkspace.resolve("MEMORY.md")));
+                Path memoryFile = resolvedWorkspace.resolve("MEMORY.md");
+                if (memoryInjection != null && memoryInjection.settings().enabled()) {
+                    // memory-retrieval-injection: pinned core → system prompt, query-aware → ephemeral.
+                    effectiveMiddlewares.add(new NativeMemoryContextMiddleware(
+                            memoryFile, memoryInjection.settings(), memoryInjection.retriever()));
+                } else {
+                    effectiveMiddlewares.add(new NativeMemoryContextMiddleware(memoryFile));
+                }
             }
 
             // av2 Phase 5b: build a HarnessAgent VEHICLE around the same ReActAgent config. The

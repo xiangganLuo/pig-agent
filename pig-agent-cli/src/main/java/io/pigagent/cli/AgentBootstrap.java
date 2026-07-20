@@ -48,6 +48,9 @@ import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.MemoryMigration;
+import io.pigagent.core.memory.injection.MemoryInjection;
+import io.pigagent.core.memory.injection.MemoryInjectionSettings;
+import io.pigagent.core.memory.injection.PinnedSource;
 import io.pigagent.core.memory.search.Embedder;
 import io.pigagent.core.memory.search.InMemoryVectorStore;
 import io.pigagent.core.memory.search.MemoryCorpusLoader;
@@ -605,12 +608,25 @@ public final class AgentBootstrap {
                     peerSubagents == null ? 0 : peerSubagents.size());
         }
 
+        // memory-retrieval-injection: when memory.injection.enabled, build a MemorySearchIndex (corpus =
+        // MEMORY.md + memory/*.md; BM25-only unless an embedder-model-id is configured) and the pinned/
+        // top-k settings, shared (read-only) across the interactive/channel/peer tracks. Only takes effect
+        // when native long-term memory is also on. null (default) → whole-MEMORY.md injection (unchanged).
+        MemoryInjection memoryInjection =
+                buildMemoryInjection(config.getMemory().getInjection(), workspace, modelManager);
+        if (memoryInjection != null) {
+            PigAgentConfig.InjectionConfig injCfg = config.getMemory().getInjection();
+            log.info("Memory retrieval injection enabled (top-k {}, pinned {} '{}' <= {} chars, embedder-model '{}')",
+                    injCfg.getTopK(), injCfg.getPinned().getSource(), injCfg.getPinned().getHeading(),
+                    injCfg.getPinned().getMaxChars(), injCfg.getEmbedderModelId());
+        }
+
         AgentFactory agentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
                 interactiveMiddlewares, memoryConfigSupplier,
                 maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, interactivePermCtx, workspaceRoot, evictionConfig,
-                subagentsEnabled, peerSubagents, planModeSettings);
+                subagentsEnabled, peerSubagents, planModeSettings, memoryInjection);
         AgentHolder agentHolder = new AgentHolder(agentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attach(agentHolder, agentFactory, defaultModel.id());
         log.info("Model: {}", defaultModel.label());
@@ -641,7 +657,7 @@ public final class AgentBootstrap {
                         AgentWiring.effectiveMode(spec.permissionMode(),
                                 configManager.getConfig().getPermissions().resolveMode()),
                         tk.getToolNames(), true),
-                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings);
+                maxRetries, workspaceRoot, evictionConfig, subagentsEnabled, planModeSettings, memoryInjection);
         for (AgentSpec s : declaredSpecs) {
             if (!"default".equals(s.id())) {
                 try {
@@ -777,7 +793,10 @@ public final class AgentBootstrap {
                         new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
                 memoryConfigSupplier,
                 maxRetries, fallbackModel, config.getAgent().getMaxIters(),
-                stateStore, channelPermCtx, workspaceRoot, evictionConfig);
+                stateStore, channelPermCtx, workspaceRoot, evictionConfig,
+                // channel is a separate non-interactive track: no subagents, no plan mode; injection
+                // applies the same when memory.injection is enabled (default null → whole-file, unchanged).
+                false, null, PlanModeSettings.disabled(), memoryInjection);
         AgentHolder channelAgentHolder = new AgentHolder(
                 channelAgentFactory.create(modelManager.buildModel(defaultModel)));
         modelManager.attachChannel(channelAgentHolder, channelAgentFactory);
@@ -897,6 +916,31 @@ public final class AgentBootstrap {
                 cfg.getBm25Weight(), cfg.getVectorWeight(), cfg.getCandidateMultiplier(),
                 cfg.getMinScore(), cfg.getTopK(), cfg.getRebuildThrottleSeconds() * 1000L);
         return new MemorySearchIndex(loader, new InMemoryVectorStore(), embedder, settings);
+    }
+
+    /**
+     * Build the {@link MemoryInjection} for RAG-style memory injection ({@code memory-retrieval-injection})
+     * from the {@code memory.injection} config, or {@code null} when disabled (→ whole-{@code MEMORY.md}
+     * injection, unchanged). The retriever is a dedicated {@link MemorySearchIndex} over the declarative
+     * corpus (workspace {@code MEMORY.md} + {@code memory/} ledger; {@code USER.md} is pinned separately by
+     * {@code user-profile}, so it is excluded here to avoid double injection). BM25-only unless an
+     * {@code embedder-model-id} resolves. Only takes effect when native long-term memory is also enabled.
+     */
+    static MemoryInjection buildMemoryInjection(PigAgentConfig.InjectionConfig cfg,
+            WorkspaceManager workspace, ModelManager modelManager) {
+        if (cfg == null || !cfg.isEnabled()) {
+            return null;
+        }
+        java.nio.file.Path root = workspace.getRootPath();
+        MemoryCorpusLoader loader = new MemoryCorpusLoader(
+                root.resolve("MEMORY.md"), root.resolve("memory"), null);
+        Embedder embedder = resolveEmbedder(cfg.getEmbedderModelId(), modelManager);
+        MemorySearchIndex index = new MemorySearchIndex(
+                loader, new InMemoryVectorStore(), embedder, MemorySearchConfig.defaults());
+        MemoryInjectionSettings settings = new MemoryInjectionSettings(true, cfg.getTopK(),
+                PinnedSource.fromConfig(cfg.getPinned().getSource()),
+                cfg.getPinned().getHeading(), cfg.getPinned().getMaxChars());
+        return new MemoryInjection(settings, index::search);
     }
 
     /**
