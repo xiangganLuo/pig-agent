@@ -341,11 +341,19 @@ public final class AgentBootstrap {
         UserProfileStore userProfileStore = new UserProfileStore(userProfileFile);
         UserProfileContextMiddleware userProfileMiddleware = new UserProfileContextMiddleware(
                 userProfileStore, upCfg.getMaxChars(), userProfileEnabled);
-        ToolContext toolContext = new ToolContext(taskManager, workspace.getSkillsDir(),
-                workspace.getRootPath(), config.getTools().getWeb().getAllowedHosts(), sandboxPolicy,
-                notificationService, () -> configManager.getConfig().getOutreach().isEnabled(),
-                skillStaging, () -> configManager.getConfig().getSkills().getAutonomous().isEnabled(),
-                userProfileFile, userProfileEnabled);
+        ToolContext toolContext = ToolContext.builder()
+                .taskManager(taskManager)
+                .skillsDir(workspace.getSkillsDir())
+                .workspaceRoot(workspace.getRootPath())
+                .webAllowedHosts(config.getTools().getWeb().getAllowedHosts())
+                .sandboxPolicy(sandboxPolicy)
+                .notificationService(notificationService)
+                .outreachEnabled(() -> configManager.getConfig().getOutreach().isEnabled())
+                .skillStaging(skillStaging)
+                .autonomousSkillsEnabled(() -> configManager.getConfig().getSkills().getAutonomous().isEnabled())
+                .userProfileFile(userProfileFile)
+                .userProfileEnabled(userProfileEnabled)
+                .build();
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
             ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
