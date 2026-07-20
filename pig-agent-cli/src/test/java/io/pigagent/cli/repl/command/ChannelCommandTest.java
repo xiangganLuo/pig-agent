@@ -94,12 +94,13 @@ class ChannelCommandTest {
     }
 
     @Test
-    void addStoresConfigAndMasksSecretInput() throws IOException {
+    void addPastedWebhookAutoDetectsTypeAndMasksSecret() throws IOException {
         ConfigurationManager cfg = cfg();
         LineReader reader = mock(LineReader.class);
-        // Type "3" = DINGTALK (functional list is webhook/stdin/dingtalk/feishu); then url, port, path.
+        // Paste a DingTalk webhook → auto-detected (no type pick), then only the masked sign-secret is
+        // asked (no port/path). A .invalid host makes the post-add auto-test fail fast + offline.
         when(reader.readLine(anyString())).thenReturn(
-                "3", "https://oapi.dingtalk.com/robot/send?access_token=T", "", "");
+                "https://oapi.dingtalk.com.invalid/robot/send?access_token=T");
         when(reader.readLine(anyString(), any(Character.class))).thenReturn("ding-secret");
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -111,9 +112,28 @@ class ChannelCommandTest {
         assertThat(saved.isEnabled()).isTrue();
         assertThat(saved.getWebhookUrl()).contains("oapi.dingtalk.com");
         assertThat(saved.getSignSecret()).isEqualTo("ding-secret");
+        // No port/path was asked for an outbound robot (they'd be null/0).
+        assertThat(saved.getPort()).isZero();
         // The secret was read via the masked overload (readLine(prompt, mask)) — never echoed plainly.
-        verify(reader, atLeastOnce()).readLine(contains("Sign secret"), any(Character.class));
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Saved dingtalk");
+        verify(reader, atLeastOnce()).readLine(contains("加签密钥"), any(Character.class));
+        String o = out.toString(StandardCharsets.UTF_8);
+        assertThat(o).contains("已识别为").contains("Saved dingtalk");
+    }
+
+    @Test
+    void addFallsBackToManualPickWhenNoUrlPasted() throws IOException {
+        ConfigurationManager cfg = cfg();
+        LineReader reader = mock(LineReader.class);
+        // Blank webhook paste → numbered picker; "1" = webhook (first functional type), then its port/path.
+        when(reader.readLine(anyString())).thenReturn("", "1", "", "");
+        when(reader.readLine(anyString(), any(Character.class))).thenReturn(""); // no auth token
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        int code = build(cfg, reader, out).execute("/channel", "add");
+
+        assertThat(code).isZero();
+        assertThat(cfg.getConfig().getChannels().containsKey("webhook")).isTrue();
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Saved webhook");
     }
 
     @Test

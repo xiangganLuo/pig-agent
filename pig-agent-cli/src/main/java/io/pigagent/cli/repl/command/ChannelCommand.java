@@ -116,40 +116,93 @@ public final class ChannelCommand implements Runnable {
             Ansi.println(t, Ansi.error("Interactive input is unavailable."));
             return;
         }
-        List<ChannelType> options = functionalTypes();
-        Ansi.println(t, Ansi.heading("Add channel — choose a type:"));
-        for (int i = 0; i < options.size(); i++) {
-            Ansi.println(t, String.format("  %d) %-10s %s", i + 1, options.get(i).id(), options.get(i).displayName()));
+        Ansi.println(t, Ansi.heading("Add channel"));
+        Ansi.println(t, Ansi.dim("  粘贴机器人 Webhook 地址可自动识别（钉钉/飞书）；或直接回车手动选类型。"));
+        String pasted = reader.readLine("Webhook 地址（可留空）: ").trim();
+        ChannelType type = detectType(pasted);
+        String prefillUrl = null;
+        if (type != null) {
+            prefillUrl = pasted;
+            Ansi.println(t, Ansi.success("已识别为 " + type.displayName() + "。"));
+        } else {
+            if (!pasted.isBlank()) {
+                Ansi.println(t, Ansi.warn("无法从该地址识别渠道，改为手动选择。"));
+            }
+            type = pickType(reader, t);
+            if (type == null) {
+                Ansi.println(t, Ansi.error("Invalid selection."));
+                return;
+            }
         }
-        Ansi.println(t, Ansi.dim("  (stubs not offered: " + String.join(", ", stubIds()) + ")"));
-        ChannelType type;
-        try {
-            type = options.get(Integer.parseInt(reader.readLine("Type number: ").trim()) - 1);
-        } catch (RuntimeException e) {
-            Ansi.println(t, Ansi.error("Invalid selection."));
-            return;
-        }
-        ChannelConfig cc = readConfig(reader, type);
+        printSetupHint(t, type);
+        ChannelConfig cc = readConfig(reader, type, prefillUrl);
         cc.setEnabled(true);
         putChannel(type.id(), cc);
         Ansi.println(t, Ansi.success("Saved " + type.id() + " (enabled). ")
                 + Ansi.dim("Connects on next launch — restart to activate."));
+        autoTest(t, type, cc);
     }
 
-    /** Read the per-transport settings for a channel; secrets are masked on input, never echoed. */
-    private ChannelConfig readConfig(LineReader reader, ChannelType type) {
+    /** Auto-detect a robot channel from a pasted webhook URL (host keyword); null if unrecognized/blank. */
+    private static ChannelType detectType(String url) {
+        if (url == null || url.isBlank() || !url.toLowerCase().startsWith("http")) {
+            return null;
+        }
+        String u = url.toLowerCase();
+        if (u.contains("dingtalk")) {
+            return ChannelType.DINGTALK;
+        }
+        if (u.contains("feishu") || u.contains("larksuite")) {
+            return ChannelType.FEISHU;
+        }
+        return null;
+    }
+
+    /** The numbered type picker — fallback when no URL was pasted / it wasn't recognized. Null on bad input. */
+    private ChannelType pickType(LineReader reader, Terminal t) {
+        List<ChannelType> options = functionalTypes();
+        Ansi.println(t, Ansi.heading("选择渠道类型:"));
+        for (int i = 0; i < options.size(); i++) {
+            Ansi.println(t, String.format("  %d) %-10s %s", i + 1, options.get(i).id(), options.get(i).displayName()));
+        }
+        Ansi.println(t, Ansi.dim("  (stubs not offered: " + String.join(", ", stubIds()) + ")"));
+        try {
+            return options.get(Integer.parseInt(reader.readLine("Type number: ").trim()) - 1);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** A short "where to get the credentials" hint per channel type — so the user isn't guessing. */
+    private void printSetupHint(Terminal t, ChannelType type) {
+        String hint = switch (type) {
+            case DINGTALK -> "钉钉群 → 设置 → 智能群助手 → 添加机器人 → 自定义 → 复制 Webhook；安全设置勾选「加签」复制密钥。";
+            case FEISHU -> "飞书群 → 设置 → 群机器人 → 添加自定义机器人 → 复制 Webhook；勾选「签名校验」复制密钥（可选）。";
+            case WEBHOOK -> "本地 HTTP webhook：设一个监听端口/路径，外部服务 POST 消息进来。";
+            default -> null;
+        };
+        if (hint != null) {
+            Ansi.println(t, Ansi.dim("  ↳ " + hint));
+        }
+    }
+
+    /**
+     * Read only the settings a channel actually needs; secrets are masked on input, never echoed. An
+     * outbound robot (DingTalk/Feishu) needs just webhook-url + sign-secret — NO listen port/path (that
+     * is only for the inbound HTTP {@code webhook} channel), so those cryptic prompts are gone. A pasted
+     * webhook URL ({@code prefillUrl}) is reused so the user isn't asked to retype it.
+     */
+    private ChannelConfig readConfig(LineReader reader, ChannelType type, String prefillUrl) {
         ChannelConfig cc = new ChannelConfig();
         switch (type) {
             case DINGTALK -> {
-                cc.setWebhookUrl(reader.readLine("Outbound webhook-url (optional): ").trim());
-                cc.setSignSecret(reader.readLine("Sign secret (optional): ", '*').trim());
-                readPortPath(reader, cc);
+                cc.setWebhookUrl(webhook(reader, prefillUrl));
+                cc.setSignSecret(reader.readLine("加签密钥 sign-secret（可选，回车跳过）: ", '*').trim());
             }
             case FEISHU -> {
-                cc.setWebhookUrl(reader.readLine("Outbound webhook-url (optional): ").trim());
-                cc.setSignSecret(reader.readLine("Sign secret (optional): ", '*').trim());
-                cc.setVerificationToken(reader.readLine("Verification token (optional): ", '*').trim());
-                readPortPath(reader, cc);
+                cc.setWebhookUrl(webhook(reader, prefillUrl));
+                cc.setSignSecret(reader.readLine("签名密钥 sign-secret（可选，回车跳过）: ", '*').trim());
+                cc.setVerificationToken(reader.readLine("入站事件校验 token（可选，回车跳过）: ", '*').trim());
             }
             case WEBHOOK -> {
                 cc.setToken(reader.readLine("Auth token (optional): ", '*').trim());
@@ -160,6 +213,12 @@ public final class ChannelCommand implements Runnable {
         return cc;
     }
 
+    /** Reuse a pasted webhook URL if we have one, else prompt for it. */
+    private static String webhook(LineReader reader, String prefillUrl) {
+        return (prefillUrl != null && !prefillUrl.isBlank())
+                ? prefillUrl : reader.readLine("Outbound webhook-url: ").trim();
+    }
+
     private void readPortPath(LineReader reader, ChannelConfig cc) {
         String port = reader.readLine("Listen port (blank = default): ").trim();
         if (port.matches("\\d+")) {
@@ -168,6 +227,34 @@ public final class ChannelCommand implements Runnable {
         String path = reader.readLine("HTTP path (blank = default): ").trim();
         if (!path.isBlank()) {
             cc.setPath(path);
+        }
+    }
+
+    /**
+     * After add: for an outbound robot with a webhook-url, send one real test message and report — so
+     * the user knows it works without a separate {@code /channel test}. Inbound channels bind on the
+     * next launch (no listener started here). Best-effort: never throws, never echoes a credential.
+     */
+    private void autoTest(Terminal t, ChannelType type, ChannelConfig cc) {
+        Channel channel;
+        try {
+            channel = type.create(cc);
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (channel instanceof OutboundChannel out && isSet(cc.getWebhookUrl())) {
+            Ansi.println(t, Ansi.dim("发送一条测试消息验证 " + type.id() + " …"));
+            boolean ok;
+            try {
+                ok = out.send("", Notification.of(NotificationType.MESSAGE, Severity.NORMAL,
+                        "PigAgent 连通性测试", "This is a channel connectivity test from PigAgent."));
+            } catch (RuntimeException e) {
+                ok = false;
+            }
+            Ansi.println(t, ok ? Ansi.success("✓ 测试消息已投递——机器人接受了消息。")
+                    : Ansi.warn("测试消息未投递（检查 webhook-url / 加签密钥）。"));
+        } else {
+            Ansi.println(t, Ansi.dim("（入站渠道将在重启后监听；用 /channel test " + type.id() + " 验证。）"));
         }
     }
 
@@ -376,7 +463,7 @@ public final class ChannelCommand implements Runnable {
     private static void usage(Terminal t) {
         Ansi.println(t, Ansi.heading("/channel actions:"));
         Ansi.println(t, Ansi.dim("  list                    list configured channels + live status"));
-        Ansi.println(t, Ansi.dim("  add                     add a channel (type, settings) + enable it"));
+        Ansi.println(t, Ansi.dim("  add                     add a channel（粘贴 webhook 自动识别 / 引导式，加完自动测试）"));
         Ansi.println(t, Ansi.dim("  remove <id|index>       remove a channel (asks to confirm)"));
         Ansi.println(t, Ansi.dim("  enable <id|index>       enable a channel (connects on next launch)"));
         Ansi.println(t, Ansi.dim("  disable <id|index>      disable a channel"));
