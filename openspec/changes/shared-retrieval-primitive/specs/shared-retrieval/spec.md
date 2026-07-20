@@ -42,11 +42,11 @@
 
 ### Requirement: 通用原语与记忆域的包边界
 
-通用、无记忆语义的检索原语 SHALL 位于内核共享包 `io.pigagent.core.search`（`SearchDocument`、`Bm25Index`、`HybridRanker`、`Tokenizer`、`VectorStore` 及其内存实现、`Embedder` 及其实现、向量工具）。记忆线私有的类型（`MemoryDocument`、语料装载器、记忆检索门面、记忆检索配置）SHALL 留在 `io.pigagent.core.memory.search`。工具检索（Tool-OS）与技能匹配（Skills）等后续能力 MUST 能只依赖 `io.pigagent.core.search` 复用这套原语，而不牵扯记忆域类型。
+通用、无记忆语义的 **ranker 核心** SHALL 位于内核共享包 `io.pigagent.core.search`（`SearchDocument`、`Bm25Index`、`HybridRanker`、`Tokenizer`）。记忆线私有的类型（`MemoryDocument`、语料装载器 `MemoryCorpusLoader`、记忆检索门面 `MemorySearchIndex`、记忆检索配置 `MemorySearchConfig`）以及当前仅记忆线消费的向量/嵌入层（`VectorStore`/`InMemoryVectorStore`/`Embedder`/`DeterministicEmbedder`/`OpenAiCompatibleEmbedder`/向量工具）SHALL 留在 `io.pigagent.core.memory.search`——保证既有记忆门面/工具单测逐字不改；向量层的上提待真有跨线消费方时按 YAGNI 再做，届时不影响 ranker 核心契约。工具检索（Tool-OS）与技能匹配（Skills）等后续能力 MUST 能只依赖 `io.pigagent.core.search` 复用 ranker 核心做 BM25 排序，而不牵扯记忆域类型。
 
-#### Scenario: 后续检索线只依赖通用包
-- **WHEN** 一条新检索线（工具或技能）定义自己的 `SearchDocument` 实现并做混合排序
-- **THEN** 它只需 import `io.pigagent.core.search` 的原语即可完成，无需 import 任何 `io.pigagent.core.memory.search` 记忆域类型
+#### Scenario: 后续检索线只依赖通用包做 BM25 排序
+- **WHEN** 一条新检索线（工具或技能）定义自己的 `SearchDocument` 实现并做 BM25/混合排序
+- **THEN** 它只需 import `io.pigagent.core.search` 的 ranker 核心（`SearchDocument`/`Bm25Index`/`HybridRanker`/`Tokenizer`）即可完成 BM25 排序，无需 import 任何 `io.pigagent.core.memory.search` 记忆域类型
 
 #### Scenario: 记忆域类型仍在原包
 - **WHEN** 查找 `MemoryDocument` 与记忆检索门面
