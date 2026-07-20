@@ -55,7 +55,7 @@ class ThinkingSpinnerTest {
                 eq(ThinkingSpinner.REPAINT_INTERVAL_MS), eq(ThinkingSpinner.REPAINT_INTERVAL_MS),
                 eq(TimeUnit.MILLISECONDS));
         assertThat(sink).hasSize(1);
-        assertThat(sink.get(0)).contains("⠋").contains("thinking").contains("(0s)").contains("\r");
+        assertThat(sink.get(0)).contains("⠋").contains("思考中").contains("(0s)").contains("\r");
     }
 
     @Test
@@ -104,7 +104,7 @@ class ThinkingSpinnerTest {
 
         verifyNoInteractions(scheduler); // never schedules → no \r animation spam on a dumb terminal
         assertThat(sink).hasSize(1);
-        assertThat(sink.get(0)).contains("thinking");
+        assertThat(sink.get(0)).contains("思考中");
 
         spinner.stop();
         assertThat(sink).hasSize(2); // static line erased, still no scheduler use
@@ -153,51 +153,39 @@ class ThinkingSpinnerTest {
 
     @Test
     void frameContent_formatsGlyphLabelAndElapsed() {
-        assertThat(ThinkingSpinner.frameContent("⠹", 12)).isEqualTo("⠹ thinking… (12s)");
+        assertThat(ThinkingSpinner.frameContent("⠹", 12)).isEqualTo("⠹ 思考中… (12s)");
     }
 
     @Test
-    void labelFor_flipsToRetryLabelAfterThreshold_whenEnabled() {
-        assertThat(ThinkingSpinner.labelFor(0, true, "thinking…")).isEqualTo("thinking…");
-        assertThat(ThinkingSpinner.labelFor(ThinkingSpinner.RETRY_LABEL_AFTER_SECONDS - 1, true, "thinking…"))
-                .isEqualTo("thinking…");
-        assertThat(ThinkingSpinner.labelFor(ThinkingSpinner.RETRY_LABEL_AFTER_SECONDS, true, "thinking…"))
-                .contains("重试");
-    }
-
-    @Test
-    void labelFor_neverFlips_whenRetrySwitchOff() {
-        assertThat(ThinkingSpinner.labelFor(30, false, "运行中…")).isEqualTo("运行中…");
-    }
-
-    @Test
-    void tick_afterRetryThreshold_paintsRetryLabel() {
+    void tick_afterLongWait_stillShowsThinkingNotRetry() {
+        // A long wait with no data = the model is thinking/generating, NOT retrying — the label must
+        // stay 思考中 (with the elapsed counter), never a fabricated "重试中".
         ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
         when(scheduler.scheduleAtFixedRate(any(), anyLong(), anyLong(), any())).thenReturn(future());
         AtomicLong now = new AtomicLong(0);
         List<String> sink = new ArrayList<>();
 
         ThinkingSpinner spinner = new ThinkingSpinner(scheduler, now::get, sink::add, true);
-        spinner.start(); // reasoning phase → retry switch on
+        spinner.start(); // reasoning phase
 
         ArgumentCaptor<Runnable> repaint = ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).scheduleAtFixedRate(repaint.capture(), anyLong(), anyLong(), any());
 
-        now.set(7 * SEC);
+        now.set(90 * SEC);
         repaint.getValue().run();
 
-        assertThat(sink.get(sink.size() - 1)).contains("重试中").contains("(7s)");
+        assertThat(sink.get(sink.size() - 1)).contains("思考中").contains("(90s)").doesNotContain("重试");
     }
 
     @Test
-    void toolPhaseStart_neverShowsRetryLabel() {
+    void toolPhaseStart_showsExplicitLabel() {
         ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
         when(scheduler.scheduleAtFixedRate(any(), anyLong(), anyLong(), any())).thenReturn(future());
         AtomicLong now = new AtomicLong(0);
         List<String> sink = new ArrayList<>();
 
         ThinkingSpinner spinner = new ThinkingSpinner(scheduler, now::get, sink::add, true);
-        spinner.start("运行中…", false); // tool-execution phase → no retry flip
+        spinner.start("运行中…"); // tool-execution phase → explicit label, still no retry wording
 
         ArgumentCaptor<Runnable> repaint = ArgumentCaptor.forClass(Runnable.class);
         verify(scheduler).scheduleAtFixedRate(repaint.capture(), anyLong(), anyLong(), any());

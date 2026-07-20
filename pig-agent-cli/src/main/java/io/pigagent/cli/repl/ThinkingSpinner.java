@@ -38,17 +38,8 @@ public final class ThinkingSpinner {
     /** Repaint period (ms) — within the ~80–120ms Claude-Code-style range. */
     public static final long REPAINT_INTERVAL_MS = 90L;
 
-    /**
-     * After this many elapsed seconds with the reasoning spinner still running (no answer text yet),
-     * the label flips to {@link #RETRY_LABEL} — the native model retry (backoff up to ~8s over several
-     * attempts) makes the user wait ~a minute seeing only {@code thinking…}; this signals it is
-     * retrying, not frozen. Only applies to a reasoning start (not a tool-execution start).
-     */
-    public static final long RETRY_LABEL_AFTER_SECONDS = 6L;
-
-    private static final String LABEL = "thinking…";
-    private static final String RETRY_LABEL = "模型繁忙，重试中…";
-    private static final String STATIC_LINE = "⋯ thinking";
+    private static final String LABEL = "思考中…";
+    private static final String STATIC_LINE = "⋯ 思考中";
     /** ANSI: carriage-return + erase entire line (rendered by JLine on all platforms). */
     private static final String ERASE_ANSI = "\r[2K";
     /** Static-degradation erase: CR + spaces + CR (matches the pre-animation behavior). */
@@ -67,7 +58,6 @@ public final class ThinkingSpinner {
     private long startNanos;           // guarded by lock
     private int tick;                  // guarded by lock
     private String baseLabel = LABEL;  // guarded by lock: label for the current start() cycle
-    private boolean retrySwitch = true; // guarded by lock: whether to flip to RETRY_LABEL after N s
 
     public ThinkingSpinner(ScheduledExecutorService scheduler, LongSupplier nanoClock,
                            Consumer<String> sink, boolean animated) {
@@ -77,25 +67,26 @@ public final class ThinkingSpinner {
         this.animated = animated;
     }
 
-    /** Show the reasoning indicator ({@code thinking…}, retry-label after {@link #RETRY_LABEL_AFTER_SECONDS}s). */
+    /** Show the reasoning indicator: {@code 思考中… (Ns)}. */
     public void start() {
-        start(LABEL, true);
+        start(LABEL);
     }
 
     /**
-     * Show the indicator with an explicit base label and whether it may flip to the retry label. A
-     * tool-execution phase passes {@code retrySwitch=false} (a running tool is not "retrying"), while a
-     * reasoning phase uses the default {@link #start()}. Paint the first frame and (on a TTY) begin the
-     * repaint timer. Idempotent.
+     * Show the indicator with an explicit base label (a tool-execution phase passes {@code 运行中…}).
+     * The label is shown verbatim with an elapsed-seconds counter and does <b>not</b> flip to a
+     * "retrying" wording: a long wait with no data is the model thinking / generating (or a slow first
+     * token), not a retry — and the native model path exposes no per-retry signal — so we never
+     * fabricate a "重试中" label that misleads. Paint the first frame + (on a TTY) start the repaint
+     * timer. Idempotent.
      */
-    public void start(String baseLabel, boolean retrySwitch) {
+    public void start(String baseLabel) {
         synchronized (lock) {
             if (active) {
                 return;
             }
             active = true;
             this.baseLabel = (baseLabel == null || baseLabel.isBlank()) ? LABEL : baseLabel;
-            this.retrySwitch = retrySwitch;
             startNanos = nanoClock.getAsLong();
             tick = 0;
             if (!animated) {
@@ -136,22 +127,10 @@ public final class ThinkingSpinner {
     /** Paint the current frame in place. Caller holds {@link #lock}. */
     private void paintLocked() {
         long elapsedSeconds = (nanoClock.getAsLong() - startNanos) / NANOS_PER_SECOND;
-        String label = labelFor(elapsedSeconds, retrySwitch, baseLabel);
-        sink.accept("\r" + Ansi.dim(frameContent(spinner.glyph(tick), elapsedSeconds, label)));
+        sink.accept("\r" + Ansi.dim(frameContent(spinner.glyph(tick), elapsedSeconds, baseLabel)));
     }
 
-    /**
-     * The label for the current elapsed time: the retry label once past
-     * {@link #RETRY_LABEL_AFTER_SECONDS} when {@code retrySwitch} is on, else the base label. Pure.
-     */
-    static String labelFor(long elapsedSeconds, boolean retrySwitch, String baseLabel) {
-        if (retrySwitch && elapsedSeconds >= RETRY_LABEL_AFTER_SECONDS) {
-            return RETRY_LABEL;
-        }
-        return baseLabel;
-    }
-
-    /** The unstyled line content (e.g. {@code ⠹ thinking… (3s)}); pure, for deterministic testing. */
+    /** The unstyled line content (e.g. {@code ⠹ 思考中… (3s)}); pure, for deterministic testing. */
     static String frameContent(String glyph, long elapsedSeconds) {
         return frameContent(glyph, elapsedSeconds, LABEL);
     }

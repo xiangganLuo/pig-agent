@@ -550,7 +550,7 @@ public final class AgentRepl {
             Ansi.println(terminal, ToolCallFormatter.head(label));
             r.produced = true;
         }
-        r.spinner.start("运行中…", false); // an activity indicator during execution — not a "retry"
+        r.spinner.start("运行中…"); // an activity indicator during tool execution
     }
 
     /**
