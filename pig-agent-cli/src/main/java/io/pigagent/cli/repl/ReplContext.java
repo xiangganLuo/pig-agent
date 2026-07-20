@@ -45,7 +45,26 @@ public record ReplContext(
         AtomicReference<LineReader> readerRef,
         ToolAvailabilityReport availabilityReport,
         NotificationService notificationService,
-        SkillGate skillGate) {
+        SkillGate skillGate,
+        SubagentSwitchState subagentSwitch) {
+
+    /**
+     * Backward-compatible constructor (pre-subagent-online-switch call sites): supplies a fresh
+     * {@link SubagentSwitchState}. Command tests and any caller that does not need the shared switch
+     * pointer keep working unchanged; {@link AgentRepl} uses the full constructor to share its own
+     * instance with the run loop so {@code /agent sub switch|back} and {@code runTurn} agree.
+     */
+    public ReplContext(
+            AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
+            ConfigurationManager configManager, ProtocolRegistry registry, ModelManager modelManager,
+            CompressionService compressionService, McpManager mcpManager, List<ChannelAgentBridge> bridges,
+            SessionManager sessionManager, Terminal terminal, AtomicBoolean running,
+            AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport,
+            NotificationService notificationService, SkillGate skillGate) {
+        this(agentHolder, agentKernel, reportsDir, configManager, registry, modelManager,
+                compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
+                availabilityReport, notificationService, skillGate, new SubagentSwitchState());
+    }
 
     /** Convenience accessor for the current agent. */
     public io.pigagent.core.agent.PigAgent agent() {

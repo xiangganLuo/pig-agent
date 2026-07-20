@@ -5,6 +5,7 @@ import io.pigagent.cli.repl.ReplContext;
 import io.pigagent.core.agent.AgentInstance;
 import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.kernel.AgentKernel;
+import io.pigagent.core.agent.kernel.ExposedSubagent;
 import io.pigagent.model.StoredModel;
 import io.pigagent.task.TaskScheduler;
 import org.fusesource.jansi.Ansi.Color;
@@ -21,13 +22,13 @@ import java.util.List;
  * active one, create/update, and (for digital employees) run a mandate now / view reports. The CLI
  * is just an adapter over the kernel; it does not touch the internal registry/repository/factory.
  */
-@Command(name = "/agent", description = "Manage agents (list|use|new|model|run|report)")
+@Command(name = "/agent", description = "Manage agents (list|use|new|model|run|report|sub)")
 public final class AgentCommand implements Runnable {
 
     private final ReplContext ctx;
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<action>",
-            description = "list | use | new | model | run | report")
+            description = "list | use | new | model | run | report | sub")
     String action;
 
     @Parameters(index = "1..*", paramLabel = "<args>")
@@ -60,6 +61,7 @@ public final class AgentCommand implements Runnable {
             case "model" -> setModel(t);
             case "run" -> runNow(t);
             case "report" -> report(t);
+            case "sub" -> sub(t);
             case "help" -> usage(t);
             default -> {
                 Ansi.println(t, Ansi.error("Unknown action: " + act));
@@ -228,6 +230,89 @@ public final class AgentCommand implements Runnable {
                 () -> Ansi.println(t, Ansi.warn("Skipped: a run is already in progress.")));
     }
 
+    /**
+     * {@code /agent sub list|view <id>|switch <id>|back} — view + switch into an exposed subagent
+     * (subagent-online-switch). Only subagents the active agent exposed via {@code
+     * agent_spawn(expose_to_user=true)} are switchable; non-exposed background spawns are view-only via
+     * their {@code task_output}. Switch state is the shared {@link io.pigagent.cli.repl.SubagentSwitchState}
+     * the REPL run loop reads to route input.
+     */
+    private void sub(Terminal t) {
+        String subAction = (args == null || args.length == 0) ? "list" : args[0].toLowerCase();
+        switch (subAction) {
+            case "list" -> subList(t);
+            case "view" -> subView(t);
+            case "switch", "use" -> subSwitch(t);
+            case "back", "parent", "exit" -> subBack(t);
+            default -> {
+                Ansi.println(t, Ansi.error("Unknown sub action: " + subAction));
+                Ansi.println(t, Ansi.dim("Usage: /agent sub list | view <id> | switch <id> | back"));
+            }
+        }
+    }
+
+    private void subList(Terminal t) {
+        List<ExposedSubagent> subs = ctx.agentKernel().listSubagents();
+        String current = ctx.subagentSwitch().current();
+        if (subs.isEmpty()) {
+            Ansi.println(t, Ansi.dim("No exposed subagents. A subagent becomes switchable when the "
+                    + "agent spawns it with expose_to_user=true."));
+            return;
+        }
+        Ansi.println(t, Ansi.heading("Exposed subagents:"));
+        int i = 1;
+        for (ExposedSubagent s : subs) {
+            String marker = s.id().equals(current) ? Ansi.bold(" *", Color.GREEN) : "  ";
+            Ansi.println(t, String.format("  %2d)", i) + marker + " " + Ansi.info(s.display())
+                    + Ansi.dim(" [" + s.id() + "]  type=" + s.agentId()));
+            i++;
+        }
+        if (current != null) {
+            Ansi.println(t, Ansi.dim("Currently switched into [" + current + "]. /agent sub back to return."));
+        }
+    }
+
+    private void subView(Terminal t) {
+        if (args == null || args.length < 2) {
+            Ansi.println(t, Ansi.warn("Usage: /agent sub view <id>"));
+            return;
+        }
+        String id = args[1];
+        ctx.agentKernel().subagentOutput(id).ifPresentOrElse(
+                s -> {
+                    Ansi.println(t, Ansi.heading("Subagent " + s.display()));
+                    Ansi.println(t, Ansi.dim("  id:   " + s.id()));
+                    Ansi.println(t, Ansi.dim("  type: " + s.agentId()));
+                    Ansi.println(t, Ansi.dim("  switch into it with: /agent sub switch " + s.id()));
+                },
+                () -> Ansi.println(t, Ansi.error("No such exposed subagent: " + id)));
+    }
+
+    private void subSwitch(Terminal t) {
+        if (args == null || args.length < 2) {
+            Ansi.println(t, Ansi.warn("Usage: /agent sub switch <id>"));
+            return;
+        }
+        String id = args[1];
+        if (ctx.agentKernel().subagentOutput(id).isEmpty()) {
+            Ansi.println(t, Ansi.error("No such exposed subagent: " + id
+                    + " — use /agent sub list to see switchable subagents."));
+            return;
+        }
+        ctx.subagentSwitch().switchTo(id);
+        Ansi.println(t, Ansi.success("Switched into subagent ") + Ansi.info(id)
+                + Ansi.dim(" — your messages now go to it. /agent sub back to return."));
+    }
+
+    private void subBack(Terminal t) {
+        if (!ctx.subagentSwitch().isActive()) {
+            Ansi.println(t, Ansi.dim("Not currently switched into a subagent."));
+            return;
+        }
+        ctx.subagentSwitch().back();
+        Ansi.println(t, Ansi.success("Returned to the main agent."));
+    }
+
     /** List recent morning reports. */
     private void report(Terminal t) {
         java.nio.file.Path dir = ctx.reportsDir();
@@ -264,5 +349,7 @@ public final class AgentCommand implements Runnable {
         Ansi.println(t, Ansi.dim("  model <id> <modelId>       change an agent's model (must be a saved id)"));
         Ansi.println(t, Ansi.dim("  run <id>                   run a digital-employee mandate now"));
         Ansi.println(t, Ansi.dim("  report                     list recent morning reports"));
+        Ansi.println(t, Ansi.dim("  sub list|view <id>|switch <id>|back"));
+        Ansi.println(t, Ansi.dim("                             view + switch into an exposed subagent"));
     }
 }

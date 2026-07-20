@@ -121,6 +121,14 @@ public final class AgentRepl {
     private final NotificationService notificationService;
     private final SkillGate skillGate;
 
+    /**
+     * subagent-online-switch: which exposed subagent (if any) the REPL is currently switched into.
+     * Shared with {@code AgentCommand} via {@link ReplContext} so {@code /agent sub switch|back} and
+     * {@link #runTurn} agree on routing. Instance-scoped (one per REPL), created before {@link #run()}
+     * builds the context so both point at the same pointer.
+     */
+    private final SubagentSwitchState subagentSwitch = new SubagentSwitchState();
+
     public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
@@ -144,6 +152,11 @@ public final class AgentRepl {
         this.skillGate = skillGate;
     }
 
+    /** Test seam: the shared subagent-switch pointer (also handed to {@link ReplContext}). */
+    SubagentSwitchState subagentSwitch() {
+        return subagentSwitch;
+    }
+
     public void run() throws IOException {
         // Pick a single ANSI provider: let JLine (jna) own the terminal and render
         // ANSI; do NOT install Jansi's native hooks (would double-wrap on Windows).
@@ -154,7 +167,7 @@ public final class AgentRepl {
             ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
                     configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
-                    availabilityReport, notificationService, skillGate);
+                    availabilityReport, notificationService, skillGate, subagentSwitch);
 
             DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();
@@ -187,12 +200,16 @@ public final class AgentRepl {
             // blank — replay its recent tail so a resumed populated session doesn't look empty.
             maybeReplayCurrentSession(terminal);
 
-            String prompt = Ansi.prompt("❯ ");
             while (running.get()) {
                 try {
                     systemRegistry.cleanUp();
                     Ansi.println(terminal,
                             StatusLine.from(modelManager, sessionManager, configManager, planModeActive()));
+                    // subagent-online-switch: while switched into an exposed subagent, the prompt shows
+                    // it so it's obvious input is going to the child (not the parent agent).
+                    String prompt = subagentSwitch.isActive()
+                            ? Ansi.prompt("[sub " + subagentSwitch.current() + "] ❯ ")
+                            : Ansi.prompt("❯ ");
                     String line = reader.readLine(prompt);
                     if (line == null || line.isBlank()) {
                         continue;
@@ -304,6 +321,12 @@ public final class AgentRepl {
      * Package-private so the ordering + event mapping can be unit-tested without the JLine read loop.
      */
     void runTurn(String input, Terminal terminal) {
+        // subagent-online-switch: when switched into an exposed subagent, route input to the child (its
+        // own conversation), NOT the parent — so no parent noteUserMessage/compress/save for this turn.
+        if (subagentSwitch.isActive()) {
+            runSubagentTurn(subagentSwitch.current(), input, terminal);
+            return;
+        }
         sessionManager.noteUserMessage(input);
         String sessionId = sessionManager.getCurrentSessionId();
         compressionService.maybeCompress(sessionId);
@@ -312,6 +335,25 @@ public final class AgentRepl {
         renderTurn(userMsg, sessionId, terminal);
         sessionManager.saveCurrent();
         maybeAutoPromoteSkills(terminal);
+    }
+
+    /**
+     * Stream one turn to the switched-into exposed subagent (subagent-online-switch): route via
+     * {@link AgentKernel#chatWithSubagent}, rendered exactly like a normal turn. A subagent is a leaf
+     * (fail-closed permissions, no confirmer), so its turn won't surface a HITL confirm — the returned
+     * pending confirm (if any) is ignored. Defensive: if the subagent has vanished (an agent switch /
+     * model rebuild cleared it), we drop the switch, notify, and re-route the input to the parent.
+     */
+    private void runSubagentTurn(String subagentId, String input, Terminal terminal) {
+        if (agentKernel == null || agentKernel.subagentOutput(subagentId).isEmpty()) {
+            subagentSwitch.back();
+            Ansi.println(terminal, Ansi.warn("[子 agent " + subagentId + " 不可用，已返回主 agent]"));
+            runTurn(input, terminal); // switch now inactive → parent path
+            return;
+        }
+        Msg userMsg = Msg.builder().name("user").role(MsgRole.USER)
+                .content(TextBlock.builder().text(input).build()).build();
+        renderStream(agentKernel.chatWithSubagent(subagentId, userMsg), terminal);
     }
 
     /**
@@ -446,11 +488,18 @@ public final class AgentRepl {
             return;
         }
         if (event instanceof SubagentExposedEvent exposed) {
-            // Phase 6b will bridge expose_to_user to a Channel (chat.sendToSubagent); for now, note it
-            // (never a credential) so the operator sees a subagent was exposed. Graceful no-op otherwise.
+            // subagent-online-switch: track the exposed subagent on the kernel (the single seam that
+            // owns the switchable-subagent list) so `/agent sub list|switch` can address it, and tell the
+            // operator how to switch. The id is a gateway handle, never a credential.
             r.spinner.stop();
+            if (agentKernel != null) {
+                agentKernel.noteSubagentExposed(
+                        exposed.getSubagentId(), exposed.getAgentId(), exposed.getLabel());
+            }
             String who = exposed.getLabel() != null ? exposed.getLabel() : exposed.getAgentId();
-            Ansi.println(terminal, Ansi.dim("[subagent exposed: " + who + "]"));
+            String id = exposed.getSubagentId();
+            String hint = (id != null && !id.isBlank()) ? " — /agent sub switch " + id : "";
+            Ansi.println(terminal, Ansi.dim("[subagent exposed: " + who + hint + "]"));
             r.produced = true;
         } else if (event instanceof ModelCallStartEvent || event instanceof ThinkingBlockStartEvent) {
             r.spinner.start();
