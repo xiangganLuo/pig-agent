@@ -7,6 +7,8 @@ import io.agentscope.core.model.Model;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
 import io.pigagent.core.agent.PigAgent;
+import io.pigagent.core.memory.search.Embedder;
+import io.pigagent.core.memory.search.OpenAiCompatibleEmbedder;
 import io.pigagent.core.model.ModelErrorMessages;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
@@ -18,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -66,9 +69,20 @@ public final class ModelManager implements AgentModelSwitcher {
     // falls back to setting the holder directly (single-agent / test paths, no registry attached).
     private Consumer<PigAgent> activeAgentUpdater;
 
+    // embedding-model-layer: how an embedding StoredModel becomes an Embedder for the /embeddings
+    // connectivity probe. Default builds a real OpenAiCompatibleEmbedder (its own HttpPost seam);
+    // tests inject a fake so the probe mapping is verified offline (no network).
+    private Function<StoredModel, Embedder> embedderFactory =
+            m -> new OpenAiCompatibleEmbedder(m.baseUrl(), m.apiKey(), m.modelName());
+
     public ModelManager(ProtocolRegistry registry, ModelStore store) {
         this.registry = registry;
         this.store = store;
+    }
+
+    /** Test seam: override how an embedding {@link StoredModel} is turned into an {@link Embedder}. */
+    void setEmbedderFactory(Function<StoredModel, Embedder> factory) {
+        this.embedderFactory = factory;
     }
 
     /** Connect the live agent machinery after the initial agent has been built. */
@@ -140,6 +154,16 @@ public final class ModelManager implements AgentModelSwitcher {
         store.setDefaultId(id);
     }
 
+    /** Id of the default embedding model, or {@code null} when none configured (embedding-model-layer). */
+    public String getDefaultEmbeddingModelId() {
+        return store.getDefaultEmbeddingModelId();
+    }
+
+    /** Set (or clear, with {@code null}) the default embedding model pointer. */
+    public void setDefaultEmbeddingModelId(String id) {
+        store.setDefaultEmbeddingModelId(id);
+    }
+
     /**
      * Resolve which stored model an agent's {@code modelId} refers to, falling back to the
      * default when the id is null or points at a model that no longer exists. Fault-tolerant:
@@ -176,8 +200,16 @@ public final class ModelManager implements AgentModelSwitcher {
      * {@value #PROBE_TIMEOUT_SECONDS}s timeout. A failure returns a friendly, credential-redacted
      * message (shared taxonomy via {@link ModelErrorMessages}) rather than the raw exception text, so
      * every caller ({@code OnboardingWizard}, {@code /model add|edit}) displays the same clear reason.
+     *
+     * <p>The probe is dispatched by {@link StoredModel#kind() kind} (capability {@code
+     * embedding-model-layer}): a chat model issues a tiny chat "ping"; an embedding model issues a
+     * single {@code /embeddings} request (see {@link #testEmbedding}). Both share the same bounded
+     * timeout + redacted-error mapping.
      */
     public TestResult test(StoredModel m) {
+        if (m.isEmbedding()) {
+            return testEmbedding(m);
+        }
         final Model model;
         try {
             model = buildModel(m);
@@ -196,20 +228,40 @@ public final class ModelManager implements AgentModelSwitcher {
     }
 
     /**
-     * Run a connectivity probe on a daemon worker with a bounded timeout, mapping the outcome to a
-     * {@link TestResult}: a reply → success; null → no-response; a timeout → a clear "连接超时" reason;
-     * any other failure → the friendly {@link ModelErrorMessages} taxonomy. Package-private + injectable
-     * probe/timeout so the timeout + mapping paths are unit-testable without touching the network.
+     * Connectivity probe for an embedding model: build the {@link Embedder} for the model's
+     * OpenAI-compatible {@code /embeddings} endpoint and embed a tiny "ping", bounded + redacted like the
+     * chat probe. The real embedder never echoes the key/body (only the exception type), and
+     * {@link #runProbe} runs it through {@link ModelErrorMessages} so no credential reaches the caller.
+     * The live {@code /embeddings} round-trip is verified under {@code /ls:itest}; the mapping is
+     * offline-tested via an injected {@link #setEmbedderFactory embedder factory}.
      */
-    static TestResult runProbe(Callable<Msg> probe, long timeoutSeconds) {
+    private TestResult testEmbedding(StoredModel m) {
+        final Embedder embedder;
+        try {
+            embedder = embedderFactory.apply(m);
+        } catch (Exception e) {
+            return TestResult.failure(ModelErrorMessages.friendly(e));
+        }
+        return runProbe(() -> embedder.embed("ping"), PROBE_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Run a connectivity probe on a daemon worker with a bounded timeout, mapping the outcome to a
+     * {@link TestResult}: a non-null result → success; null → no-response; a timeout → a clear "连接超时"
+     * reason; any other failure → the friendly {@link ModelErrorMessages} taxonomy. Generic over the
+     * probe's result type so it serves both the chat probe ({@code Msg}) and the embedding probe
+     * ({@code float[]}). Package-private + injectable probe/timeout so the timeout + mapping paths are
+     * unit-testable without touching the network.
+     */
+    static <T> TestResult runProbe(Callable<T> probe, long timeoutSeconds) {
         ExecutorService exec = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "pig-model-probe");
             t.setDaemon(true);
             return t;
         });
         try {
-            Future<Msg> future = exec.submit(probe);
-            Msg reply = future.get(timeoutSeconds, TimeUnit.SECONDS);
+            Future<T> future = exec.submit(probe);
+            T reply = future.get(timeoutSeconds, TimeUnit.SECONDS);
             return reply != null ? TestResult.success() : TestResult.failure("模型无响应，请稍后再试。");
         } catch (TimeoutException te) {
             return TestResult.failure("连接超时（检查 base URL / 网络）。");

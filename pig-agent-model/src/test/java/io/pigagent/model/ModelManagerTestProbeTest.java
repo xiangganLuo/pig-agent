@@ -37,6 +37,15 @@ class ModelManagerTestProbeTest {
     }
 
     @Test
+    void nonMsgReply_mapsToSuccess() {
+        // the probe is generic: an embedding probe returns a float[], mapped like any non-null reply
+        ModelManager.TestResult r = ModelManager.runProbe(() -> new float[]{0.1f, 0.2f}, 5);
+
+        assertThat(r.ok()).isTrue();
+        assertThat(r.error()).isNull();
+    }
+
+    @Test
     void slowProbe_timesOut_withClearReason() {
         ModelManager.TestResult r = ModelManager.runProbe(() -> {
             Thread.sleep(10_000); // longer than the 1s bound below

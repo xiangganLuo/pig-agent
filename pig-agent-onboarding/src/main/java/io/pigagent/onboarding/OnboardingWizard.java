@@ -1,6 +1,7 @@
 package io.pigagent.onboarding;
 
 import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.model.ModelKind;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.provider.registry.ProtocolRegistry;
@@ -54,12 +55,72 @@ public final class OnboardingWizard {
                 modelManager.add(model);
                 modelManager.setDefault(model.id());
                 System.out.println("\nSuccess! Saved '" + model.label() + "' as the default model.\n");
+                offerEmbeddingModel();
                 return;
             } catch (EndOfInputException e) {
                 throw new IOException("Onboarding requires interactive input (no stdin available).");
             } catch (IllegalArgumentException e) {
                 System.out.println(e.getMessage() + "\n");
             }
+        }
+    }
+
+    /**
+     * Optional, skippable embedding-model step (capability {@code embedding-model-layer}). The chat
+     * model above is mandatory; this offers to also configure an OpenAI-compatible {@code /embeddings}
+     * endpoint for memory search. Declining (or any failure here) leaves the setup with the chat model
+     * only — byte-identical to before this step existed (BM25-only memory search). Never fatal.
+     */
+    private void offerEmbeddingModel() {
+        try {
+            String ans = readLine("Configure an embedding model for memory search? (optional, y/N): ").trim();
+            if (!ans.equalsIgnoreCase("y")) {
+                return; // skip → chat-only, today's behavior
+            }
+            ModelProtocol protocol = selectProtocol();
+            String apiKey = promptApiKey(protocol);
+            String baseUrl = promptBaseUrl(protocol);
+            String modelName = promptEmbeddingModelName();
+            StoredModel emb = StoredModel.create(protocol.protocolId(), apiKey,
+                    baseUrl == null || baseUrl.isBlank() ? null : baseUrl, modelName, ModelKind.EMBEDDING);
+
+            System.out.println("\nTesting embeddings endpoint " + emb.label() + " ...");
+            ModelManager.TestResult result = tryAddEmbeddingModel(modelManager, emb);
+            if (result.ok()) {
+                System.out.println("Success! Saved '" + emb.label() + "' as the default embedding model.\n");
+            } else {
+                System.out.println("Embeddings test failed: " + result.error()
+                        + " (not saved). Continuing without an embedding model.\n");
+            }
+        } catch (RuntimeException | IOException e) {
+            // Optional step: any error (bad input, closed stdin) simply skips it — chat model is saved.
+            System.out.println("Skipping embedding model setup.\n");
+        }
+    }
+
+    /**
+     * Test an embedding model and, on success, persist it and make it the default embedding model when
+     * none is set yet (mirrors the default-chat rule). Package-private + {@link ModelManager}-driven so
+     * the persistence decision is unit-testable offline (the {@code /embeddings} round-trip is stubbed).
+     */
+    static ModelManager.TestResult tryAddEmbeddingModel(ModelManager mm, StoredModel emb) {
+        ModelManager.TestResult result = mm.test(emb);
+        if (result.ok()) {
+            mm.add(emb);
+            if (mm.getDefaultEmbeddingModelId() == null) {
+                mm.setDefaultEmbeddingModelId(emb.id());
+            }
+        }
+        return result;
+    }
+
+    private String promptEmbeddingModelName() throws IOException {
+        while (true) {
+            String name = readLine("Embedding model name (e.g. text-embedding-3-small): ").trim();
+            if (!name.isBlank()) {
+                return name;
+            }
+            System.out.println("Embedding model name is required.");
         }
     }
 
