@@ -1,4 +1,4 @@
-package io.pigagent.core.memory.search;
+package io.pigagent.core.search;
 
 import org.junit.jupiter.api.Test;
 

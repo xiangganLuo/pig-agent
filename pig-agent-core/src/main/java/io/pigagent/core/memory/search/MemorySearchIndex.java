@@ -1,5 +1,7 @@
 package io.pigagent.core.memory.search;
 
+import io.pigagent.core.search.Bm25Index;
+import io.pigagent.core.search.HybridRanker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

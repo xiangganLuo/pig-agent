@@ -1,17 +1,18 @@
-package io.pigagent.core.memory.search;
+package io.pigagent.core.search;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Pure-Java Okapi BM25 keyword scorer over the memory corpus — capability {@code hybrid-memory-search}.
+ * Pure-Java Okapi BM25 keyword scorer over a document corpus — capability {@code shared-retrieval}.
  * Deterministic, offline, no external dependency (the reliable, offline-provable half of the hybrid
- * rank; the vector half sits behind the {@link Embedder} seam). Standard parameters {@code k1=1.2} /
+ * rank; the vector half sits behind an embedder seam). Standard parameters {@code k1=1.2} /
  * {@code b=0.75}; IDF uses the always-positive BM25+ form so a common term never subtracts.
  *
- * <p>Not thread-safe on its own — the owning {@link MemorySearchIndex} guards {@code index}/{@code
- * score} under a lock.
+ * <p>Generic over any {@link SearchDocument} — it reads only {@code id()} and {@code text()} — so the
+ * memory/tool/skill retrieval lines all index through the same scorer. Not thread-safe on its own — the
+ * owning index guards {@code index}/{@code score} under a lock.
  */
 public final class Bm25Index {
 
@@ -25,15 +26,15 @@ public final class Bm25Index {
     private Map<String, Integer> docFreq = new HashMap<>();
     private int docCount = 0;
 
-    /** (Re)build the index from the corpus. */
-    public void index(List<MemoryDocument> docs) {
+    /** (Re)build the index from the corpus (any {@link SearchDocument} implementation). */
+    public void index(List<? extends SearchDocument> docs) {
         docIds = new java.util.ArrayList<>(docs.size());
         termFreqs = new java.util.ArrayList<>(docs.size());
         docLengths = new double[docs.size()];
         docFreq = new HashMap<>();
         long totalLen = 0;
         for (int d = 0; d < docs.size(); d++) {
-            MemoryDocument doc = docs.get(d);
+            SearchDocument doc = docs.get(d);
             List<String> tokens = Tokenizer.tokenize(doc.text());
             Map<String, Integer> tf = new HashMap<>();
             for (String t : tokens) {

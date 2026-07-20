@@ -1,4 +1,4 @@
-package io.pigagent.core.memory.search;
+package io.pigagent.core.search;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -7,14 +7,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Pure hybrid ranker for memory search — capability {@code hybrid-memory-search}. Given per-document
- * BM25 keyword scores and vector cosine scores, it min-max-normalizes each component independently
- * (making the two different-scaled scores comparable), blends
+ * Pure hybrid ranker for the shared retrieval primitives — capability {@code shared-retrieval}. Given
+ * per-document BM25 keyword scores and vector cosine scores, it min-max-normalizes each component
+ * independently (making the two different-scaled scores comparable), blends
  * {@code score = bm25Weight·BM25 + vectorWeight·cosine}, deduplicates by document id (a doc matched by
  * both paths appears once), filters by a minimum blended score, and returns the top-K.
  *
- * <p>Degrades cleanly: an empty vector map (no embedder) yields BM25-only ranking (order preserved by
- * min-max normalization); an empty BM25 map yields vector-only. Deterministic, no external dependency.
+ * <p>Fully generic (keyed only by document id, no document type): memory/tool/skill lines all consume
+ * it identically. Degrades cleanly: an empty vector map (no embedder) yields BM25-only ranking (order
+ * preserved by min-max normalization); an empty BM25 map yields vector-only. Deterministic, no external
+ * dependency.
  */
 public final class HybridRanker {
 

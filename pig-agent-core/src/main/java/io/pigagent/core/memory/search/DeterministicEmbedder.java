@@ -1,5 +1,7 @@
 package io.pigagent.core.memory.search;
 
+import io.pigagent.core.search.Tokenizer;
+
 /**
  * A deterministic, dependency-free {@link Embedder} used for <b>offline tests</b> and as a safe
  * fallback — capability {@code hybrid-memory-search}. It hashes tokens (via {@link Tokenizer}) into a
