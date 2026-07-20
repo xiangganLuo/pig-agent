@@ -608,6 +608,9 @@ public final class AgentBootstrap {
         AgentSpec defaultSpec = new AgentSpec("default", config.getAgent().getName(), sysPrompt,
                 List.of(), null, defaultModel.id(), config.getAgent().getMaxIters());
         agentRegistry.register(new AgentInstance("default", defaultSpec, agentHolder.get()));
+        // A runtime model switch (/model) must rebuild the ACTIVE registry instance that kernel.chat
+        // runs — not just the holder mirror — else chat keeps using the old model. Wire that seam.
+        modelManager.attachRegistry(agentRegistry::replaceActiveAgent);
 
         AgentInstanceFactory agentInstanceFactory = new AgentInstanceFactory(
                 // av2 Phase 5a: the model is passed through untouched — retry + interrupt are native

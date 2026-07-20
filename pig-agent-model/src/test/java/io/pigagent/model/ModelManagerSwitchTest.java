@@ -8,6 +8,9 @@ import io.agentscope.core.model.ToolSchema;
 import io.agentscope.core.tool.Toolkit;
 import io.pigagent.core.agent.AgentFactory;
 import io.pigagent.core.agent.AgentHolder;
+import io.pigagent.core.agent.AgentInstance;
+import io.pigagent.core.agent.AgentRegistry;
+import io.pigagent.core.agent.AgentSpec;
 import io.pigagent.core.agent.PigAgent;
 import io.pigagent.core.protocol.ModelProtocol;
 import io.pigagent.core.protocol.ModelSpec;
@@ -66,6 +69,24 @@ class ModelManagerSwitchTest {
         mm.ensureModel("m2");
 
         assertThat(holder.get()).isNotSameAs(initialAgent); // agent rebuilt on the new model
+        assertThat(mm.getCurrentModelId()).isEqualTo("m2");
+    }
+
+    @Test
+    void ensureModel_withRegistry_rebuildsActiveInstanceThatKernelRuns() {
+        // Regression for the "/model switch didn't take effect" bug: chat runs registry.active().agent(),
+        // so a switch must rebuild the ACTIVE instance — not merely the holder mirror.
+        when(store.findById("m2")).thenReturn(Optional.of(model("m2", "fake")));
+        AgentRegistry reg = new AgentRegistry(holder);
+        reg.register(new AgentInstance("default", AgentSpec.create("default", "d"), initialAgent));
+        ModelManager mm = attached("m1");
+        mm.attachRegistry(reg::replaceActiveAgent);
+
+        mm.ensureModel("m2");
+
+        assertThat(reg.active().orElseThrow().agent()).isNotSameAs(initialAgent); // what kernel.chat runs
+        assertThat(holder.get()).isNotSameAs(initialAgent);                         // mirror followed
+        assertThat(reg.active().orElseThrow().agent()).isSameAs(holder.get());      // consistent
         assertThat(mm.getCurrentModelId()).isEqualTo("m2");
     }
 

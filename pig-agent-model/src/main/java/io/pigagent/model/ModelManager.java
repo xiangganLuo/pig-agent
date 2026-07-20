@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -60,6 +61,11 @@ public final class ModelManager implements AgentModelSwitcher {
     private AgentHolder channelHolder;
     private AgentFactory channelFactory;
 
+    // agent-management seam: a model switch must rebuild the ACTIVE AgentInstance the kernel actually
+    // runs (registry.active().agent()), not just the holder mirror. Optional — when unset, ensureModel
+    // falls back to setting the holder directly (single-agent / test paths, no registry attached).
+    private Consumer<PigAgent> activeAgentUpdater;
+
     public ModelManager(ProtocolRegistry registry, ModelStore store) {
         this.registry = registry;
         this.store = store;
@@ -76,6 +82,16 @@ public final class ModelManager implements AgentModelSwitcher {
     public void attachChannel(AgentHolder channelHolder, AgentFactory channelFactory) {
         this.channelHolder = channelHolder;
         this.channelFactory = channelFactory;
+    }
+
+    /**
+     * Wire the active-agent updater (the {@code AgentRegistry}) so a runtime model switch rebuilds the
+     * ACTIVE instance that {@code AgentKernel.chat} runs — not just the {@link AgentHolder} mirror.
+     * Without this, a switch updated the holder but the kernel kept using the old agent (old model).
+     * Optional: unset → {@link #ensureModel} falls back to setting the holder directly.
+     */
+    public void attachRegistry(Consumer<PigAgent> activeAgentUpdater) {
+        this.activeAgentUpdater = activeAgentUpdater;
     }
 
     /** True once at least one model is saved and a resolvable default exists. */
@@ -219,7 +235,14 @@ public final class ModelManager implements AgentModelSwitcher {
         }
         try {
             Model model = buildModel(target);
-            holder.set(factory.create(model));
+            PigAgent rebuilt = factory.create(model);
+            // Rebuild the ACTIVE registry instance (what kernel.chat runs) via the updater; the holder
+            // is re-pointed inside it. Fall back to the holder directly when no registry is attached.
+            if (activeAgentUpdater != null) {
+                activeAgentUpdater.accept(rebuilt);
+            } else {
+                holder.set(rebuilt);
+            }
             if (channelHolder != null && channelFactory != null) {
                 channelHolder.set(channelFactory.create(model));
             }

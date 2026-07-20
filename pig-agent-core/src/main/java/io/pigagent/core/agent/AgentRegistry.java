@@ -45,6 +45,25 @@ public final class AgentRegistry {
         return true;
     }
 
+    /**
+     * Replace the ACTIVE instance's agent with a freshly-built one (same id + spec) — used after a
+     * runtime model switch rebuilds the agent. The registry (via {@code active().agent()}), NOT the
+     * holder, is the source of truth that {@code AgentKernel.chat} runs, so a model switch MUST update
+     * it here; the holder is a downstream mirror and is re-pointed too. No-op when nothing is active.
+     */
+    public void replaceActiveAgent(PigAgent agent) {
+        Objects.requireNonNull(agent, "agent");
+        if (activeId == null) {
+            return;
+        }
+        AgentInstance cur = instances.get(activeId);
+        if (cur == null) {
+            return;
+        }
+        instances.put(activeId, new AgentInstance(cur.id(), cur.spec(), agent));
+        holder.set(agent);
+    }
+
     public Optional<AgentInstance> get(String id) {
         return Optional.ofNullable(instances.get(id));
     }
