@@ -51,7 +51,7 @@ class AgentCommandSubTest {
         SubagentSwitchState state = new SubagentSwitchState();
         ReplContext ctx = new ReplContext(
                 null, kernel, null, null, null, null, null, null, null, null,
-                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null, state);
+                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null, state, null);
         return new Harness(ReplCommands.build(ctx, CommandLine.defaultFactory()), state, out);
     }
 

@@ -2,6 +2,7 @@ package io.pigagent.tool.skills;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.tool.skills.curator.SkillUsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +39,7 @@ public final class SkillsTool {
 
     private final SkillRegistry registry;
     private final SkillLimits limits;
+    private final SkillUsageRecorder usageRecorder;
 
     /** Primary constructor: compose any set of sources (used by tests and explicit wiring). */
     public SkillsTool(SkillRegistry registry) {
@@ -45,8 +47,18 @@ public final class SkillsTool {
     }
 
     public SkillsTool(SkillRegistry registry, SkillLimits limits) {
+        this(registry, limits, SkillUsageRecorder.noop());
+    }
+
+    /**
+     * Full constructor: additionally wire a {@link SkillUsageRecorder} (skill-curator-and-graded-
+     * promotion, S3). The default overloads use {@link SkillUsageRecorder#noop()}, so usage recording
+     * is off unless a native recorder is injected — zero behavior change to the {@code @Tool} surface.
+     */
+    public SkillsTool(SkillRegistry registry, SkillLimits limits, SkillUsageRecorder usageRecorder) {
         this.registry = registry;
         this.limits = limits == null ? SkillLimits.defaults() : limits;
+        this.usageRecorder = usageRecorder == null ? SkillUsageRecorder.noop() : usageRecorder;
     }
 
     /**
@@ -80,9 +92,24 @@ public final class SkillsTool {
         }
         try {
             String body = skill.get().content();
-            return body + SupportingFilesRenderer.render(safeSupportingFiles(skill.get()), limits);
+            String rendered = body + SupportingFilesRenderer.render(safeSupportingFiles(skill.get()), limits);
+            recordUsage(skill.get().name());
+            return rendered;
         } catch (IOException e) {
             return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Record a usage hit for a resolved skill (skill-curator-and-graded-promotion, S3). Fault-tolerant:
+     * a recording failure is swallowed so it can never affect the {@code loadSkill} result. Default
+     * recorder is a no-op, so this is inert unless the curator feature is wired on.
+     */
+    private void recordUsage(String skillName) {
+        try {
+            usageRecorder.record(skillName);
+        } catch (RuntimeException e) {
+            log.debug("Skill usage recording failed for '{}': {}", skillName, e.toString());
         }
     }
 

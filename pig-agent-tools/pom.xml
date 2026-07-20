@@ -40,5 +40,14 @@
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-core</artifactId>
         </dependency>
+        <!-- skill-curator-and-graded-promotion (S3): the native skill curator / usage store /
+             promotion gate engine (io.agentscope.harness.agent.skill.curator.*) lives in the harness
+             artifact. Fulfils native-skill-engine-bridge (S1) design D11 ("S2/S3 宿主模块须补
+             agentscope-harness"). Transitively available via pig-agent-core; declared directly for
+             Maven hygiene. Adopted as a pure library ("engine, not mouth") — no native prompt path. -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope-harness</artifactId>
+        </dependency>
     </dependencies>
 </project>

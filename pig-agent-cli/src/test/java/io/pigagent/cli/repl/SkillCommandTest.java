@@ -104,4 +104,38 @@ class SkillCommandTest {
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("No staged skill");
     }
+
+    @Test
+    void curatorStatus_whenDisabled_reportsNotEnabled() throws IOException {
+        // build() wires a null SkillCuratorService (curator disabled — the default).
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        CommandLine cmd = build(out);
+
+        cmd.execute("/skill", "curator", "status");
+
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("not enabled");
+    }
+
+    @Test
+    void curatorStatus_whenEnabled_showsReadOnlySummary() throws IOException {
+        // Arrange — a real curator service over the temp workspace (curator enabled).
+        io.agentscope.harness.agent.skill.curator.SkillCuratorConfig cfg =
+                io.agentscope.harness.agent.skill.curator.SkillCuratorConfig.builder()
+                        .enabled(true).staleAfterDays(30).archiveAfterDays(90).build();
+        io.pigagent.tool.skills.curator.SkillCuratorService service =
+                io.pigagent.tool.skills.curator.SkillCuratorService.forWorkspace(skillsDir, cfg, false);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Terminal terminal = TerminalBuilder.builder()
+                .dumb(true).streams(new ByteArrayInputStream(new byte[0]), out).build();
+        ReplContext ctx = new ReplContext(
+                null, null, null, null, null, null, null, null, null, null,
+                terminal, new AtomicBoolean(true), new AtomicReference<LineReader>(), null, null, null, service);
+        CommandLine cmd = ReplCommands.build(ctx, CommandLine.defaultFactory());
+
+        // Act
+        cmd.execute("/skill", "curator", "status");
+
+        // Assert — read-only status line rendered.
+        assertThat(out.toString(StandardCharsets.UTF_8)).contains("Skill curator (status)");
+    }
 }
