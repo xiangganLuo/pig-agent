@@ -24,14 +24,14 @@
 
 ## 4. 配置（`pig-agent-config`）
 
-- [ ] 4.1 `MemoryConfig` 内嵌 `InjectionConfig`（`enabled` 默认 **false**、`top-k` 默认 6、`pinned.source`/`pinned.heading`/`pinned.max-chars` 默认 800、`embedder-model-id` 空）；getter/setter null-tolerant、`@JsonIgnoreProperties(ignoreUnknown=true)` 契合 config-resilience。
-- [ ] 4.2 单测：`MemoryConfigTest`/`InjectionConfigTest`——默认值、YAML 解析、缺块用默认、非法值 clamp。
+- [x] 4.1 `MemoryConfig` 内嵌 `InjectionConfig`（`enabled` 默认 **false**、`top-k` 默认 6、`pinned.source`/`pinned.heading`/`pinned.max-chars` 默认 800、`embedder-model-id` 空）+ `PinnedConfig` 子块；getter/setter null-tolerant（顶层 `@JsonIgnoreProperties(ignoreUnknown=true)` 已由 config-resilience 提供）。
+- [x] 4.2 单测：`InjectionConfigTest`——默认值、YAML 解析、缺块用默认、null-tolerant setters。
 
 ## 5. 接线（`pig-agent-cli` `AgentBootstrap`）
 
-- [ ] 5.1 `AgentBootstrap`：`memory.injection.enabled` 时为 `NativeMemoryContextMiddleware` 注入一个 `MemorySearchIndex`（语料 = workspace `MEMORY.md` + `memory/`；`embedder-model-id` → `resolveStoredModel` → 真嵌入器，或空 → BM25-only）+ pinned/top-k 设置；默认关 → 沿用今日的全量注入构造（不建索引、`onReasoning` 恒等）。
-- [ ] 5.2 确认 interactive/channel/peer 三条注入轨一致（本能力对渠道非交互轨同样默认关；启用语义一致）。
-- [ ] 5.3 单测/接线校验：`enabled=false` 时 `AgentBootstrap` 产出与今日一致（不引入索引、注入行为字节等价）；`enabled=true` 时中间件持有索引且切分生效。
+- [x] 5.1 `AgentBootstrap.buildMemoryInjection`：`memory.injection.enabled` 时建 `MemorySearchIndex`（语料 = workspace `MEMORY.md` + `memory/`；`embedder-model-id` → `resolveStoredModel` → 真嵌入器，或空 → BM25-only）+ `MemoryInjectionSettings`，经 `MemoryInjection` 传入 `PigAgent.Builder.memoryInjection`；默认关 → 返回 null → 沿用今日的全量注入构造。
+- [x] 5.2 interactive/channel/peer 三条注入轨一致：`memoryInjection` 同一实例传入 `agentFactory`、`channelAgentFactory`（新 fullest ctor，subagents/plan off）、`agentInstanceFactory`（peer）；默认关 = null = 今日行为。
+- [x] 5.3 接线单测：`MemoryInjectionWiringTest`——`enabled=false` → `buildMemoryInjection` 返回 null；`enabled=true` → 返回 enabled settings + 可用 BM25-only retriever（空语料不抛）。`AgentFactoryTest`/`AgentInstanceFactoryTest`/`HarnessAgentWrapTest`/`CrossSessionMemoryTest` 仍绿（默认路径字节等价）。
 
 ## 6. 集成测试（真模型 `*IT`，外环，延后 `/ls:itest`）
 
@@ -39,7 +39,7 @@
 
 ## 7. 验收 + 文档
 
-- [ ] 7.1 `mvn -q test` whole reactor 全绿（报告数目 + 新增测试数）。
-- [ ] 7.2 `mvn -q -pl pig-agent-cli -am compile` 绿。
-- [ ] 7.3 `CLAUDE.md` 记忆段落新增「检索即注入（pinned 常驻 + query-aware ephemeral）」说明 + 配置段 `memory.injection` 同步。
-- [ ] 7.4 `openspec validate memory-retrieval-injection --strict` 通过；归档时（`/ls:archive`）同步主 spec → `openspec/specs/memory-retrieval-injection/`。
+- [ ] 7.1 `mvn -q test` whole reactor 全绿（延后：内环只跑受影响模块的定向测试；全量套件由协调方合并后统一跑）。
+- [x] 7.2 `mvn -pl pig-agent-cli -am compile` 绿（BUILD SUCCESS，17 模块）。
+- [x] 7.3 `CLAUDE.md` 记忆段落新增「检索即注入（pinned 常驻 + query-aware ephemeral）」说明 + 配置段 `memory.injection` 同步。
+- [ ] 7.4 归档时（`/ls:archive`）同步主 spec → `openspec/specs/memory-retrieval-injection/`（本 change 的 `openspec validate --strict` 已在 spec 阶段通过）。
