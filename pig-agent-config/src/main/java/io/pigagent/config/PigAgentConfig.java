@@ -378,9 +378,14 @@ public final class PigAgentConfig {
      */
     public static final class SkillsConfig {
         @JsonProperty("autonomous") private AutonomousSkillsConfig autonomous = new AutonomousSkillsConfig();
+        @JsonProperty("native") private NativeSkillConfig nativeSkills = new NativeSkillConfig();
         public AutonomousSkillsConfig getAutonomous() { return autonomous; }
         public void setAutonomous(AutonomousSkillsConfig a) {
             this.autonomous = a == null ? new AutonomousSkillsConfig() : a;
+        }
+        public NativeSkillConfig getNative() { return nativeSkills; }
+        public void setNative(NativeSkillConfig n) {
+            this.nativeSkills = n == null ? new NativeSkillConfig() : n;
         }
     }
 
@@ -397,6 +402,25 @@ public final class PigAgentConfig {
         }
         public boolean isAutoPromote() { return autoPromote; }
         public void setAutoPromote(boolean a) { this.autoPromote = a; }
+    }
+
+    /**
+     * {@code skills.native} 子块（native-skill-engine-bridge，S1）。默认 {@code enabled=false} →
+     * 不追加原生技能源，{@code SkillRegistry} 源列表逐字节等价今天。启用后把 AgentScope 2.0 原生
+     * {@code FileSystemSkillRepository(workspace/skills)} 当只读源接入（置于 pig 源之后，最低优先级；
+     * 同根同名经去重折叠，行为等价）；{@code classpath-resource-dir} 非空时再叠一个
+     * {@code ClasspathSkillRepository}。原生只做存取（引擎），pig 仍 {@code disableDynamicSkills()}
+     * 不重开 {@code <available_skills>} 注入（不当嘴）。全部可选、默认安全、向后兼容。
+     */
+    public static final class NativeSkillConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("classpath-resource-dir") private String classpathResourceDir = "";
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public String getClasspathResourceDir() { return classpathResourceDir; }
+        public void setClasspathResourceDir(String d) {
+            this.classpathResourceDir = d == null ? "" : d;
+        }
     }
 
     /**

@@ -105,8 +105,10 @@ import io.pigagent.tool.permission.PermissionContextFactory;
 import io.pigagent.tool.sandbox.SandboxPolicy;
 import io.pigagent.tool.shell.ShellTools;
 import io.pigagent.tool.skills.ClasspathSkillSource;
+import io.pigagent.tool.skills.NativeRepositorySkillSource;
 import io.pigagent.tool.skills.SkillLimits;
 import io.pigagent.tool.skills.SkillRegistry;
+import io.pigagent.tool.skills.SkillSource;
 import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.skills.WorkspaceSkillSource;
 import io.pigagent.tool.skills.authoring.DefaultSkillContentScanner;
@@ -357,9 +359,19 @@ public final class AgentBootstrap {
                 .userProfileFile(userProfileFile)
                 .userProfileEnabled(userProfileEnabled)
                 .build();
+        // native-skill-engine-bridge (S1): when skills.native.enabled, compose a SkillsTool whose
+        // SkillRegistry appends a NativeRepositorySkillSource (adopted native FileSystemSkillRepository
+        // over the same skills dir, lowest priority). Default off → the auto SkillsToolProvider's
+        // [workspace, classpath] SkillsTool is used unchanged (byte-identical to today).
+        PigAgentConfig.NativeSkillConfig nativeSkillsCfg = config.getSkills().getNative();
         List<Object> builtinTools;
         if (Boolean.parseBoolean(System.getProperty(TOOLS_AUTO_REGISTER_PROP, "true"))) {
-            ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, List.of());
+            // When native skills are on, register a native-aware SkillsTool as a manual override so it
+            // supersedes the auto-registered default (same @Tool names); off → empty overrides.
+            List<Object> skillsOverride = nativeSkillsCfg.isEnabled()
+                    ? List.of(skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg))
+                    : List.of();
+            ToolRegistrar.Result reg = ToolRegistrar.registerAll(toolkit, toolContext, skillsOverride);
             log.info("Tools auto-registered: {}", reg.registered);
             builtinTools = reg.instances;
         } else {
@@ -370,7 +382,7 @@ public final class AgentBootstrap {
                     new TaskTool(taskManager),
                     new ShellTools(sandboxPolicy),
                     new FileSystemTools(),
-                    new SkillsTool(workspace.getSkillsDir()),
+                    skillsToolWithNative(workspace.getSkillsDir(), nativeSkillsCfg),
                     new LoopDetectedTool());
             for (Object tool : builtinTools) {
                 toolkit.registration().tool(tool).apply();
@@ -1107,6 +1119,38 @@ public final class AgentBootstrap {
                 .evictionPath(dir)
                 .excludedToolNames(ToolResultEvictionConfig.DEFAULT_EXCLUDED_TOOLS)
                 .build();
+    }
+
+    /**
+     * Compose the {@code SkillsTool} for the given skills dir (native-skill-engine-bridge, S1). When
+     * {@code skills.native.enabled} is off (default) this is exactly {@code new SkillsTool(skillsDir)}
+     * ([workspace, classpath] sources — byte-identical to today). When on, a
+     * {@link NativeRepositorySkillSource} (an adopted native {@code FileSystemSkillRepository} over the
+     * same skills dir — "engine, not mouth": no {@code <available_skills>} injection) is appended at
+     * <b>lowest</b> priority, so a same-root/same-name skill is folded away by {@link SkillRegistry}
+     * de-dup (pig sources win) and behaviour stays equivalent. An optional {@code classpath-resource-dir}
+     * adds a native {@code ClasspathSkillRepository}; a source that fails to construct is skipped (warn).
+     */
+    static SkillsTool skillsToolWithNative(java.nio.file.Path skillsDir,
+                                           PigAgentConfig.NativeSkillConfig nativeCfg) {
+        if (nativeCfg == null || !nativeCfg.isEnabled()) {
+            return new SkillsTool(skillsDir);
+        }
+        List<SkillSource> sources = new ArrayList<>();
+        sources.add(new WorkspaceSkillSource(skillsDir));
+        sources.add(new ClasspathSkillSource());
+        sources.add(new NativeRepositorySkillSource(skillsDir));
+        String cpDir = nativeCfg.getClasspathResourceDir();
+        if (cpDir != null && !cpDir.isBlank()) {
+            try {
+                sources.add(new NativeRepositorySkillSource(
+                        new io.agentscope.core.skill.repository.ClasspathSkillRepository(cpDir)));
+            } catch (Exception e) {
+                log.warn("skills.native.classpath-resource-dir '{}' unusable, skipping: {}",
+                        cpDir, e.toString());
+            }
+        }
+        return new SkillsTool(new SkillRegistry(sources));
     }
 
     /**
