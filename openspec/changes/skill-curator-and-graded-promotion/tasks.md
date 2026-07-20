@@ -17,8 +17,8 @@
 
 ## 3. 使用分析 seam（`pig-agent-tools`，`io.pigagent.tool.skills.curator` + `SkillsTool`）
 
-- [ ] 3.1 `SkillUsageRecorder`（接口，`record(String)`；静态 `noop()`）+ `NativeSkillUsageRecorder`（包 `SkillUsageStore(LocalFilesystem(workspaceRoot))`：`get` 存在→`bumpUse`+`save`，不存在→no-op；容错吞异常）。`SkillUsageRecorderTest`：no-op 默认不抛；native recorder 对已注册名递增、未注册名 no-op、store 抛异常时吞掉。
-- [ ] 3.2 `SkillsTool` 构造多接 `SkillUsageRecorder`（默认 `noop()`）；`loadSkill` 命中后调 `recorder.record(name)`（try/catch 容错，永不影响返回）。`SkillsToolTest` 保持绿（`@Tool` 名/签名/返回语义**逐字不变**：空列表/未知名/读错兜底/无支持文件）；加一例断言「命中触发一次 record、读错/未知名不 record」（用 fake recorder）。
+- [x] 3.1 `SkillUsageRecorder`（接口，`record(String)` + 默认 `markCreated(String)`；静态 `noop()`）+ `NativeSkillUsageRecorder`（包 `SkillUsageStore(LocalFilesystem(workspaceRoot))`：`record`→`bumpUse`（native provenance-gated：已注册 agent-created 才增，未注册 no-op）、`markCreated`→`markAgentCreated`；全 try/catch 吞异常）。`SkillUsageRecorderTest`（4/4）：no-op 不抛；native markCreated→record 递增、未注册名 no-op（无幻影 record）、mock store 抛异常时吞掉。**绿** ✅
+- [x] 3.2 `SkillsTool` 加 3 参构造多接 `SkillUsageRecorder`（默认 `noop()`，既有构造委托 noop）；`loadSkill` 命中后调 `recordUsage(name)`（try/catch 容错，永不影响返回）。`SkillsToolTest`（6/6）保持绿（`@Tool` 面逐字不变）；`SkillsToolUsageTest`（3/3）断言命中记录一次、未命中不记录、recorder 抛异常不影响返回。**绿** ✅
 
 ## 4. curator 采纳 + 调度（`pig-agent-tools` / `pig-agent-cli`）
 
