@@ -39,7 +39,7 @@
 
 ## 7. 验收 + 文档
 
-- [ ] 7.1 `mvn -q test` whole reactor 全绿（延后：内环只跑受影响模块的定向测试；全量套件由协调方合并后统一跑）。
+- [x] 7.1 `mvn -q test` whole reactor 全绿（合并后统一跑：main 全量 `mvn clean test` = BUILD SUCCESS，全模块 0 失败 0 错误）。
 - [x] 7.2 `mvn -pl pig-agent-cli -am compile` 绿（BUILD SUCCESS，17 模块）。
 - [x] 7.3 `CLAUDE.md` 记忆段落新增「检索即注入（pinned 常驻 + query-aware ephemeral）」说明 + 配置段 `memory.injection` 同步。
 - [ ] 7.4 归档时（`/ls:archive`）同步主 spec → `openspec/specs/memory-retrieval-injection/`（本 change 的 `openspec validate --strict` 已在 spec 阶段通过）。
