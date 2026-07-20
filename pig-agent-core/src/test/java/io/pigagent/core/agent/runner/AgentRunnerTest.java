@@ -108,6 +108,38 @@ class AgentRunnerTest {
     }
 
     @Test
+    void runMandate_success_returnsReport_withoutReportWriterOrSpecUpdater() {
+        List<AgentReport> written = new ArrayList<>();
+        AtomicReference<Long> ranAt = new AtomicReference<>();
+        AgentRunner runner = new AgentRunner(
+                (s, rec) -> agent(new FakeModel(FakeModel.Mode.SUCCESS)),
+                (s, r) -> written.add(r),
+                (s, epoch) -> ranAt.set(epoch),
+                () -> 42L);
+
+        AgentReport report = runner.runMandate("task:abc", "跑测试\n\n跑一下夜间测试", 0);
+
+        assertThat(report).isNotNull();
+        assertThat(report.outcome()).isEqualTo(AgentReport.Outcome.SUCCESS);
+        assertThat(report.body()).contains("跑完测试");
+        // Ad-hoc runs must NOT write a morning report or persist a spec (there is none).
+        assertThat(written).isEmpty();
+        assertThat(ranAt.get()).isNull();
+    }
+
+    @Test
+    void runMandate_failure_returnsFailureReport_doesNotThrow() {
+        AgentRunner runner = new AgentRunner(
+                (s, rec) -> agent(new FakeModel(FakeModel.Mode.FAILURE)),
+                (s, r) -> {}, null, () -> 0L);
+
+        AgentReport report = runner.runMandate("task:x", "do it");
+
+        assertThat(report.outcome()).isEqualTo(AgentReport.Outcome.FAILURE);
+        assertThat(report.note()).isNotBlank();
+    }
+
+    @Test
     void reentrancy_skipsOverlappingRun() {
         // The builder re-enters run() for the same spec; the guard must skip the nested run.
         AtomicReference<Optional<AgentReport>> nested = new AtomicReference<>();

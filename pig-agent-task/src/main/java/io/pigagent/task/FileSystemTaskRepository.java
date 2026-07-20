@@ -28,6 +28,9 @@ public final class FileSystemTaskRepository implements TaskRepository {
 
     private static final Logger log = LoggerFactory.getLogger(FileSystemTaskRepository.class);
 
+    /** Cap the stored run summary so one huge agent output can't bloat the task file. */
+    private static final int MAX_RESULT_CHARS = 4000;
+
     private final Path tasksDir;
 
     public FileSystemTaskRepository(Path tasksDir) { this.tasksDir = tasksDir; }
@@ -78,9 +81,13 @@ public final class FileSystemTaskRepository implements TaskRepository {
     }
 
     private String toMarkdown(Task t) {
-        return "# %s\n\n- **ID**: %s\n- **Status**: %s\n- **Schedule**: %s\n- **Created**: %s\n- **Updated**: %s\n\n%s\n"
+        // LastRun/Result are written BEFORE Updated so the description delimiter (keyed on the Updated
+        // line) is unaffected — old files without these lines parse identically (fields → null).
+        return ("# %s\n\n- **ID**: %s\n- **Status**: %s\n- **Schedule**: %s\n- **Created**: %s\n"
+                + "- **LastRun**: %s\n- **Result**: %s\n- **Updated**: %s\n\n%s\n")
                 .formatted(t.title(), t.id(), t.status(), encodeSchedule(t.schedule()),
-                        t.createdAt(), t.updatedAt(), t.description());
+                        t.createdAt(), encodeInstant(t.lastRunAt()), encodeResult(t.result()),
+                        t.updatedAt(), t.description());
     }
 
     /**
@@ -97,21 +104,30 @@ public final class FileSystemTaskRepository implements TaskRepository {
             TaskStatus status = TaskStatus.valueOf(extractField(content, "Status"));
             TaskSchedule schedule = parseSchedule(extractField(content, "Schedule"));
             Instant created = parseInstant(extractField(content, "Created"));
+            Instant lastRun = parseNullableInstant(extractField(content, "LastRun"));
+            String result = decodeResult(extractField(content, "Result"));
             Instant updated = parseInstant(extractField(content, "Updated"));
             String description = extractDescription(content);
             return new Task(id != null ? id : path.getFileName().toString().replace(".md", ""),
-                    title, description, status, schedule, created, updated, null);
+                    title, description, status, schedule, created, updated, null, result, lastRun);
         } catch (Exception e) {
             log.warn("Skipping unreadable task file {}: {}", path.getFileName(), e.getMessage());
             return null;
         }
     }
 
+    /**
+     * Extract a single-line metadata field value. Matching is <b>anchored</b> to a line that (after
+     * strip) starts with {@code - **<field>**:}, so a field's VALUE that happens to contain another
+     * field's marker (e.g. an encoded Result mentioning {@code **Updated**:}) can never be mistaken for
+     * that field. Returns {@code null} when the field is absent (old files without LastRun/Result).
+     */
     private String extractField(String content, String field) {
+        String prefix = "- **" + field + "**:";
         for (String line : content.split("\n")) {
-            if (line.contains("**" + field + "**:")) {
-                int idx = line.indexOf(":");
-                return idx >= 0 ? line.substring(idx + 1).trim() : null;
+            String s = line.strip();
+            if (s.startsWith(prefix)) {
+                return s.substring(prefix.length()).trim();
             }
         }
         return null;
@@ -167,12 +183,69 @@ public final class FileSystemTaskRepository implements TaskRepository {
         }
     }
 
+    /** ISO-8601 encoding of an optional instant ({@code null} → empty, so old files read back null). */
+    private String encodeInstant(Instant instant) {
+        return instant == null ? "" : instant.toString();
+    }
+
+    /** Parse an optional ISO-8601 instant; blank/absent/unparseable → {@code null} (never throws). */
+    private Instant parseNullableInstant(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(raw.trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Encode a run summary onto a single metadata line: capped at {@link #MAX_RESULT_CHARS}, backslashes
+     * escaped, and every newline (CRLF/CR/LF) collapsed to a literal {@code \n} so the value stays on one
+     * line. {@code null}/empty → empty string (round-trips back to {@code null}).
+     */
+    private static String encodeResult(String result) {
+        if (result == null || result.isEmpty()) {
+            return "";
+        }
+        String capped = result.length() > MAX_RESULT_CHARS
+                ? result.substring(0, MAX_RESULT_CHARS) + "…" : result;
+        return capped.replace("\\", "\\\\")
+                .replace("\r\n", "\n").replace("\r", "\n")
+                .replace("\n", "\\n");
+    }
+
+    /** Reverse {@link #encodeResult}: unescape {@code \n} → newline and {@code \\} → backslash. */
+    private static String decodeResult(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\\' && i + 1 < raw.length()) {
+                char next = raw.charAt(++i);
+                if (next == 'n') {
+                    sb.append('\n');
+                } else if (next == '\\') {
+                    sb.append('\\');
+                } else {
+                    sb.append(c).append(next);
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     /** The task body: everything after the metadata block (the blank line following {@code Updated}). */
     private String extractDescription(String content) {
         String[] lines = content.split("\n", -1);
         int updatedIdx = -1;
         for (int i = 0; i < lines.length; i++) {
-            if (lines[i].contains("**Updated**:")) {
+            if (lines[i].strip().startsWith("- **Updated**:")) {
                 updatedIdx = i;
                 break;
             }

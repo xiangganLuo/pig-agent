@@ -24,6 +24,7 @@ public final class PigAgentConfig {
     @JsonProperty("sandbox") private SandboxConfig sandbox = new SandboxConfig();
     @JsonProperty("tools") private ToolsConfig tools = new ToolsConfig();
     @JsonProperty("subagents") private SubagentsConfig subagents = new SubagentsConfig();
+    @JsonProperty("tasks") private TasksConfig tasks = new TasksConfig();
     @JsonProperty("plan-mode") private PlanModeConfig planMode = new PlanModeConfig();
     @JsonProperty("web") private WebConfig web = new WebConfig();
     @JsonProperty("memory") private MemoryConfig memory = new MemoryConfig();
@@ -49,6 +50,8 @@ public final class PigAgentConfig {
     public ToolsConfig getTools() { return tools; }
     public SubagentsConfig getSubagents() { return subagents; }
     public void setSubagents(SubagentsConfig s) { this.subagents = s == null ? new SubagentsConfig() : s; }
+    public TasksConfig getTasks() { return tasks; }
+    public void setTasks(TasksConfig t) { this.tasks = t == null ? new TasksConfig() : t; }
     public PlanModeConfig getPlanMode() { return planMode; }
     public void setPlanMode(PlanModeConfig p) { this.planMode = p == null ? new PlanModeConfig() : p; }
     public WebConfig getWeb() { return web; }
@@ -600,6 +603,17 @@ public final class PigAgentConfig {
         @JsonProperty("enabled") private boolean enabled = true;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean e) { this.enabled = e; }
+    }
+
+    /**
+     * 计划任务执行（task-executor-wiring）。{@code execute=false}（缺省）时计划任务只翻状态、不做真实工作
+     * （既有"仅提醒"行为，零 token 消耗）；{@code execute=true} 时触发的任务经 fail-closed 一次性隔离
+     * agent 跑其意图（title + description）并把结果记回任务——会消耗模型 token，故显式 opt-in。可选、默认安全。
+     */
+    public static final class TasksConfig {
+        @JsonProperty("execute") private boolean execute = false;
+        public boolean isExecute() { return execute; }
+        public void setExecute(boolean e) { this.execute = e; }
     }
 
     /**
