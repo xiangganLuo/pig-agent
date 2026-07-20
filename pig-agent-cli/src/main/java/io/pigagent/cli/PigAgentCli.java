@@ -61,6 +61,10 @@ public final class PigAgentCli {
             log.error("startup failed", e);
             System.exit(1);
         }
+        // Normal exit (/quit, Ctrl-D): run() has returned, the shutdown hook runs cleanup — then force
+        // prompt JVM termination. Library-created non-daemon threads (model HTTP connection pools, etc.)
+        // would otherwise keep the JVM alive for tens of seconds after "Goodbye!" (the reported hang).
+        System.exit(0);
     }
 
     /** The real entry-point body, run under {@link #main}'s top-level error guard. */
