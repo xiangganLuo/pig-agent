@@ -143,6 +143,26 @@ public final class PigAgent {
         return harness.streamEvents(userMsg, contextFor(sessionId));
     }
 
+    /**
+     * Stream a turn directly to a subagent that was previously exposed via {@code
+     * agent_spawn(expose_to_user=true)} (subagent-online-switch). The message is routed through this
+     * agent's native gateway to the exposed subagent's own session — <em>bypassing</em> this parent's
+     * conversation — via {@code HarnessGateway.runSubagentStream}. The {@code subagentId} is the value
+     * carried on the {@code SubagentExposedEvent} the parent turn emitted.
+     *
+     * <p>Only meaningful when this agent was built with native subagents enabled ({@link
+     * Builder#subagents(boolean)}) — the build then eagerly initializes the gateway so the exposure
+     * bridge is wired. An unknown/expired {@code subagentId} yields an error {@link Flux} (surfaced as a
+     * one-line error by the frontend), never an exception; a {@code null}/blank id is rejected the same
+     * way. Streaming (not blocking) so the frontend renders it exactly like a normal turn.
+     */
+    public Flux<AgentEvent> streamSubagent(String subagentId, Msg userMsg) {
+        if (subagentId == null || subagentId.isBlank()) {
+            return Flux.error(new IllegalArgumentException("subagentId is required"));
+        }
+        return harness.gateway().runSubagentStream(subagentId, List.of(userMsg));
+    }
+
     /** The per-call runtime context for a pig session id (default session when null/blank). */
     private static RuntimeContext contextFor(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
@@ -703,6 +723,27 @@ public final class PigAgent {
             }
 
             HarnessAgent harness = hb.build();
+
+            // subagent-online-switch: when native subagents are enabled (interactive + peer tracks
+            // only — channel/autonomous keep subagents off), eagerly initialize the HarnessAgent's
+            // internal gateway. This is the documented enabler for `expose_to_user`: ensureGateway()
+            // wires the SubagentGatewayBridge onto the subagent middleware, so a subagent spawned with
+            // expose_to_user=true is registered as a user-addressable session and emits a
+            // SubagentExposedEvent (carrying a subagentId) onto this parent's stream — after which the
+            // frontend can talk to it directly via streamSubagent(...). Spike-verified (javap + offline
+            // PoC): gateway() is a lazy, SEPARATE object; the direct stream/streamEvents path never
+            // routes through it, so binding it does NOT regress the normal chat turn (no fair queuing /
+            // routing engine on the interactive path). Cheap + no IO (no model call).
+            if (subagentsEnabled) {
+                try {
+                    harness.gateway();
+                } catch (RuntimeException e) {
+                    // Never let the exposure enabler break agent construction — subagent switch is an
+                    // additive convenience; the normal chat/delegation path is unaffected either way.
+                    log.warn("Subagent exposure gateway init failed (switch disabled this build): {}",
+                            e.getMessage());
+                }
+            }
             return new PigAgent(harness, harness.getDelegate(), name, model, effectiveStore);
         }
 

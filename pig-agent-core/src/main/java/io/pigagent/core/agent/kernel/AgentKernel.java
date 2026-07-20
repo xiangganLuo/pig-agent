@@ -16,7 +16,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -38,6 +41,19 @@ public final class AgentKernel {
     private final InterruptController interrupts;
     private final Sinks.Many<KernelEvent> events =
             Sinks.many().multicast().onBackpressureBuffer(256, false);
+
+    /**
+     * Exposed subagents seen on the active agent's stream (subagent-online-switch), keyed by the
+     * gateway {@code subagentId} handle, insertion-ordered. Populated by the frontend via
+     * {@link #noteSubagentExposed} as {@code SubagentExposedEvent}s arrive; read by {@link
+     * #listSubagents}/{@link #subagentOutput} and routed by {@link #chatWithSubagent}. Exposed
+     * subagents live on the <em>active</em> agent's harness gateway, so this map is cleared whenever
+     * the active agent changes/rebuilds (switch / model change) — see {@link #clearExposedSubagents}.
+     * A {@code synchronized} {@link LinkedHashMap} keeps order without a dependency and is cheap for
+     * this small, low-churn set.
+     */
+    private final Map<String, ExposedSubagent> exposedSubagents =
+            Collections.synchronizedMap(new LinkedHashMap<>());
 
     public AgentKernel(AgentRegistry registry, AgentSpecRepository repository,
                        AgentInstanceFactory instanceFactory, AgentRunner runner) {
@@ -76,6 +92,9 @@ public final class AgentKernel {
     public boolean useAgent(String id) {
         boolean ok = registry.setActive(id);
         if (ok) {
+            // Exposed subagents belong to the previous active agent's gateway — drop them on switch
+            // so a stale subagentId can't be addressed against the new agent (subagent-online-switch).
+            clearExposedSubagents();
             emit(KernelEvent.Type.AGENT_SWITCHED, id, id);
         }
         return ok;
@@ -97,6 +116,9 @@ public final class AgentKernel {
         registry.register(rebuilt);
         if (spec.id().equals(registry.activeId())) {
             registry.setActive(spec.id());
+            // A rebuild (e.g. model switch) replaces the harness + its gateway, so previously exposed
+            // subagents are gone — drop the tracked handles (subagent-online-switch).
+            clearExposedSubagents();
         }
         return rebuilt;
     }
@@ -187,6 +209,69 @@ public final class AgentKernel {
      */
     public boolean interruptCurrent() {
         return interrupts.interruptCurrent();
+    }
+
+    // ==================== Subagent online switch (subagent-online-switch) ====================
+
+    /**
+     * Record a subagent the active agent just exposed to the user ({@code
+     * agent_spawn(expose_to_user=true)} → {@code SubagentExposedEvent}). The frontend calls this from
+     * its stream renderer as the event arrives, so the kernel is the single seam that owns the list of
+     * switchable subagents. Idempotent per id (a repeat updates the label/type). A {@code null}/blank
+     * {@code subagentId} is ignored (a non-exposed spawn has no id).
+     */
+    public void noteSubagentExposed(String subagentId, String agentId, String label) {
+        if (subagentId == null || subagentId.isBlank()) {
+            return;
+        }
+        exposedSubagents.put(subagentId, new ExposedSubagent(subagentId, agentId, label));
+    }
+
+    /** The subagents the active agent has exposed to the user this session, in exposure order. */
+    public List<ExposedSubagent> listSubagents() {
+        synchronized (exposedSubagents) {
+            return List.copyOf(exposedSubagents.values());
+        }
+    }
+
+    /**
+     * The tracked exposure record for one subagent id — the view-only lookup backing {@code /agent sub
+     * view <id>}. Live output tailing of <em>non-exposed</em> background tasks is a model-driven tool
+     * ({@code task_output}), not a façade call; this returns the addressing metadata pig knows about.
+     */
+    public Optional<ExposedSubagent> subagentOutput(String id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(exposedSubagents.get(id));
+    }
+
+    /**
+     * Stream a turn directly to an exposed subagent (subagent-online-switch): route {@code msg} to the
+     * active agent's exposed subagent {@code subagentId} via the native gateway, <em>bypassing</em> the
+     * parent conversation. Registered as an interruptible unit like {@link #chat} so mid-turn Ctrl-C via
+     * {@link #interruptCurrent()} terminates the stream and returns control to the frontend (the
+     * subagent's own cooperative interrupt is best-effort; the frontend regains control immediately via
+     * {@code takeUntilOther}). An unknown/expired id surfaces as an error on the returned {@link Flux}.
+     */
+    public Flux<AgentEvent> chatWithSubagent(String subagentId, Msg msg) {
+        AgentInstance instance = registry.active().orElse(null);
+        if (instance == null) {
+            return Flux.error(new IllegalStateException("No active agent available"));
+        }
+        emit(KernelEvent.Type.CHAT_STARTED, instance.id(), "subagent:" + subagentId);
+        return Flux.defer(() -> {
+            TurnHandle handle = interrupts.begin();
+            return instance.agent().streamSubagent(subagentId, msg)
+                    .takeUntilOther(handle.onInterrupt()
+                            .then(Mono.error(new TurnInterruptedException(handle.turnId()))))
+                    .doFinally(sig -> interrupts.end(handle));
+        });
+    }
+
+    /** Drop all tracked exposed subagents (on active-agent switch/rebuild). */
+    private void clearExposedSubagents() {
+        exposedSubagents.clear();
     }
 
     /**
