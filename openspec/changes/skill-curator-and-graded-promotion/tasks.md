@@ -40,8 +40,8 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 新增测试全绿：`SkillCuratorSpikeTest`(3+) + `SkillUsageRecorderTest` + `SkillCuratorServiceTest`(+Canary) + `SkillGateGradedGateTest` + `DefaultSkillContentScannerTest`(扩) + `SkillGateTest`(扩) + `CuratorConfigTest` + `SkillCommandTest`(扩) + `ChannelPromotionFailClosedTest`；既有 `SkillsToolTest`/`SkillGate`/`NativeRepositorySkillSourceTest` 保持绿（模型面/读栈零回归）。
-- [ ] 7.2 `mvn -pl pig-agent-cli -am compile` 绿；`mvn verify` 覆盖率地板不回退。
-- [ ] 7.3 更新 `CLAUDE.md` builtin-skills 段落（技能新陈代谢：usage/curator/分级晋级门当纯库采纳、仍 `disableDynamicSkills()` 不当嘴、`skills.curator` 默认关先只读、S1 基座之上、fail-closed 映射）。
-- [ ] 7.4 提交（分组提交：spike / 依赖+配置 / usage seam / curator+调度 / 分级门+安全统一 / 命令+守卫）。
+- [x] 7.1 新增测试全绿：`SkillCuratorSpikeTest`(3) + `SkillUsageRecorderTest`(4) + `SkillsToolUsageTest`(3) + `SkillCuratorServiceTest`(3) + `SkillGateGradedGateTest`(3) + `DefaultSkillContentScannerNativeTest`(3) + `CuratorConfigTest`(4) + `SkillCommandTest`(6, 含 curator) + `ChannelPromotionFailClosedTest`(2)；既有 `SkillsToolTest`(6)/`SkillGateTest`(9)/`AgentCommandSubTest`(6) 保持绿（模型面/读栈零回归）。**`mvn -pl pig-agent-tools -am test` 全绿：424 tests, 0 failures**。
+- [x] 7.2 `mvn -pl pig-agent-cli -am compile` **绿**。（`mvn verify` 全量覆盖率门交合并后统一跑，不在本轮——coordinator 指示「别等全量套件」。）
+- [x] 7.3 更新 `CLAUDE.md`：builtin-skills 段落追加 S3 段（usage 自喂/curator 老化归档/分级晋级门当纯库采纳、仍 `disableDynamicSkills()` 不当嘴、`skills.curator` 默认关先只读、R-Spike-S3-1 可写仓、fail-closed 映射、D8 安全统一、D12 边界）；config 段加 `skills.curator`。
+- [x] 7.4 分组提交（spike / 依赖+配置 / usage seam / curator+调度 / 分级门+安全统一 / 命令+守卫 / 收尾）——conventional commits，7 提交。
 - [ ] 7.5 归档：同步主 spec → `openspec/specs/skill-curator-and-graded-promotion/`，change 移 `openspec/changes/archive/<date>-skill-curator-and-graded-promotion/`（**人工确认门，不在本轮**）。
