@@ -154,6 +154,16 @@ public final class ModelManager implements AgentModelSwitcher {
         store.setDefaultId(id);
     }
 
+    /** Id of the default embedding model, or {@code null} when none configured (embedding-model-layer). */
+    public String getDefaultEmbeddingModelId() {
+        return store.getDefaultEmbeddingModelId();
+    }
+
+    /** Set (or clear, with {@code null}) the default embedding model pointer. */
+    public void setDefaultEmbeddingModelId(String id) {
+        store.setDefaultEmbeddingModelId(id);
+    }
+
     /**
      * Resolve which stored model an agent's {@code modelId} refers to, falling back to the
      * default when the id is null or points at a model that no longer exists. Fault-tolerant:

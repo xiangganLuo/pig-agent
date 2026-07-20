@@ -956,21 +956,33 @@ public final class AgentBootstrap {
     }
 
     /**
-     * Resolve a real {@link Embedder} from a stored model id (an OpenAI-compatible {@code /embeddings}
-     * endpoint via {@link OpenAiCompatibleEmbedder}); {@code null} (→ BM25-only) when the id is blank or
-     * unresolvable. The live embedding round-trip is verified under {@code /ls:itest}, not offline.
+     * Resolve a real {@link Embedder} from an embedding {@link io.pigagent.model.StoredModel} (an
+     * OpenAI-compatible {@code /embeddings} endpoint via {@link OpenAiCompatibleEmbedder}) — capability
+     * {@code embedding-model-layer}. Resolution order: the explicit config {@code embedder-model-id}
+     * (when set) → the store's default embedding model pointer → {@code null} (→ BM25-only, today's
+     * default, zero regression). The id is resolved by exact {@code findById} and an embedder is built
+     * from whatever it resolves to — the kind is NOT required to be {@code EMBEDDING}, so a legacy
+     * {@code embedder-model-id} pointing at a chat model keeps working (identical creds shape). Any
+     * blank/unresolvable/exception path degrades to {@code null} (never throws). The live embedding
+     * round-trip is verified under {@code /ls:itest}, not offline.
      */
     static Embedder resolveEmbedder(String embedderModelId, ModelManager modelManager) {
-        if (embedderModelId == null || embedderModelId.isBlank()) {
+        if (modelManager == null) {
             return null;
         }
+        String id = (embedderModelId != null && !embedderModelId.isBlank())
+                ? embedderModelId
+                : modelManager.getDefaultEmbeddingModelId();
+        if (id == null || id.isBlank()) {
+            return null; // no embedding model configured → BM25-only
+        }
         try {
-            return modelManager.resolveStoredModel(embedderModelId)
+            return modelManager.findById(id)
                     .<Embedder>map(m -> new OpenAiCompatibleEmbedder(m.baseUrl(), m.apiKey(), m.modelName()))
                     .orElse(null);
         } catch (Exception e) {
-            log.warn("Embedder model '{}' not resolvable — hybrid memory search runs BM25-only: {}",
-                    embedderModelId, e.getMessage());
+            log.warn("Embedder model '{}' not resolvable — memory search runs BM25-only: {}",
+                    id, e.getMessage());
             return null;
         }
     }
