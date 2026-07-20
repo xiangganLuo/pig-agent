@@ -45,6 +45,15 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void richFileToolsClassified() {
+        // builtin-file-tools: editFile mutates a file → WRITE; searchFiles/findFiles are read-only
+        // traversals → READ_ONLY (so plan/EXPLORE mode permits them).
+        assertThat(ToolRiskClassifier.classify("editFile", Map.of())).isEqualTo(ToolRisk.WRITE);
+        assertThat(ToolRiskClassifier.classify("searchFiles", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+        assertThat(ToolRiskClassifier.classify("findFiles", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+    }
+
+    @Test
     void toolSearchIsReadOnly() {
         // deferred-tools: tool_search 只搜索/揭示元数据，必须只读（不触发权限确认）
         assertThat(ToolRiskClassifier.classify("tool_search", Map.of())).isEqualTo(ToolRisk.READ_ONLY);

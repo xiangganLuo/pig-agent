@@ -15,6 +15,9 @@ public final class ToolRiskClassifier {
             // 只读
             Map.entry("readFile", ToolRisk.READ_ONLY),
             Map.entry("listDirectory", ToolRisk.READ_ONLY),
+            // 富内置文件工具（builtin-file-tools）——纯 Java 内容搜索 / glob 文件名查找，只读遍历不改盘
+            Map.entry("searchFiles", ToolRisk.READ_ONLY),
+            Map.entry("findFiles", ToolRisk.READ_ONLY),
             Map.entry("listMcpServers", ToolRisk.READ_ONLY),
             Map.entry("testMcpServer", ToolRisk.READ_ONLY),
             Map.entry("listSkills", ToolRisk.READ_ONLY),
@@ -45,6 +48,8 @@ public final class ToolRiskClassifier {
             Map.entry("randomString", ToolRisk.READ_ONLY),
             // 写
             Map.entry("writeFile", ToolRisk.WRITE),
+            // 富内置文件工具（builtin-file-tools）——editFile 对已存在文件做定位串替（非整篇覆盖）
+            Map.entry("editFile", ToolRisk.WRITE),
             Map.entry("createChecklist", ToolRisk.WRITE),
             Map.entry("completeItem", ToolRisk.WRITE),
             // 原生记忆写（pa-memory-native）——memory_save 原子更新 MEMORY.md + 日志层

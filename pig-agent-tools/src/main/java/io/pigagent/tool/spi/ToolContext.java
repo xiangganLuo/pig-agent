@@ -85,6 +85,96 @@ public final class ToolContext {
         this.userProfileEnabled = userProfileEnabled == null ? () -> false : userProfileEnabled;
     }
 
+    /**
+     * A fluent builder — the preferred way to construct a {@code ToolContext}. Adding a new tool
+     * dependency means adding one builder setter instead of a new telescoping constructor overload,
+     * so future tools no longer widen the constructor list. The convenience constructors above are
+     * kept for backward compatibility and delegate to the same canonical constructor, so a
+     * builder-built context is byte-for-byte equivalent to the constructor-built one (same defaults).
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** Fluent builder for {@link ToolContext}; unset fields default exactly as the constructors do. */
+    public static final class Builder {
+        private TaskManager taskManager;
+        private Path skillsDir;
+        private Path workspaceRoot;
+        private List<String> webAllowedHosts;
+        private SandboxPolicy sandboxPolicy;
+        private NotificationService notificationService;
+        private BooleanSupplier outreachEnabled;
+        private SkillStagingArea skillStaging;
+        private BooleanSupplier autonomousSkillsEnabled;
+        private Path userProfileFile;
+        private BooleanSupplier userProfileEnabled;
+
+        private Builder() {
+        }
+
+        public Builder taskManager(TaskManager v) {
+            this.taskManager = v;
+            return this;
+        }
+
+        public Builder skillsDir(Path v) {
+            this.skillsDir = v;
+            return this;
+        }
+
+        public Builder workspaceRoot(Path v) {
+            this.workspaceRoot = v;
+            return this;
+        }
+
+        public Builder webAllowedHosts(List<String> v) {
+            this.webAllowedHosts = v;
+            return this;
+        }
+
+        public Builder sandboxPolicy(SandboxPolicy v) {
+            this.sandboxPolicy = v;
+            return this;
+        }
+
+        public Builder notificationService(NotificationService v) {
+            this.notificationService = v;
+            return this;
+        }
+
+        public Builder outreachEnabled(BooleanSupplier v) {
+            this.outreachEnabled = v;
+            return this;
+        }
+
+        public Builder skillStaging(SkillStagingArea v) {
+            this.skillStaging = v;
+            return this;
+        }
+
+        public Builder autonomousSkillsEnabled(BooleanSupplier v) {
+            this.autonomousSkillsEnabled = v;
+            return this;
+        }
+
+        public Builder userProfileFile(Path v) {
+            this.userProfileFile = v;
+            return this;
+        }
+
+        public Builder userProfileEnabled(BooleanSupplier v) {
+            this.userProfileEnabled = v;
+            return this;
+        }
+
+        public ToolContext build() {
+            return new ToolContext(taskManager, skillsDir, workspaceRoot, webAllowedHosts,
+                    sandboxPolicy, notificationService, outreachEnabled, skillStaging,
+                    autonomousSkillsEnabled, userProfileFile, userProfileEnabled);
+        }
+    }
+
     /** The task manager (for the task tool); may be {@code null} in contexts that don't need it. */
     public TaskManager taskManager() {
         return taskManager;

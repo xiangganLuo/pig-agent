@@ -39,7 +39,8 @@ class ToolRegistrarTest {
         // (PermissionEngine + ToolResultState.DENIED replace the veto-to-sentinel mechanism).
         assertThat(toolkit.getToolNames()).contains(
                 "executeCommand",
-                "readFile", "writeFile", "listDirectory",
+                "readFile", "writeFile", "editFile", "listDirectory",
+                "searchFiles", "findFiles",
                 "createTask", "listTasks", "updateTaskStatus",
                 "listSkills", "loadSkill");
         assertThat(toolkit.getToolNames()).doesNotContain("permissionDenied");
