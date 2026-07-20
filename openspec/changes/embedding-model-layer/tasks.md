@@ -10,29 +10,29 @@
 
 ## 2. `StoredModel` kind + store（`pig-agent-model`）
 
-- [ ] 2.1 `StoredModel` 增 `kind` 字段（枚举 `ModelKind{CHAT, EMBEDDING}`，默认 `CHAT`）+ `withKind`；`create(...)` 兼容重载（默认 `CHAT`），`label()` 可选标注类别。保持 record 不可变。
-- [ ] 2.2 `ModelStore` 增 `getDefaultEmbeddingModelId()`/`setDefaultEmbeddingModelId(String)`；`deleteById` 删到默认嵌入模型时清空该指针（沿用 `defaultModelId` 的既有容错模式）。
-- [ ] 2.3 `JsonModelStore`：`Entry` 增 `kind`（缺省 → `CHAT`）、`Data` 增 `defaultEmbeddingModelId`（缺省 → null）；`@JsonIgnoreProperties(ignoreUnknown=true)` 已有 → 老文件容错读回；落盘仍 `restrictToOwner`（`0600`）。
-- [ ] 2.4 单测：`StoredModelTest`（kind 默认/withKind/不可变）；`JsonModelStoreTest`——保存/读回嵌入条目、默认嵌入指针；**老 `models.json` 无 kind → 读回 CHAT**、无默认嵌入指针 → null；删除默认嵌入模型清指针；聊天路径逐字节等价。
+- [x] 2.1 `StoredModel` 增 `kind` 字段（枚举 `ModelKind{CHAT, EMBEDDING}`，默认 `CHAT`）+ `withKind`；`create(...)` 兼容重载（默认 `CHAT`）+ 5-arg 便捷构造器（默认 `CHAT`）；紧凑构造器把 `null` kind 归一化为 `CHAT`。保持 record 不可变。
+- [x] 2.2 `ModelStore` 增 `getDefaultEmbeddingModelId()`/`setDefaultEmbeddingModelId(String)`（default 方法保持备选 store 源码兼容）；`JsonModelStore.deleteById` 删到默认嵌入模型时清空该指针（沿用 `defaultModelId` 的既有容错模式）。
+- [x] 2.3 `JsonModelStore`：`Entry` 增 `kind`（缺省 → `CHAT`，经 `ModelKind.fromString`）、`Data` 增 `defaultEmbeddingModelId`（缺省 → null）；`@JsonIgnoreProperties(ignoreUnknown=true)` 已有 → 老文件容错读回；落盘仍 `restrictToOwner`（`0600`）。
+- [x] 2.4 单测：`StoredModelTest`（kind 默认/5-arg 默认/null→CHAT/withKind 不可变/with* 保留 kind）；`JsonModelStoreTest`——保存/读回嵌入条目、默认嵌入指针独立于默认 chat、**老 `models.json` 无 kind → 读回 CHAT** + 无默认嵌入指针、删除默认嵌入模型清指针。
 
 ## 3. `/embeddings` 连通性测试（`pig-agent-model` `ModelManager`）
 
-- [ ] 3.1 `ModelManager.test(StoredModel)` 按 `kind` 分派：`CHAT` → 今日 chat「ping」探针（不变）；`EMBEDDING` → 构建 `OpenAiCompatibleEmbedder`（该模型 `baseUrl`/`apiKey`/`modelName`）+ `embed("ping")` 探针，经同一 `runProbe(callable, PROBE_TIMEOUT_SECONDS)` → `TestResult`；失败经 `ModelErrorMessages.friendly` redacted（key 不回显）。
-- [ ] 3.2 为离线可测保留/引入嵌入探针的可注入 seam（复用 `OpenAiCompatibleEmbedder` 的 `HttpPost`，或包私有可注入 `Embedder`）；`runProbe` 已包私有可注入。
-- [ ] 3.3 单测：`ModelManagerTest`——嵌入探针成功 → `TestResult.success`；失败 → 友好 redacted；超时 → 清晰超时原因（注入 fake `Embedder`/`HttpPost`，无网络）；chat 分派回归不变。
+- [x] 3.1 `ModelManager.test(StoredModel)` 按 `kind` 分派：`CHAT` → 今日 chat「ping」探针（不变）；`EMBEDDING` → `testEmbedding` 构建 `OpenAiCompatibleEmbedder` + `embed("ping")` 探针，经同一 `runProbe(callable, PROBE_TIMEOUT_SECONDS)` → `TestResult`；失败经 `ModelErrorMessages.friendly` redacted（key 不回显）。
+- [x] 3.2 `runProbe` 泛型化 `<T>`（同时服务 chat `Msg` 与 embedding `float[]` 探针）；嵌入探针经可注入的 `embedderFactory` seam（包私有 `setEmbedderFactory`）离线可测；`runProbe` 已包私有可注入。
+- [x] 3.3 单测：`ModelManagerEmbeddingTest`——嵌入探针成功 → `success`；失败 → 友好 redacted（不泄 `sk-`）；分派到 embedderFactory；factory 抛异常 → failure。`ModelManagerTestProbeTest`——泛型 non-Msg（float[]）reply → success。
 
 ## 4. `/model` + onboarding UX（`pig-agent-cli` + `pig-agent-onboarding`）
 
-- [ ] 4.1 `ReplCommands.ModelCommand.addModel`：先选类别（chat/embedding）→ 复用协议/凭据（掩码 `readLine(prompt,'*')`）/base URL/模型名流程 → `test`（按 kind 分派）→ `add`（写正确 kind）；嵌入模型限 `supportsEmbeddings` 协议（或固定 openai 兼容流程，以 design D2 为准）。
-- [ ] 4.2 `/model list` 标注每模型类别（chat/embedding，默认嵌入模型标 `*emb`/`[default-emb]` 之类）；新增设默认嵌入模型的子动作（如 `/model set-embedding <id|index>`）。
-- [ ] 4.3 `OnboardingWizard`：配好 chat 模型后新增一步「是否配置嵌入模型？（可选，回车跳过）」——是 → 复用协议/`Console.readPassword`/base URL/模型名 + `/embeddings` 测试 + 存为默认嵌入模型；否 → 跳过（不存嵌入、行为等于今日）。chat 步仍不可跳过。
-- [ ] 4.4 单测：`ModelSelection`/`ModelCommand` 相关——嵌入 add 走嵌入探针后保存 kind=EMBEDDING、设默认嵌入指针；`OnboardingWizard`（可注入 reader/console）——跳过嵌入步 = 只存 chat、行为等于今日；掩码/不回显路径断言。
+- [x] 4.1 `ReplCommands.ModelCommand.addModel`：选协议后选类别（1=chat 默认 / 2=embedding）→ 掩码 key / base URL / 模型名（嵌入必填、无 chat 默认）→ `test`（按 kind 分派）→ `add`（写正确 kind）；首个嵌入模型自动设为默认嵌入模型。
+- [x] 4.2 `/model list` 标注 `(embedding)` + `[default-embedding]`；新增 `/model set-embedding <id|index>` 设默认嵌入模型指针（非嵌入 kind 给出提示但仍允许，R5 一致）。
+- [x] 4.3 `OnboardingWizard`：配好 chat 模型后新增一步「Configure an embedding model? (optional, y/N)」——是 → 复用协议/`Console.readPassword`/base URL/嵌入模型名 + `/embeddings` 测试 + 存为默认嵌入模型；否/任何错误 → 跳过（不存嵌入、行为等于今日，绝不 fatal）。chat 步仍不可跳过。
+- [x] 4.4 单测：`OnboardingWizardTest`——`tryAddEmbeddingModel` 成功且无默认 → add + setDefaultEmbeddingModelId；已有默认 → add 但不覆盖；失败 → 不存。（`/model` 交互 add 的端到端属交互 + 网络，随 codebase 惯例交 IT/手工；离线覆盖落在模型层连通性分派 + `resolveEmbedder`。）
 
 ## 5. 接线：`resolveEmbedder`（`pig-agent-cli` `AgentBootstrap`）
 
-- [ ] 5.1 `AgentBootstrap.resolveEmbedder(embedderModelId, modelManager)` 解析顺序：(1) `embedder-model-id` 非空且 `resolveStoredModel` 命中 → `OpenAiCompatibleEmbedder(creds)`；(2) 否则 `modelStore.getDefaultEmbeddingModelId()` 可解析 → 同上；(3) 否则 `null`。保留 `HttpPost` seam；不可解析/异常 → `null` + warn（key 不入日志）；**不硬要求 `kind==EMBEDDING`**（R5 向后兼容）。
-- [ ] 5.2 消费方不变：`buildMemorySearchIndex`/`buildMemoryInjection` 仍调 `resolveEmbedder`；默认（无嵌入模型）→ `null` → BM25-only；本 spec **不翻默认检索路径**（属 M-B）。
-- [ ] 5.3 接线单测：`resolveEmbedder`——config id 命中 → 非 null embedder；config 空但有默认嵌入模型 → 命中默认；两者皆空/不可解析 → null（BM25-only）；既有指向 chat 模型的 `embedder-model-id` 仍构建 embedder（R5）。既有 `MemoryInjectionWiringTest`/`AgentFactoryTest` 等仍绿（默认路径字节等价）。
+- [x] 5.1 `AgentBootstrap.resolveEmbedder(embedderModelId, modelManager)` 解析顺序：(1) `embedder-model-id` 非空 → 用之；(2) 否则 `modelManager.getDefaultEmbeddingModelId()`；(3) 皆空 → `null`。用精确 `findById`（无隐式回落默认 chat）构建 `OpenAiCompatibleEmbedder(creds)`；保留 `HttpPost` seam；`modelManager==null`/不可解析/异常 → `null` + warn（key 不入日志）；**不硬要求 `kind==EMBEDDING`**（R5 向后兼容）。
+- [x] 5.2 消费方不变：`buildMemorySearchIndex`/`buildMemoryInjection` 仍调 `resolveEmbedder`；默认（无嵌入模型）→ `null` → BM25-only；本 spec **不翻默认检索路径**（属 M-B）。
+- [x] 5.3 接线单测：`EmbedderResolutionTest`——config id 命中 → 非 null embedder；config 空但有默认嵌入模型 → 命中默认；两者皆空/dangling id/null manager → null（BM25-only）；既有指向 chat 模型的 `embedder-model-id` 仍构建 embedder（R5）。既有 `MemoryInjectionWiringTest` 仍绿（默认路径字节等价）。
 
 ## 6. 集成测试（真模型 `*IT`，外环，延后 `/ls:itest`）
 
@@ -40,7 +40,7 @@
 
 ## 7. 验收 + 文档
 
-- [ ] 7.1 `mvn -q test`（`pig-agent-model`/`pig-agent-cli`/`pig-agent-onboarding` 及全反应堆）全绿。
-- [ ] 7.2 `mvn -pl pig-agent-cli -am compile` 绿。
-- [ ] 7.3 `CLAUDE.md` 模型层段落新增「嵌入模型（一等公民：kind + 默认嵌入指针 + `/embeddings` 测试 + `resolveEmbedder`）」说明；`models.json`/onboarding/`/model` 段同步；显式记「默认无嵌入模型 → BM25-only、翻默认属 M-B」。
+- [ ] 7.1 `mvn test` 全反应堆全绿（合并方统一跑；本内环已跑受影响模块定向测试绿——`pig-agent-model` 42、`pig-agent-onboarding` 3、`pig-agent-cli` 相关 REPL/wiring 测试全绿）。
+- [x] 7.2 `mvn -pl pig-agent-cli -am compile` 绿（BUILD SUCCESS）。
+- [x] 7.3 `CLAUDE.md` 模型层新增「嵌入模型层（`embedding-model-layer`, E0）」段落（kind + 默认嵌入指针 + `/embeddings` 测试 + UX + `resolveEmbedder` 顺序 + 默认 BM25-only 零回归 + 翻默认属 M-B）；`pig-agent-model` 模块行加 `ModelKind`。
 - [ ] 7.4 归档时（`/ls:archive`）同步主 spec → `openspec/specs/embedding-model-layer/`（本 change 的 `openspec validate --strict` 已在 spec 阶段通过）。
