@@ -13,6 +13,7 @@ import io.pigagent.cli.repl.command.SkillCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.protocol.ModelProtocol;
+import io.pigagent.model.ModelKind;
 import io.pigagent.model.ModelManager;
 import io.pigagent.model.StoredModel;
 import io.pigagent.session.Session;
@@ -269,12 +270,12 @@ public final class ReplCommands {
         }
     }
 
-    @Command(name = "/model", description = "Manage models (list|add|switch|edit|delete)")
+    @Command(name = "/model", description = "Manage models (list|add|switch|edit|delete|set-embedding)")
     static final class ModelCommand implements Runnable {
         private final ReplContext ctx;
 
         @Parameters(index = "0", arity = "0..1", paramLabel = "<action>",
-                description = "list | add | switch | edit | delete")
+                description = "list | add | switch | edit | delete | set-embedding")
         String action;
 
         @Parameters(index = "1..*", paramLabel = "<args>")
@@ -302,6 +303,7 @@ public final class ReplCommands {
                 case "switch" -> switchModel(t, mm);
                 case "edit" -> editModel(t, mm);
                 case "delete" -> deleteModel(t, mm);
+                case "set-embedding", "set-emb" -> setDefaultEmbedding(t, mm);
                 case "help" -> usage(t);
                 default -> {
                     Ansi.println(t, Ansi.error("Unknown action: " + act));
@@ -318,13 +320,18 @@ public final class ReplCommands {
                 return;
             }
             String def = mm.getDefaultId();
+            String defEmb = mm.getDefaultEmbeddingModelId();
             String cur = mm.getCurrentModelId();
             int idx = 1;
             for (StoredModel m : models) {
                 String marker = m.id().equals(cur) ? Ansi.bold(" *", Color.GREEN) : "  ";
+                String kindTag = m.isEmbedding() ? Ansi.dim(" (embedding)") : "";
                 String tag = m.id().equals(def) ? Ansi.success(" [default]") : "";
+                if (m.id().equals(defEmb)) {
+                    tag += Ansi.success(" [default-embedding]");
+                }
                 Ansi.println(t, String.format("  %2d)", idx) + marker + " " + Ansi.info(m.label())
-                        + tag + Ansi.dim(" [" + m.id() + "]"));
+                        + kindTag + tag + Ansi.dim(" [" + m.id() + "]"));
                 idx++;
             }
         }
@@ -349,6 +356,10 @@ public final class ReplCommands {
                 Ansi.println(t, Ansi.error("Invalid selection."));
                 return;
             }
+            // embedding-model-layer: choose the model kind (default chat). An embedding model is an
+            // OpenAI-compatible /embeddings endpoint used for the vector half of memory search.
+            String kindIn = reader.readLine("Kind [1=chat (default), 2=embedding]: ").trim();
+            ModelKind kind = "2".equals(kindIn) ? ModelKind.EMBEDDING : ModelKind.CHAT;
             String apiKey = null;
             if (protocol.requiresApiKey()) {
                 apiKey = reader.readLine("API key: ", '*').trim(); // masked: no echo / scrollback
@@ -364,11 +375,20 @@ public final class ReplCommands {
                     baseUrl = null;
                 }
             }
-            String modelName = reader.readLine("Model name [" + protocol.defaultModelName() + "]: ").trim();
-            if (modelName.isBlank()) {
-                modelName = protocol.defaultModelName();
+            String modelName;
+            if (kind == ModelKind.EMBEDDING) {
+                modelName = reader.readLine("Embedding model name (e.g. text-embedding-3-small): ").trim();
+                if (modelName.isBlank()) {
+                    Ansi.println(t, Ansi.error("Embedding model name is required."));
+                    return;
+                }
+            } else {
+                modelName = reader.readLine("Model name [" + protocol.defaultModelName() + "]: ").trim();
+                if (modelName.isBlank()) {
+                    modelName = protocol.defaultModelName();
+                }
             }
-            StoredModel m = StoredModel.create(protocol.protocolId(), apiKey, baseUrl, modelName);
+            StoredModel m = StoredModel.create(protocol.protocolId(), apiKey, baseUrl, modelName, kind);
             Ansi.println(t, Ansi.dim("Testing " + m.label() + " ..."));
             ModelManager.TestResult test = mm.test(m);
             if (!test.ok()) {
@@ -376,7 +396,33 @@ public final class ReplCommands {
                 return;
             }
             mm.add(m);
-            Ansi.println(t, Ansi.success("Added " + m.label() + " [" + m.id() + "]"));
+            Ansi.println(t, Ansi.success("Added " + m.label()
+                    + (kind == ModelKind.EMBEDDING ? " (embedding)" : "") + " [" + m.id() + "]"));
+            // First embedding model becomes the default embedding model (mirrors the default-chat rule).
+            if (kind == ModelKind.EMBEDDING && mm.getDefaultEmbeddingModelId() == null) {
+                mm.setDefaultEmbeddingModelId(m.id());
+                Ansi.println(t, Ansi.dim("Set as the default embedding model."));
+            }
+        }
+
+        /** {@code /model set-embedding <id|index>}: point the default embedding model at a saved model. */
+        private void setDefaultEmbedding(Terminal t, ModelManager mm) {
+            if (args == null || args.length == 0) {
+                Ansi.println(t, Ansi.warn("Usage: /model set-embedding <id|index>"));
+                return;
+            }
+            String id = resolveId(mm, args[0]);
+            StoredModel m = id == null ? null : mm.findById(id).orElse(null);
+            if (m == null) {
+                Ansi.println(t, Ansi.error("No such model: " + args[0]));
+                return;
+            }
+            mm.setDefaultEmbeddingModelId(id);
+            Ansi.println(t, Ansi.success("Default embedding model set to " + m.label() + " [" + id + "]."));
+            if (!m.isEmbedding()) {
+                Ansi.println(t, Ansi.warn("Note: this model is not marked as an embedding model; "
+                        + "it will still be called as an OpenAI-compatible /embeddings endpoint."));
+            }
         }
 
         private void switchModel(Terminal t, ModelManager mm) {
@@ -466,11 +512,12 @@ public final class ReplCommands {
         private static void usage(Terminal t) {
             Ansi.println(t, Ansi.heading("/model actions:"));
             Ansi.println(t, Ansi.dim("  list                       list saved models (* = active, [default])"));
-            Ansi.println(t, Ansi.dim("  add                        add a model (provider, key, url, name) + test"));
+            Ansi.println(t, Ansi.dim("  add                        add a model (kind, provider, key, url, name) + test"));
             Ansi.println(t, Ansi.dim("  switch <id|index>          use this model for the current session"));
             Ansi.println(t, Ansi.dim("  switch <id|index> --global set as the global default (all sessions)"));
             Ansi.println(t, Ansi.dim("  edit <id|index>            change key / url / model name"));
             Ansi.println(t, Ansi.dim("  delete <id|index>          delete a saved model (asks to confirm)"));
+            Ansi.println(t, Ansi.dim("  set-embedding <id|index>   set the default embedding model (memory search)"));
         }
     }
 
