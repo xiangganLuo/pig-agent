@@ -37,12 +37,18 @@ public final class SkillCommand implements Runnable {
     @Override
     public void run() {
         Terminal t = ctx.terminal();
+        String act = action == null ? "review" : action.toLowerCase();
+        // Curator sub-command (skill-curator-and-graded-promotion, S3) is independent of the autonomous-
+        // skills gate; handle it first (its own "not enabled" message).
+        if ("curator".equals(act)) {
+            curator(t);
+            return;
+        }
         SkillGate gate = ctx.skillGate();
         if (gate == null) {
             Ansi.println(t, Ansi.warn("Autonomous skills are not available."));
             return;
         }
-        String act = action == null ? "review" : action.toLowerCase();
         switch (act) {
             case "review", "list" -> review(t, gate);
             case "approve" -> approve(t, gate);
@@ -53,6 +59,27 @@ public final class SkillCommand implements Runnable {
                 usage(t);
             }
         }
+    }
+
+    /** {@code /skill curator run|status}: run a curator pass, or show a read-only status. */
+    private void curator(Terminal t) {
+        io.pigagent.tool.skills.curator.SkillCuratorService service = ctx.skillCuratorService();
+        if (service == null) {
+            Ansi.println(t, Ansi.warn("Skill curator is not enabled (skills.curator.enabled=false)."));
+            return;
+        }
+        String sub = name == null ? "status" : name.trim().toLowerCase();
+        io.pigagent.tool.skills.curator.CuratorRunSummary summary = switch (sub) {
+            case "run" -> service.runOnce();
+            case "status" -> service.status();
+            default -> null;
+        };
+        if (summary == null) {
+            Ansi.println(t, Ansi.warn("Usage: /skill curator run|status"));
+            return;
+        }
+        Ansi.println(t, Ansi.heading("Skill curator (" + sub + "):"));
+        Ansi.println(t, "  " + summary.describe());
     }
 
     private void review(Terminal t, SkillGate gate) {
@@ -127,6 +154,8 @@ public final class SkillCommand implements Runnable {
         Ansi.println(t, Ansi.dim("  review [name]     list staged drafts, or show one draft's SKILL.md"));
         Ansi.println(t, Ansi.dim("  approve <name>    safety-scan + dedup + atomically install a draft"));
         Ansi.println(t, Ansi.dim("  reject <name>     discard a staged draft"));
+        Ansi.println(t, Ansi.dim("  curator run       run a skill-curator pass (aging/archival; dry-run unless auto-archive)"));
+        Ansi.println(t, Ansi.dim("  curator status    show skill usage + would-archive candidates (read-only)"));
         Ansi.println(t, Ansi.dim("  (to list installed/available skills, use /skills)"));
     }
 }

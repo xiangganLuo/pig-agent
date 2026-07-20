@@ -120,6 +120,7 @@ public final class AgentRepl {
     private final ToolAvailabilityReport availabilityReport;
     private final NotificationService notificationService;
     private final SkillGate skillGate;
+    private final io.pigagent.tool.skills.curator.SkillCuratorService skillCuratorService;
 
     /**
      * subagent-online-switch: which exposed subagent (if any) the REPL is currently switched into.
@@ -129,12 +130,26 @@ public final class AgentRepl {
      */
     private final SubagentSwitchState subagentSwitch = new SubagentSwitchState();
 
+    /** Backward-compatible constructor (no skill curator service; used by existing tests). */
     public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
                      ConfigurationManager configManager, ProtocolRegistry registry,
                      ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
                      List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
                      AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport,
                      NotificationService notificationService, SkillGate skillGate) {
+        this(agentHolder, agentKernel, reportsDir, configManager, registry, modelManager,
+                compressionService, mcpManager, bridges, sessionManager, workDir, readerRef,
+                availabilityReport, notificationService, skillGate, null);
+    }
+
+    /** Full constructor (skill-curator-and-graded-promotion, S3): additionally carries the curator service. */
+    public AgentRepl(AgentHolder agentHolder, AgentKernel agentKernel, Path reportsDir,
+                     ConfigurationManager configManager, ProtocolRegistry registry,
+                     ModelManager modelManager, CompressionService compressionService, McpManager mcpManager,
+                     List<ChannelAgentBridge> bridges, SessionManager sessionManager, Path workDir,
+                     AtomicReference<LineReader> readerRef, ToolAvailabilityReport availabilityReport,
+                     NotificationService notificationService, SkillGate skillGate,
+                     io.pigagent.tool.skills.curator.SkillCuratorService skillCuratorService) {
         this.agentHolder = agentHolder;
         this.agentKernel = agentKernel;
         this.reportsDir = reportsDir;
@@ -150,6 +165,7 @@ public final class AgentRepl {
         this.availabilityReport = availabilityReport;
         this.notificationService = notificationService;
         this.skillGate = skillGate;
+        this.skillCuratorService = skillCuratorService;
     }
 
     /** Test seam: the shared subagent-switch pointer (also handed to {@link ReplContext}). */
@@ -167,7 +183,7 @@ public final class AgentRepl {
             ReplContext ctx = new ReplContext(agentHolder, agentKernel, reportsDir,
                     configManager, registry, modelManager,
                     compressionService, mcpManager, bridges, sessionManager, terminal, running, readerRef,
-                    availabilityReport, notificationService, skillGate, subagentSwitch);
+                    availabilityReport, notificationService, skillGate, subagentSwitch, skillCuratorService);
 
             DefaultParser parser = replParser();
             PicocliCommandsFactory factory = new PicocliCommandsFactory();

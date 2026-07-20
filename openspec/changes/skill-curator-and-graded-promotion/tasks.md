@@ -35,8 +35,8 @@
 
 ## 6. 命令 + fail-closed 守卫（`pig-agent-cli`）
 
-- [ ] 6.1 `SkillCommand` 加子命 `curator run|status`：`run`→`SkillCuratorService.runOnce()` 打印 `CuratorRunSummary`；`status`→只读 usage 报告+候选+上次运行+配置；curator 未启用→提示。`SkillCommandTest`：`curator status` 只读（无迁移副作用）、未启用提示、`curator run` 调 service。
-- [ ] 6.2 **渠道态永不晋级守卫**（安全相关，锁死）：`ChannelPromotionFailClosedTest`（cli/core）——channel/autonomous 装配下**无 `SkillGate`**、agent 只有 `proposeSkill`/`skillManage`（stage-only），断言不存在任何调用序列让草稿进 `workspace/skills/<name>/` 或被 `WorkspaceSkillSource` 发现；即使误注入 `RejectAllGate` reviewer，`review` 返回 `Defer` → 判定「非 Approve」→ 拒。守卫 `autonomous-skills` 的 fail-closed 契约在 S3 下不被削弱。
+- [x] 6.1 `SkillCommand` 加子命 `curator run|status`（curator 分支先于 gate==null 守卫，独立处理）：`run`→`SkillCuratorService.runOnce()`、`status`→`status()`，打印 `CuratorRunSummary.describe()`；curator 未启用（`skillCuratorService==null`）→提示「not enabled」。`SkillCuratorService` 经 `ReplContext`（新末位 record 组件，nullable）← `AgentRepl`（新增 full 构造 + 旧签名 backward-compat 构造，18 处测试调用点零改）← `PigAgentCli`。`SkillCommandTest`（6/6）：未启用→提示、启用→只读 status 行。**绿** ✅
+- [x] 6.2 **渠道态永不晋级守卫**（安全相关，锁死）：`ChannelPromotionFailClosedTest`（2/2，`pig-agent-tools`）——`NativeSkillPromotionReviewer(new RejectAllGate()).approve(...)` == false（Defer 非 Approve）；`SkillGate` 注入该 reviewer → `promote` 返 `REJECTED_GATE`、草稿留 `.pending`、`workspace/skills/<name>/` 未创建。锁 gate-mapping 半（by-construction 半 = AgentBootstrap 只把 `SkillGate` 给 REPL，channel/autonomous 无 SkillGate，wiring 不变量）。守卫 `autonomous-skills` fail-closed 契约在 S3 不被削弱。**绿** ✅
 
 ## 7. 收尾
 
