@@ -3,8 +3,8 @@ package io.pigagent.channel;
 import java.util.function.Consumer;
 
 /**
- * A messaging channel adapter — one integration point between an external transport (Telegram,
- * Discord, an HTTP webhook, Slack, a CLI pipe, …) and the agent.
+ * A messaging channel adapter — one integration point between an external transport (an HTTP webhook,
+ * a DingTalk/Feishu robot, Slack, a CLI pipe, …) and the agent.
  *
  * <h2>Lifecycle contract</h2>
  * <ol>

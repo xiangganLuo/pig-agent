@@ -370,16 +370,9 @@ public final class WorkspaceManager {
                 #   stdin:                          # pipe stdin -> agent (CLI integration)
                 #     enabled: true
                 #
-                # STUBS (未实现/占位 — not functional yet; start()/sendMessage() only log, cannot hold a
-                # conversation). Left disabled and documented as placeholders — do NOT expect them to work:
-                channels:
-                  telegram:                         # 未实现/占位 (stub — not functional yet)
-                    enabled: false
-                    token: ""
-                  discord:                          # 未实现/占位 (stub — not functional yet)
-                    enabled: false
-                    token: ""
-                  # slack: also a stub (real inbound, but outbound cannot reply)
+                # No channels are enabled by default. Uncomment a WORKING channel above and fill it in.
+                # (Slack exists as a 未实现/占位 stub — real inbound, but its outbound can't reply yet.)
+                channels: {}
 
                 # --- Proactive outreach + notifications -----------------------------------
                 # outreach:

@@ -156,7 +156,7 @@ Maven 多模块项目（`io.pigagent`，`0.1.0-SNAPSHOT`），共 **16 个模块
 | `pig-agent-mcp` | 动态 MCP 服务器管理 + JSON store | `McpManager`、`McpServerSpec`、`McpStore`、`JsonMcpStore` |
 | `pig-agent-workspace` | `~/.pig-agent/workspace/` 布局 | `WorkspaceManager` |
 | `pig-agent-config` | YAML 配置 + 变更监听 | `PigAgentConfig`、`ConfigurationManager`、`ConfigurationChangedEvent` |
-| `pig-agent-channel` | 通道抽象 + agent 桥接 + 适配器工厂 + 原生 Gateway 内核 + 主动外呼 | `Channel`、`ChannelFactory`、`ChannelAgentBridge`、`TelegramChannel`/`DiscordChannel`/`SlackChannel`/`WebhookChannel`/`StdinPipeChannel`、`gateway/*`、`outreach/*`、`ChannelRegistry` |
+| `pig-agent-channel` | 通道抽象 + agent 桥接 + 适配器工厂 + 原生 Gateway 内核 + 主动外呼 | `Channel`、`ChannelFactory`、`ChannelAgentBridge`、`SlackChannel`/`WebhookChannel`/`StdinPipeChannel`、`gateway/*`、`outreach/*`、`ChannelRegistry` |
 | `pig-agent-onboarding` | 首次运行交互式模型配置 | `OnboardingWizard` |
 | `pig-agent-plugin` | 插件 SPI（`register(ctx)`）+ 发现源 | `Plugin`、`PluginContext`、`ServiceLoaderPluginSource`、`DirectoryPluginSource`、`PluginRegistry` |
 | `pig-agent-plugin-builtin` | 内置插件参考实现：6 个离线计算插件 + 从核心拆出的 web 搜索/抓取/清单 | `AbstractToolPlugin`、`PluginCatalog`、`Time/Uuid/Base64/Hash/Json/Random` 插件、`WebSearchPlugin`/`WebFetchPlugin`/`ChecklistPlugin` |
@@ -372,10 +372,8 @@ loop-detection:
   warn-threshold: 3
   stop-threshold: 5
 
-# —— 渠道 ——
-channels:
-  telegram: { enabled: false, token: "" }
-  discord:  { enabled: false, token: "" }
+# —— 渠道 ——（用 /channel add 管理；可用：dingtalk/feishu/webhook/stdin）
+channels: {}
 channel-gateway:
   enabled: false                # 原生 Gateway 内核（公平队列 + expose_to_user）
 
@@ -494,7 +492,7 @@ nohup mvn exec:java -pl pig-agent-cli > pig-agent.log 2>&1 &
 
 | 能力 | 说明 |
 | ---- | ---- |
-| 渠道常驻 | Telegram/Discord/Slack/Webhook 等持续监听，收到即响应 |
+| 渠道常驻 | 钉钉/飞书/Slack/Webhook 等持续监听，收到即响应 |
 | 主动外呼 | `notifyUser` + 定时晨报/提醒，`OutreachGate` 防打扰（URGENT 例外） |
 | 定时任务 | `TaskScheduler` 后台执行 CRON/DELAYED，`.md` 无损往返、重启重排 |
 | MCP 长连接 | 连接保持、工具随时可用 |

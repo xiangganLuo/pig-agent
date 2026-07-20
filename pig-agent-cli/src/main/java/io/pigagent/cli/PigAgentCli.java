@@ -233,7 +233,7 @@ public final class PigAgentCli {
     }
 
     /**
-     * Whether an enabled channel entry is a non-functional stub (Telegram/Discord/Slack) that must NOT
+     * Whether an enabled channel entry is a non-functional stub (e.g. Slack, whose outbound can't reply) that must NOT
      * be started — logging a clear warning instead of a misleading "Channel started" for a dead stub.
      * Disabled/unknown entries return {@code false} (the factory already skips them appropriately).
      */

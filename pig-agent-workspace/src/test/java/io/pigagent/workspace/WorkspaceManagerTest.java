@@ -161,8 +161,9 @@ class WorkspaceManagerTest {
 
         // The WORKING channels are surfaced (as commented examples) so a user knows the real options.
         assertThat(yaml).contains("dingtalk").contains("feishu").contains("webhook").contains("stdin");
-        // Stubs are clearly marked as placeholders, not pretended-functional.
-        assertThat(yaml).contains("telegram").contains("占位").containsIgnoringCase("stub");
+        // The removed stubs (telegram/discord) are gone; only Slack's inbound-only placeholder note remains.
+        assertThat(yaml).doesNotContain("telegram").doesNotContain("discord");
+        assertThat(yaml).contains("占位").containsIgnoringCase("stub");
         // The gateway kernel is documented as NOT required for pig's own channels.
         assertThat(yaml).contains("channel-gateway");
     }

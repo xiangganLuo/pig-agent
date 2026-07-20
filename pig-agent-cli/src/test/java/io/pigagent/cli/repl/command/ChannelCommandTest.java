@@ -76,21 +76,21 @@ class ChannelCommandTest {
     void listMarksStubsAndNeverEchoesSecrets() throws IOException {
         ConfigurationManager cfg = cfg();
         putChannel(cfg, "dingtalk", dingtalk());
-        ChannelConfig tg = new ChannelConfig();
-        tg.setEnabled(true);
-        tg.setToken("TELEGRAM-TOKEN");
-        putChannel(cfg, "telegram", tg);
+        ChannelConfig sl = new ChannelConfig();
+        sl.setEnabled(true);
+        sl.setSigningSecret("SLACK-SECRET-VALUE");
+        putChannel(cfg, "slack", sl);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         int code = build(cfg, null, out).execute("/channel", "list");
 
         String o = out.toString(StandardCharsets.UTF_8);
         assertThat(code).isZero();
-        assertThat(o).contains("dingtalk").contains("telegram");
+        assertThat(o).contains("dingtalk").contains("slack");
         // Stub is clearly marked; working channel shows a safe hint, never the raw secret/url/token.
         assertThat(o).contains("占位/stub");
         assertThat(o).contains("webhook-url set").contains("secret set");
-        assertThat(o).doesNotContain("SUPER").doesNotContain("SIGN-SECRET-VALUE").doesNotContain("TELEGRAM-TOKEN");
+        assertThat(o).doesNotContain("SUPER").doesNotContain("SIGN-SECRET-VALUE").doesNotContain("SLACK-SECRET-VALUE");
     }
 
     @Test
@@ -121,12 +121,12 @@ class ChannelCommandTest {
         ConfigurationManager cfg = cfg();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        build(cfg, null, out).execute("/channel", "enable", "telegram");
+        build(cfg, null, out).execute("/channel", "enable", "slack");
 
         String o = out.toString(StandardCharsets.UTF_8);
         assertThat(o).contains("占位");
         // A stub must not be flipped on.
-        assertThat(cfg.getConfig().getChannels().containsKey("telegram")).isFalse();
+        assertThat(cfg.getConfig().getChannels().containsKey("slack")).isFalse();
     }
 
     @Test
@@ -175,7 +175,7 @@ class ChannelCommandTest {
         ConfigurationManager cfg = cfg();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        build(cfg, null, out).execute("/channel", "test", "telegram");
+        build(cfg, null, out).execute("/channel", "test", "slack");
 
         assertThat(out.toString(StandardCharsets.UTF_8)).contains("占位");
     }

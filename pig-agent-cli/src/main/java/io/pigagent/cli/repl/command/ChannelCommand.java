@@ -29,9 +29,9 @@ import java.util.Map;
  * JLine masked input and are <b>never</b> echoed — {@code list} shows only a safe label (transport +
  * non-secret hints, e.g. "webhook-url set"), never a token / URL / signing secret.
  *
- * <p><b>Honesty:</b> Telegram / Discord (and Slack, whose outbound can't reply) are non-functional
- * stubs ({@link ChannelType#isFunctional()}). {@code list} marks them clearly and {@code enable} /
- * {@code test} refuse them with "该渠道尚未实现（占位）" rather than pretending they connect. The working
+ * <p><b>Honesty:</b> Slack (whose outbound can't reply) is a non-functional stub
+ * ({@link ChannelType#isFunctional()}). {@code list} marks it clearly and {@code enable} /
+ * {@code test} refuse it with "该渠道尚未实现（占位）" rather than pretending it connects. The working
  * channels are DingTalk / Feishu / Webhook / Stdin.
  *
  * <p><b>Startup:</b> channels are started at launch by {@code PigAgentCli.startChannels} for every
