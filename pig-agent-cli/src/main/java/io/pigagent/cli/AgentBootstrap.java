@@ -45,6 +45,10 @@ import io.pigagent.core.compression.EngineeringOptions;
 import io.pigagent.core.interrupt.InterruptController;
 import io.pigagent.core.middleware.LoggingMiddleware;
 import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
+import io.pigagent.core.middleware.ToolMetricsMiddleware;
+import io.pigagent.core.metrics.ToolMetricsRegistry;
+import io.pigagent.cli.tools.ToolAvailabilityRefresher;
+import io.pigagent.cli.tools.ToolsConsole;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.MemoryMigration;
@@ -477,8 +481,10 @@ public final class AgentBootstrap {
         // INDEPENDENT group active-state). The base toolkit + every peer copy register here; subagent child
         // copies register via PigAgent.Builder.revealTargets (threaded through the factories below).
         RevealTargets revealTargets = new RevealTargets();
+        // Register the base toolkit unconditionally so /tools enable|disable (tools-observability, T3)
+        // can activate/deactivate a tool group on it even when the deferred-tools feature is off.
+        revealTargets.register(toolkit);
         if (deferredEnabled) {
-            revealTargets.register(toolkit);
             DeferredToolReveal reveal = DeferredToolGate.reveal(revealTargets, deferredRegistry);
             toolkit.registration().tool(new ToolSearchTool(deferredRegistry, reveal)).apply();
             mcpManager.setToolGroupNamer(name -> "mcp:" + name);
@@ -638,6 +644,14 @@ public final class AgentBootstrap {
         // longer decorated. Autonomous/channel tracks don't share it (their turns aren't kernel-driven).
         InterruptController interruptController = new InterruptController();
 
+        // per-tool metrics (tools-observability, T3): ONE shared, in-memory registry aggregating
+        // calls/latency/errors across the interactive + channel + peer tracks, fed by a pure-observer
+        // ToolMetricsMiddleware and read by /tools + the kernel tool inventory. Default enabled but
+        // additive (the middleware never modifies acting input / tool result / existing logging); when
+        // tools.metrics.enabled=false the middleware is simply not installed (zero overhead).
+        boolean metricsEnabled = config.getTools().getMetrics().isEnabled();
+        ToolMetricsRegistry toolMetrics = new ToolMetricsRegistry();
+
         // Interactive agent middlewares (av2 Phase 5a: native MiddlewareBase, no more legacy hooks):
         // the fixed pig middlewares + any middlewares contributed by plugins (change plugin-system).
         // Permission is NOT a middleware — it is the native PermissionContextState on the builder
@@ -649,6 +663,9 @@ public final class AgentBootstrap {
         interactiveMiddlewares.add(newLoopDetectionMiddleware(configManager));
         interactiveMiddlewares.add(new LoggingMiddleware());
         interactiveMiddlewares.add(new ToolCallLoggingMiddleware());
+        if (metricsEnabled) {
+            interactiveMiddlewares.add(new ToolMetricsMiddleware(toolMetrics));
+        }
         interactiveMiddlewares.addAll(pluginResult.middlewares);
         // User profile (user-profile): inject USER.md into the system prompt. Added to the passed-in
         // middleware list so it precedes the NativeMemoryContextMiddleware (appended last inside
@@ -725,8 +742,9 @@ public final class AgentBootstrap {
                 },
                 // av2 Phase 4/5a: permission is native (context provider below); per-agent middlewares
                 // are logging-only (loop detection is instance-stateful → interactive/channel tracks) +
-                // the shared user-profile injector (user-profile) so peers also "know who you are".
-                spec -> List.of(new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
+                // the shared user-profile injector (user-profile) + the shared per-tool metrics observer
+                // (tools-observability, T3; when enabled) so peers also "know who you are".
+                spec -> peerMiddlewares(userProfileMiddleware, metricsEnabled ? toolMetrics : null),
                 memoryConfigSupplier,
                 stateStore,
                 // Per-agent native permission context: the agent's permissionMode override (else the
@@ -925,10 +943,15 @@ public final class AgentBootstrap {
         // The channel agent is a separate track (D4) with no stop key; it is deliberately NOT wired
         // to the interrupt controller (which is scoped to the interactive kernel turn). It shares the
         // one state store — channel conversations live in their own (pig, "channel:<id>") slots.
+        List<MiddlewareBase> channelMiddlewares = new ArrayList<>(List.of(
+                newLoopDetectionMiddleware(configManager),
+                new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware));
+        if (metricsEnabled) {
+            channelMiddlewares.add(new ToolMetricsMiddleware(toolMetrics));
+        }
         AgentFactory channelAgentFactory = new AgentFactory(
                 config.getAgent().getName(), sysPrompt, toolkit,
-                List.of(newLoopDetectionMiddleware(configManager),
-                        new LoggingMiddleware(), new ToolCallLoggingMiddleware(), userProfileMiddleware),
+                channelMiddlewares,
                 memoryConfigSupplier,
                 maxRetries, fallbackModel, config.getAgent().getMaxIters(),
                 stateStore, channelPermCtx, workspaceRoot, evictionConfig,
@@ -944,12 +967,33 @@ public final class AgentBootstrap {
         // model switch). Fresh sessions/slots pick up per-tool rules for the new MCP tools; existing
         // slots stay fail-safe on the base mode (interactive DEFAULT→ASK, channel DONT_ASK→DENY). Fires
         // only for runtime changes (startup import in initialize() runs before this callback is set).
-        mcpManager.setToolsChangedCallback(() -> modelManager.getCurrentModel().ifPresent(m -> {
+        // Shared agent-rebuild seam: rebuild the interactive + channel agents on the current model so
+        // their native permission context re-snapshots the toolkit's current tool set. Used by the MCP
+        // tool-change callback AND by /tools availability-refresh / enable / disable (tools-observability,
+        // T3), so the running agents reflect a runtime tool-set change without a restart.
+        Runnable rebuildAgents = () -> modelManager.getCurrentModel().ifPresent(m -> {
             Model rebuilt = modelManager.buildModel(m);
             agentHolder.set(agentFactory.create(rebuilt));
             channelAgentHolder.set(channelAgentFactory.create(rebuilt));
-            log.info("Rebuilt agents after MCP tool change (permission context re-snapshotted).");
-        }));
+            log.info("Rebuilt agents after tool-set change (permission context re-snapshotted).");
+        });
+        mcpManager.setToolsChangedCallback(rebuildAgents);
+
+        // Tool observability + runtime management (tools-observability, T3): a mutable current
+        // availability report (so /tools reflects hot re-evaluations), a triggered availability
+        // refresher (reuses the rebuild seam), and the ToolsConsole that builds the read-only tool
+        // inventory + implements runtime management. Wire both into the kernel façade so /tools (and
+        // future frontends) depend only on AgentKernel.listTools()/toolAdmin().
+        AtomicReference<ToolAvailabilityReport> availabilityRef = new AtomicReference<>(availabilityReport);
+        ToolAvailabilityRefresher availabilityRefresher =
+                new ToolAvailabilityRefresher(toolkit, gatedTools, availabilityRef, rebuildAgents);
+        ToolsConsole toolsConsole = new ToolsConsole(
+                toolkit,
+                () -> configManager.getConfig().getPermissions().getToolOverrides(),
+                availabilityRef, deferredRegistry, revealTargets, toolMetrics,
+                mcpManager::managedToolGroups, availabilityRefresher, rebuildAgents);
+        agentKernel.setToolInventoryProvider(toolsConsole::list);
+        agentKernel.setToolAdmin(toolsConsole);
 
         SessionRepository sessionRepository = new FileSystemSessionRepository(workspace.getSessionsDir());
 
@@ -1225,6 +1269,22 @@ public final class AgentBootstrap {
      * middleware. The permission-denied sentinel is gone (native permission denies before execution),
      * so only the loop sentinel remains in the ignore set.
      */
+    /**
+     * The per-peer middleware list (agent-management): logging + the shared user-profile injector, plus
+     * the shared per-tool metrics observer (tools-observability, T3) when {@code metrics} is non-null.
+     * Loop detection is instance-stateful, so it stays on the interactive/channel tracks only.
+     */
+    static List<MiddlewareBase> peerMiddlewares(MiddlewareBase userProfileMiddleware, ToolMetricsRegistry metrics) {
+        List<MiddlewareBase> out = new ArrayList<>();
+        out.add(new LoggingMiddleware());
+        out.add(new ToolCallLoggingMiddleware());
+        if (metrics != null) {
+            out.add(new ToolMetricsMiddleware(metrics));
+        }
+        out.add(userProfileMiddleware);
+        return out;
+    }
+
     static LoopDetectionMiddleware newLoopDetectionMiddleware(ConfigurationManager configManager) {
         PigAgentConfig.LoopDetectionConfig lc = configManager.getConfig().getLoopDetection();
         LoopDetector detector = new LoopDetector(
