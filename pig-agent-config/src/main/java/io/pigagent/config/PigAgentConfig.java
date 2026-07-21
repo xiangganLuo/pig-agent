@@ -258,6 +258,8 @@ public final class PigAgentConfig {
         @JsonProperty("model-id") private String modelId = "";
         @JsonProperty("search") private SearchConfig search = new SearchConfig();
         @JsonProperty("injection") private InjectionConfig injection = new InjectionConfig();
+        @JsonProperty("consolidation-quality")
+        private ConsolidationQualityConfig consolidationQuality = new ConsolidationQualityConfig();
 
         public String getFlush() { return flush; }
         public void setFlush(String f) { this.flush = f == null || f.isBlank() ? "always" : f; }
@@ -273,6 +275,64 @@ public final class PigAgentConfig {
         public void setSearch(SearchConfig s) { this.search = s == null ? new SearchConfig() : s; }
         public InjectionConfig getInjection() { return injection; }
         public void setInjection(InjectionConfig i) { this.injection = i == null ? new InjectionConfig() : i; }
+        public ConsolidationQualityConfig getConsolidationQuality() { return consolidationQuality; }
+        public void setConsolidationQuality(ConsolidationQualityConfig c) {
+            this.consolidationQuality = c == null ? new ConsolidationQualityConfig() : c;
+        }
+    }
+
+    /**
+     * consolidation 质量层（{@code memory.consolidation-quality}，能力 {@code memory-consolidation-quality}）
+     * ——在原生双层记忆之上叠加：可选的 flush/consolidation prompt 定制 + pig 侧语义去重后置 curator。全部
+     * <b>可选、默认关/additive</b>：未配置时 prompt 为空（走原生默认 prompt）、去重关，行为逐字节等于本能力
+     * 引入前。
+     * <ul>
+     *   <li>{@code flush-prompt}：自定义 flush 抽取 prompt（纯 SYSTEM prompt，无占位要求；空 = 原生默认）。</li>
+     *   <li>{@code consolidation-prompt}：自定义 consolidation prompt（<b>须恰含两个 {@code %d}</b>，见
+     *       {@code ConsolidationPromptValidator}；空或校验失败 = 回退原生默认）。</li>
+     *   <li>{@code dedup}：语义去重后置 curator 子块（默认关）。</li>
+     * </ul>
+     */
+    public static final class ConsolidationQualityConfig {
+        @JsonProperty("flush-prompt") private String flushPrompt = "";
+        @JsonProperty("consolidation-prompt") private String consolidationPrompt = "";
+        @JsonProperty("dedup") private DedupConfig dedup = new DedupConfig();
+
+        public String getFlushPrompt() { return flushPrompt; }
+        public void setFlushPrompt(String p) { this.flushPrompt = p == null ? "" : p; }
+        public String getConsolidationPrompt() { return consolidationPrompt; }
+        public void setConsolidationPrompt(String p) { this.consolidationPrompt = p == null ? "" : p; }
+        public DedupConfig getDedup() { return dedup; }
+        public void setDedup(DedupConfig d) { this.dedup = d == null ? new DedupConfig() : d; }
+    }
+
+    /**
+     * 语义去重子块（{@code memory.consolidation-quality.dedup}）——原生 consolidation 之后的 pig 侧确定性
+     * 近重复去除。<b>默认 {@code enabled=false}</b>：关闭时无 curator、无 schedule，{@code MEMORY.md} 不被
+     * pig 侧改动。全部可选、默认安全、非法值 clamp。
+     * <ul>
+     *   <li>{@code enabled}：是否启用后置去重 curator（默认 false）。</li>
+     *   <li>{@code similarity-threshold}：判近重复的相似度阈值（默认保守偏高 0.9；clamp 到 {@code [0,1]}）。</li>
+     *   <li>{@code embedder-model-id}：向量嵌入模型 id（空 → 无嵌入器 → BM25 相似度去重，零依赖降级）。</li>
+     *   <li>{@code min-gap-minutes}：后台去重最小间隔（分钟，默认 60；clamp {@code ≥ 1}）。</li>
+     * </ul>
+     */
+    public static final class DedupConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("similarity-threshold") private double similarityThreshold = 0.9;
+        @JsonProperty("embedder-model-id") private String embedderModelId = "";
+        @JsonProperty("min-gap-minutes") private int minGapMinutes = 60;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public double getSimilarityThreshold() { return similarityThreshold; }
+        public void setSimilarityThreshold(double t) {
+            this.similarityThreshold = Math.min(1.0, Math.max(0.0, t));
+        }
+        public String getEmbedderModelId() { return embedderModelId; }
+        public void setEmbedderModelId(String id) { this.embedderModelId = id == null ? "" : id; }
+        public int getMinGapMinutes() { return minGapMinutes; }
+        public void setMinGapMinutes(int m) { this.minGapMinutes = Math.max(1, m); }
     }
 
     /**

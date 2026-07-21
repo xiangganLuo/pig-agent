@@ -48,6 +48,9 @@ import io.pigagent.core.middleware.ToolCallLoggingMiddleware;
 import io.pigagent.core.loop.LoopDetectionMiddleware;
 import io.pigagent.core.loop.LoopDetector;
 import io.pigagent.core.memory.MemoryMigration;
+import io.pigagent.core.memory.quality.ConsolidationPromptValidator;
+import io.pigagent.core.memory.quality.MemoryConsolidationCurator;
+import io.pigagent.core.memory.quality.SemanticDeduplicator;
 import io.pigagent.core.memory.injection.MemoryInjection;
 import io.pigagent.core.memory.injection.MemoryInjectionSettings;
 import io.pigagent.core.memory.injection.PinnedSource;
@@ -829,6 +832,27 @@ public final class AgentBootstrap {
                             ? "cheap/primary" : upCfg.getConsolidation().getModelId());
         }
 
+        // consolidation-quality (M-D): optional pig-side semantic-dedup curator, scheduled AFTER native
+        // consolidation to drop near-duplicate facts left in MEMORY.md. Default off → no curator, no
+        // schedule (MEMORY.md untouched by pig, byte-identical to today). The embedder is resolved from
+        // the SAME resolveEmbedder seam as hybrid search / M-B (blank/unresolvable → null → BM25
+        // similarity, zero-dependency degradation); the curator self-throttles + is fault-tolerant
+        // (mirrors user-profile consolidation). A "*/N" schedule maps to an every-N-seconds interval.
+        PigAgentConfig.DedupConfig dedupCfg = config.getMemory().getConsolidationQuality().getDedup();
+        if (dedupCfg.isEnabled()) {
+            Embedder dedupEmbedder = resolveEmbedder(dedupCfg.getEmbedderModelId(), modelManager);
+            int dedupGapMinutes = Math.max(1, dedupCfg.getMinGapMinutes());
+            MemoryConsolidationCurator memoryCurator = new MemoryConsolidationCurator(
+                    workspaceRoot.resolve("MEMORY.md"),
+                    new SemanticDeduplicator(dedupEmbedder, dedupCfg.getSimilarityThreshold()),
+                    java.time.Duration.ofMinutes(dedupGapMinutes));
+            taskScheduler.schedule("memory:dedup",
+                    TaskSchedule.cron("*/" + (dedupGapMinutes * 60)), memoryCurator::maybeCurate);
+            log.info("Memory dedup curator scheduled (every {}m, threshold {}, embedder {})",
+                    dedupGapMinutes, dedupCfg.getSimilarityThreshold(),
+                    dedupEmbedder == null ? "none (BM25)" : "vector");
+        }
+
         // Skill curator (skill-curator-and-graded-promotion, S3): schedule periodic skill aging/archival
         // on the existing TaskScheduler (mirrors user-profile consolidation / outreach briefing). Default
         // off → no service, no schedule. Enabled + auto-archive=false → the scheduled pass is a
@@ -971,6 +995,27 @@ public final class AgentBootstrap {
             } catch (Exception e) {
                 log.warn("Memory model '{}' not resolvable — flush/consolidation fall back to the primary model: {}",
                         cfg.getModelId(), e.getMessage());
+            }
+        }
+        // consolidation-quality (M-D): opt-in custom flush/consolidation prompts. Blank (the default) →
+        // leave the native default prompts untouched (byte-identical to today). A custom consolidation
+        // prompt MUST pass ConsolidationPromptValidator (exactly two %d, no stray %) — the native
+        // MemoryConsolidator does String.format(prompt, maxTokens, maxChars), so a malformed prompt would
+        // throw in the async background consolidation; on validation failure we log + keep the native
+        // default (fail-safe). A flush prompt is a plain SYSTEM prompt (no placeholder requirement).
+        PigAgentConfig.ConsolidationQualityConfig cq = cfg.getConsolidationQuality();
+        if (cq != null) {
+            if (ConsolidationPromptValidator.isValidFlushPrompt(cq.getFlushPrompt())) {
+                b.flushPrompt(cq.getFlushPrompt());
+            }
+            String consolidationPrompt = cq.getConsolidationPrompt();
+            if (consolidationPrompt != null && !consolidationPrompt.isBlank()) {
+                if (ConsolidationPromptValidator.isValidConsolidationPrompt(consolidationPrompt)) {
+                    b.consolidationPrompt(consolidationPrompt);
+                } else {
+                    log.warn("Custom consolidation prompt is invalid (needs exactly two %d and no stray %); "
+                            + "keeping the native default prompt");
+                }
             }
         }
         return b.build();
