@@ -255,11 +255,13 @@ public final class PigAgentConfig {
         @JsonProperty("flush-throttle-minutes") private int flushThrottleMinutes = 0;
         @JsonProperty("consolidation-min-gap-minutes") private int consolidationMinGapMinutes = 30;
         @JsonProperty("consolidation-max-tokens") private int consolidationMaxTokens = 4000;
+        @JsonProperty("daily-file-retention-days") private int dailyFileRetentionDays = 0;
         @JsonProperty("model-id") private String modelId = "";
         @JsonProperty("search") private SearchConfig search = new SearchConfig();
         @JsonProperty("injection") private InjectionConfig injection = new InjectionConfig();
         @JsonProperty("consolidation-quality")
         private ConsolidationQualityConfig consolidationQuality = new ConsolidationQualityConfig();
+        @JsonProperty("layering-decay") private LayeringDecayConfig layeringDecay = new LayeringDecayConfig();
 
         public String getFlush() { return flush; }
         public void setFlush(String f) { this.flush = f == null || f.isBlank() ? "always" : f; }
@@ -269,6 +271,8 @@ public final class PigAgentConfig {
         public void setConsolidationMinGapMinutes(int m) { this.consolidationMinGapMinutes = m; }
         public int getConsolidationMaxTokens() { return consolidationMaxTokens; }
         public void setConsolidationMaxTokens(int t) { this.consolidationMaxTokens = t; }
+        public int getDailyFileRetentionDays() { return dailyFileRetentionDays; }
+        public void setDailyFileRetentionDays(int d) { this.dailyFileRetentionDays = d; }
         public String getModelId() { return modelId; }
         public void setModelId(String id) { this.modelId = id == null ? "" : id; }
         public SearchConfig getSearch() { return search; }
@@ -279,6 +283,57 @@ public final class PigAgentConfig {
         public void setConsolidationQuality(ConsolidationQualityConfig c) {
             this.consolidationQuality = c == null ? new ConsolidationQualityConfig() : c;
         }
+        public LayeringDecayConfig getLayeringDecay() { return layeringDecay; }
+        public void setLayeringDecay(LayeringDecayConfig l) {
+            this.layeringDecay = l == null ? new LayeringDecayConfig() : l;
+        }
+    }
+
+    /**
+     * 记忆分层与衰减（{@code memory.layering-decay}，能力 {@code memory-layering-and-decay}，M-C）——在 M-D
+     * 分层格式契约（{@code MemoryLayerFormat} 的 Pinned/General/Recent）之上建「记忆新陈代谢」：确定性事实分层
+     * 归类 + recency/复用信号驱动的衰减降级/归档。由一个 pig 侧后置 curator 在原生 consolidation（及 M-D 去重）
+     * <b>之后</b>跑，层级每趟由事实内容重推导（对原生扁平化健壮），归档到点前缀审计账本（非删除、不复活）。
+     *
+     * <p><b>全默认关/additive</b>：{@code enabled=false} 时无 curator、无 schedule、{@code MEMORY.md} 不被
+     * pig 侧改动、访问记录 no-op、不影响原生行为，逐字节等于本能力引入前。启用后默认还是<b>非破坏 dry-run</b>
+     * （只报告 would-degrade/would-archive），{@code auto-archive=true} 才真降级/归档。复用信号用 token-set 指纹
+     * （零嵌入依赖）、recency 从只增不改的日期日志推导，故本能力不需要嵌入器。全部可选、非法值 clamp。
+     * <ul>
+     *   <li>{@code enabled}：是否启用分层/衰减后置 curator（默认 false）。</li>
+     *   <li>{@code auto-archive}：true 才真降级/归档；false（默认）= 非破坏 dry-run（只报告）。</li>
+     *   <li>{@code stale-after-days}：General 事实陈旧降级阈值（默认 30；clamp {@code ≥ 1}）。</li>
+     *   <li>{@code archive-after-days}：Recent 事实陈旧归档阈值（默认 90；clamp {@code ≥ stale}）。</li>
+     *   <li>{@code reinforce-access-threshold}：抗降级的复用命中数（默认 2；clamp {@code ≥ 1}）。</li>
+     *   <li>{@code promote-access-threshold}：提级的复用命中数（默认 5；clamp {@code ≥ reinforce}）。</li>
+     *   <li>{@code min-gap-minutes}：后台整理最小间隔（分钟，默认 60；clamp {@code ≥ 1}）。</li>
+     * </ul>
+     */
+    public static final class LayeringDecayConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("auto-archive") private boolean autoArchive = false;
+        @JsonProperty("stale-after-days") private int staleAfterDays = 30;
+        @JsonProperty("archive-after-days") private int archiveAfterDays = 90;
+        @JsonProperty("reinforce-access-threshold") private int reinforceAccessThreshold = 2;
+        @JsonProperty("promote-access-threshold") private int promoteAccessThreshold = 5;
+        @JsonProperty("min-gap-minutes") private int minGapMinutes = 60;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public boolean isAutoArchive() { return autoArchive; }
+        public void setAutoArchive(boolean a) { this.autoArchive = a; }
+        public int getStaleAfterDays() { return staleAfterDays; }
+        public void setStaleAfterDays(int d) { this.staleAfterDays = Math.max(1, d); }
+        public int getArchiveAfterDays() { return archiveAfterDays; }
+        public void setArchiveAfterDays(int d) { this.archiveAfterDays = Math.max(getStaleAfterDays(), d); }
+        public int getReinforceAccessThreshold() { return reinforceAccessThreshold; }
+        public void setReinforceAccessThreshold(int t) { this.reinforceAccessThreshold = Math.max(1, t); }
+        public int getPromoteAccessThreshold() { return promoteAccessThreshold; }
+        public void setPromoteAccessThreshold(int t) {
+            this.promoteAccessThreshold = Math.max(getReinforceAccessThreshold(), t);
+        }
+        public int getMinGapMinutes() { return minGapMinutes; }
+        public void setMinGapMinutes(int m) { this.minGapMinutes = Math.max(1, m); }
     }
 
     /**

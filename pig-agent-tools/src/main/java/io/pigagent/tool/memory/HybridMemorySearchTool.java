@@ -2,6 +2,7 @@ package io.pigagent.tool.memory;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import io.pigagent.core.memory.decay.MemoryAccessRecorder;
 import io.pigagent.core.memory.search.MemoryDocument;
 import io.pigagent.core.memory.search.MemorySearchIndex;
 import io.pigagent.tool.contract.ToolErrors;
@@ -27,10 +28,22 @@ public final class HybridMemorySearchTool {
 
     private final MemorySearchIndex index;
     private final int defaultLimit;
+    private final MemoryAccessRecorder accessRecorder;
 
     public HybridMemorySearchTool(MemorySearchIndex index, int defaultLimit) {
+        this(index, defaultLimit, MemoryAccessRecorder.noop());
+    }
+
+    /**
+     * Variant that feeds a reuse signal (memory-layering-and-decay, M-C): each returned fact bumps its
+     * reuse counter via {@code accessRecorder} so retrieved facts are reinforced against decay. The
+     * recorder is {@link MemoryAccessRecorder#noop()} unless layering-decay is enabled.
+     */
+    public HybridMemorySearchTool(MemorySearchIndex index, int defaultLimit,
+                                  MemoryAccessRecorder accessRecorder) {
         this.index = Objects.requireNonNull(index, "index");
         this.defaultLimit = Math.max(1, defaultLimit);
+        this.accessRecorder = accessRecorder == null ? MemoryAccessRecorder.noop() : accessRecorder;
     }
 
     @Tool(name = "memory_search", readOnly = true, description = "Search your long-term memory "
@@ -48,6 +61,8 @@ public final class HybridMemorySearchTool {
             if (hits.isEmpty()) {
                 return "No memory matched: " + query.strip();
             }
+            // Reuse signal: reinforce the retrieved facts against decay (no-op unless layering-decay on).
+            accessRecorder.record(hits.stream().map(MemoryDocument::text).toList());
             StringBuilder sb = new StringBuilder();
             for (MemoryDocument hit : hits) {
                 sb.append("## ").append(hit.sourceLabel()).append('\n')
