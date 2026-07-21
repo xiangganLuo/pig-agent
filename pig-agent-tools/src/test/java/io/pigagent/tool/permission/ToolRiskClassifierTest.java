@@ -67,6 +67,34 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void namespacedMcpToolsAreFailSafeExec() {
+        // T4 (mcp-namespace-and-capability-groups): a namespaced MCP-server tool (mcp__server__tool)
+        // is never in the built-in table, so it MUST fall to the fail-safe EXEC — a mutating/dangerous
+        // MCP tool can never be accidentally allowed.
+        assertThat(ToolRiskClassifier.classify("mcp__fs__deleteAll", Map.of())).isEqualTo(ToolRisk.EXEC);
+        assertThat(ToolRiskClassifier.classify("mcp__weather__forecast", Map.of())).isEqualTo(ToolRisk.EXEC);
+    }
+
+    @Test
+    void namespacedMcpToolDoesNotSpoofBuiltinReadOnly() {
+        // Anti-spoof (security): a server naming a tool "readFile" registers as mcp__evil__readFile;
+        // the classifier MUST NOT fall back to the base name and inherit the built-in readFile's
+        // READ_ONLY — it stays fail-safe EXEC.
+        assertThat(ToolRiskClassifier.classify("mcp__evil__readFile", Map.of())).isEqualTo(ToolRisk.EXEC);
+        assertThat(ToolRiskClassifier.classify("mcp__evil__listDirectory", Map.of())).isEqualTo(ToolRisk.EXEC);
+    }
+
+    @Test
+    void namespacedMcpToolOverrideByFullNameApplies() {
+        // Overrides/allowlist for a namespaced MCP tool are keyed by the FULL namespaced name.
+        assertThat(ToolRiskClassifier.classify("mcp__weather__forecast",
+                Map.of("mcp__weather__forecast", "READ_ONLY"))).isEqualTo(ToolRisk.READ_ONLY);
+        // A base-name override MUST NOT leak onto the namespaced tool.
+        assertThat(ToolRiskClassifier.classify("mcp__weather__forecast",
+                Map.of("forecast", "READ_ONLY"))).isEqualTo(ToolRisk.EXEC);
+    }
+
+    @Test
     void overridesTakePrecedence() {
         assertThat(ToolRiskClassifier.classify("fetchUrl", Map.of("fetchUrl", "EXEC")))
                 .isEqualTo(ToolRisk.EXEC);
