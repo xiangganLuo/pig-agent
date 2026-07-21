@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * The single façade the kernel exposes to frontends (CLI now, Web later). Frontends depend on
@@ -54,6 +55,15 @@ public final class AgentKernel {
      */
     private final Map<String, ExposedSubagent> exposedSubagents =
             Collections.synchronizedMap(new LinkedHashMap<>());
+
+    /**
+     * Read-only tool-inventory provider ({@code tools-observability}, T3), injected by the wiring layer
+     * ({@code AgentBootstrap}) where the tools-module types (risk classifier / availability / deferred /
+     * metrics) are visible. {@code null} (default) → {@link #listTools()} returns an empty list, so a
+     * kernel built without observability wiring (tests, minimal setups) is unaffected. Volatile because
+     * it is set once after construction and read from any thread.
+     */
+    private volatile Supplier<List<ToolInventoryEntry>> toolInventoryProvider;
 
     public AgentKernel(AgentRegistry registry, AgentSpecRepository repository,
                        AgentInstanceFactory instanceFactory, AgentRunner runner) {
@@ -282,6 +292,35 @@ public final class AgentKernel {
      */
     public void noteChannelChat(String channelId) {
         emit(KernelEvent.Type.CHAT_STARTED, "channel:" + channelId, channelId);
+    }
+
+    // ==================== Tool observability (tools-observability, T3) ====================
+
+    /**
+     * Install the read-only tool-inventory provider — the wiring layer ({@code AgentBootstrap}) builds
+     * it from the live toolkit + risk classifier + availability report + deferred registry + metrics
+     * registry (all tools-module types the kernel package cannot import directly). Frontends read the
+     * inventory only through {@link #listTools()}, never the internal collaborators. A {@code null}
+     * provider leaves {@link #listTools()} returning an empty list.
+     */
+    public void setToolInventoryProvider(Supplier<List<ToolInventoryEntry>> provider) {
+        this.toolInventoryProvider = provider;
+    }
+
+    /**
+     * The current tool inventory — one {@link ToolInventoryEntry} per tool (name, risk, availability,
+     * deferral status, metrics summary) — for {@code /tools} and future frontends. Never returns null;
+     * an empty list when no provider is wired. A provider that throws is contained (logged upstream by
+     * the provider itself); here a thrown provider degrades to an empty list so the façade never breaks
+     * a caller. Entries carry no credential value.
+     */
+    public List<ToolInventoryEntry> listTools() {
+        Supplier<List<ToolInventoryEntry>> provider = this.toolInventoryProvider;
+        if (provider == null) {
+            return List.of();
+        }
+        List<ToolInventoryEntry> out = provider.get();
+        return out == null ? List.of() : out;
     }
 
     /** Subscribe to kernel lifecycle events (hot, multicast). */
