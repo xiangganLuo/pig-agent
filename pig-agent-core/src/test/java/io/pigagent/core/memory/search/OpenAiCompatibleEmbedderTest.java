@@ -31,6 +31,33 @@ class OpenAiCompatibleEmbedderTest {
     }
 
     @Test
+    void parsePreservesVectorDimension() throws Exception {
+        float[] v = OpenAiCompatibleEmbedder.parseEmbedding(
+                "{\"data\":[{\"embedding\":[0.1,0.2,0.3,0.4,0.5]}]}");
+        assertThat(v).hasSize(5); // parsed dimension matches the response vector length
+    }
+
+    @Test
+    void parseRejectsEmptyEmbeddingVector() {
+        assertThatThrownBy(() ->
+                OpenAiCompatibleEmbedder.parseEmbedding("{\"data\":[{\"embedding\":[]}]}"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void embedClassifiesNon2xxByTypeWithoutEchoingKey() {
+        // A non-2xx from the transport (defaultHttpPost throws "embeddings HTTP <status>"):
+        OpenAiCompatibleEmbedder.HttpPost http500 = (u, k, b) -> {
+            throw new IllegalStateException("embeddings HTTP 500 for key sk-secret");
+        };
+        Embedder e = new OpenAiCompatibleEmbedder("https://x", "sk-secret", "m", http500);
+        assertThatThrownBy(() -> e.embed("x"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("IllegalStateException") // classified by exception type
+                .hasMessageNotContaining("sk-secret");          // never echoes the key
+    }
+
+    @Test
     void joinsEndpointToleratingTrailingSlash() {
         assertThat(OpenAiCompatibleEmbedder.embeddingsUrl("https://x/v1/")).isEqualTo("https://x/v1/embeddings");
         assertThat(OpenAiCompatibleEmbedder.embeddingsUrl("https://x/v1")).isEqualTo("https://x/v1/embeddings");

@@ -10,23 +10,23 @@
 
 ## 2. Config 三态开关（`pig-agent-config`）
 
-- [ ] 2.1 `PigAgentConfig.SearchConfig.hybridEnabled` 由 `boolean`（默认 false）改为**可空** `Boolean`（`@JsonProperty("hybrid-enabled")`，缺字段 → `null`=auto，显式 `true`/`false` 原样读回）；提供访问 override 的 getter（可空）+ 一个纯派生辅助（如 `resolveHybrid(boolean embedderPresent)`），保留 `bm25-weight`/`vector-weight`/`candidate-multiplier`/`min-score`/`top-k`/`rebuild-throttle-seconds` 不变。
-- [ ] 2.2 更新既有读取点（`AgentBootstrap` 的 `searchCfg.isHybridEnabled()`）为三态语义；确保 `@JsonIgnoreProperties(ignoreUnknown=true)` + config-resilience 下老配置（有/无 `hybrid-enabled` 字段、显式 `true`/`false`）读回不失败。
-- [ ] 2.3 单测：`SearchConfigTest`——缺字段 → override 为「未设」（auto）；显式 `true`/`false` → 原样读回；`resolveHybrid` 纯函数（override 未设 → 跟随 `embedderPresent`；override=true/false → 覆盖）。
+- [x] 2.1 `PigAgentConfig.SearchConfig.hybridEnabled` 由 `boolean`（默认 false）改为**可空** `Boolean`（`@JsonProperty("hybrid-enabled")` + `@JsonInclude(NON_NULL)`，缺字段 → `null`=auto，显式 `true`/`false` 原样读回）；新增 `getHybridEnabled()`（可空）/`setHybridEnabled(Boolean)`/`hasExplicitHybrid()` + 纯派生辅助 `resolveHybrid(boolean embedderPresent)`，其余字段不变。
+- [x] 2.2 更新既有读取点（`AgentBootstrap` 的 `searchCfg.isHybridEnabled()` → `resolveHybrid(...)`）为三态语义；config-resilience（mapper 级 ignore-unknown）下老配置（有/无 `hybrid-enabled` 字段、显式 `true`/`false`）读回不失败；更新既有 `MemorySearchConfigYamlTest` 到新 API。
+- [x] 2.3 单测：`SearchConfigTriStateTest`——缺字段 → override null（auto）；YAML 显式 `true`/`false` → 原样读回；`resolveHybrid` 纯函数（override 未设 → 跟随 `embedderPresent`；override=true/false → 覆盖）。
 
 ## 3. 装配：解析一次嵌入器 + 纯派生 + 复用（`pig-agent-cli` `AgentBootstrap`）
 
-- [ ] 3.1 hybrid 装配（约 `:460`）改为：先 `Embedder embedder = resolveEmbedder(searchCfg.getEmbedderModelId(), modelManager)`（**解析一次**）→ `boolean effectiveHybrid = searchCfg.resolveHybrid(embedder != null)` → `if (effectiveHybrid)` 注册 `HybridMemorySearchTool`。
-- [ ] 3.2 `buildMemorySearchIndex` 增重载/传参，接受**已解析的** `embedder`（避免二次 `resolveEmbedder`）；消费方 `MemorySearchConfig`/loader/`InMemoryVectorStore` 不变。
-- [ ] 3.3 日志：启用时区分「派生自嵌入模型」vs「显式启用」并标注 embedder（none=BM25-only / 模型 id），key 不入日志。
-- [ ] 3.4 顶替取舍现默认触发：确认 `PigAgent.Builder` 的 `disableMemoryTools()` 自协调在默认路径下照常生效（无 builder 改动）；flush/consolidation hooks 保留（`MEMORY.md` 照写）。
-- [ ] 3.5 单测：`HybridDefaultWiringTest`——(a) 派生出（`DeterministicEmbedder`/fake）嵌入器 + override 未设 → 注册 pig `memory_search`、`MemorySearchIndex.vectorEnabled()` 真；(b) 无嵌入器 + override 未设 → 不注册、原生检索、逐字节等价；(c) 显式 `false` + 有嵌入器 → 不注册（覆盖派生）；(d) 显式 `true` + 无嵌入器 → 注册、混合退化 BM25-only；(e) `resolveEmbedder` 仅调一次（复用嵌入器）。既有 `hybrid-memory-search`/`MemoryInjectionWiring` 单测保持绿。
+- [x] 3.1 hybrid 装配（约 `:460`）改为：先 `Embedder searchEmbedder = resolveEmbedder(searchCfg.getEmbedderModelId(), modelManager)`（**解析一次**）→ `if (searchCfg.resolveHybrid(searchEmbedder != null))` 注册 `HybridMemorySearchTool`。（注：本分支基于 pre-E0 的 `resolveEmbedder`——`embedder-model-id` → `resolveStoredModel`；M-B 只消费其返回的 embedder-or-null，**E0-agnostic、前向兼容**：E0 合并后 `resolveEmbedder` 增 store 默认嵌入回退，M-B 装配无需改。）
+- [x] 3.2 `buildMemorySearchIndex` 签名由 `(cfg, ws, upf, ModelManager)` 改为 `(cfg, ws, upf, Embedder)`，接受**已解析的** `embedder`（装配处解析一次、消除二次 `resolveEmbedder`）；消费方 `MemorySearchConfig`/loader/`InMemoryVectorStore` 不变。
+- [x] 3.3 日志：启用时区分「derived from embedding model」vs「explicit」并标注 embedder（`none (BM25-only)` / `configured`，不回显 model id/key）。
+- [x] 3.4 顶替取舍现默认触发：`PigAgent.Builder` 的 `disableMemoryTools()` 自协调（toolkit 内出现 `memory_search` 即触发）**未改动**，默认路径下照常生效；flush/consolidation hooks 保留（`MEMORY.md` 照写）。
+- [x] 3.5 单测：`HybridDefaultWiringTest`——(a) 派生出（`DeterministicEmbedder`）嵌入器 + auto → `resolveHybrid` 真 + `MemorySearchIndex.vectorEnabled()` 真；(b) 无嵌入器 + auto → `resolveHybrid` 假 + BM25-only；(c) 显式 `false` + 有嵌入器 → 覆盖为假；(d) 显式 `true` + 无嵌入器 → 真、混合退化 BM25-only；(e) `resolveEmbedder("")`→null、`resolveEmbedder("emb-1", mm)`→非 null。既有 `MemoryInjectionWiring` 单测保持绿。
 
 ## 4. 真实嵌入器离线覆盖（`pig-agent-core` `OpenAiCompatibleEmbedder`）
 
-- [ ] 4.1 补/核验离线单测（注入 `HttpPost` 喂 canned JSON，无真网络）：请求体 `{model,input}` 构造 + `/embeddings` URL 拼接（含 trailing slash）；解析 `data[0].embedding` → `float[]`，**维度**与响应向量长度一致，**L2 归一化**后模长≈1。
-- [ ] 4.2 **错误分类**离线单测：无 `data`/空 `data`/空向量/非 2xx 响应 → 抛携带异常类型（**不含凭据**）的错误；经 `MemorySearchIndex` 捕获 → 降级 BM25-only（不崩溃、不抛给调用方）。
-- [ ] 4.3 `OpenAiCompatibleEmbedder` 逻辑不改（仅补测试）；确认凭据（`sk-`/Bearer）绝不出现在异常/日志/输出。
+- [x] 4.1 补离线单测（注入 `HttpPost` 喂 canned JSON，无真网络）：`parsePreservesVectorDimension`（维度=响应向量长度）；既有 `embedNormalizesParsedVectorViaFakeHttp`（L2 归一化 [3,4]→[0.6,0.8]）+ `joinsEndpointToleratingTrailingSlash` + `buildsOpenAiRequestBody` 已覆盖请求体/URL。
+- [x] 4.2 **错误分类**离线单测：`parseRejectsMissingData`（空 data）+ `parseRejectsEmptyEmbeddingVector`（空向量）+ `embedClassifiesNon2xxByTypeWithoutEchoingKey`（非 2xx → 携带异常类型、不含 key）；`MemorySearchIndexTest.embedderFailureDegradesToBm25` 证降级 BM25-only（门面捕获、不抛）。
+- [x] 4.3 `OpenAiCompatibleEmbedder` 逻辑不改（仅补测试）；`failureDoesNotEchoTheApiKey` + 新 non-2xx 测试确认凭据（`sk-`/Bearer）绝不出现在异常。
 
 ## 5. 集成测试（真模型 `*IT`，外环，延后 `/ls:itest`）
 
