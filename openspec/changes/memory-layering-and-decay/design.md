@@ -134,7 +134,7 @@ memory.layering-decay.*  /  memory.daily-file-retention-days   (config, 默认�
 | 暴露 `dailyFileRetentionDays`（现吃原生默认 90） | D7；R8 | 落 tasks 组 4（config）+ 组 5（接线） |
 | 默认非破坏 dry-run，auto-archive 才真移动 | D8 | 落 tasks 组 3 |
 | curator 节流/容错/原子重写、镜像 `MemoryConsolidationCurator` | D4；R1 | 落 tasks 组 3 |
-| 嵌入器与 M-B 同源、BM25/token-set 降级、不硬依赖 M-B | D6；R7；交叉依赖 | 落 tasks 组 2/3 + 登记 |
+| 嵌入器与 M-B 同源、BM25/token-set 降级、不硬依赖 M-B | D6；R7；交叉依赖 | **已实现（精化）**：复用信号=`FactFingerprint` token-set 指纹、recency=日志日期，**均零嵌入依赖** → M-C 实现不用嵌入器、`memory.layering-decay` **不暴露 `embedder-model-id`**（YAGNI 去死旋钮）；D6 的「无嵌入器降级」即 M-C 默认路径，不被 M-B 阻塞成立 |
 | 复用 M-D 评测 harness 断重要留存/陈旧降级/关键不丢 | Spike S3；D3；交叉依赖 | 落 tasks 组 6 |
 | 真质量基线延后 live `*IT`（默认模型 403） | Spike S1/S3；R5 | 落 tasks 组 7（IT，延后） |
 | `MEMORY.md` 分层契约来自 M-D、顺序依赖 M-D 先 | 交叉依赖；R6 | 已登记（顺序依赖，非并行） |

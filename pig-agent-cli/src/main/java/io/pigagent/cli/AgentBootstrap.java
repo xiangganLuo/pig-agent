@@ -51,6 +51,12 @@ import io.pigagent.core.memory.MemoryMigration;
 import io.pigagent.core.memory.quality.ConsolidationPromptValidator;
 import io.pigagent.core.memory.quality.MemoryConsolidationCurator;
 import io.pigagent.core.memory.quality.SemanticDeduplicator;
+import io.pigagent.core.memory.decay.DecayArchiveWriter;
+import io.pigagent.core.memory.decay.FactLayerClassifier;
+import io.pigagent.core.memory.decay.MemoryAccessRecorder;
+import io.pigagent.core.memory.decay.MemoryAccessStore;
+import io.pigagent.core.memory.decay.MemoryLayeringDecayCurator;
+import io.pigagent.core.memory.decay.RetentionScorer;
 import io.pigagent.core.memory.injection.MemoryInjection;
 import io.pigagent.core.memory.injection.MemoryInjectionSettings;
 import io.pigagent.core.memory.injection.PinnedSource;
@@ -502,7 +508,15 @@ public final class AgentBootstrap {
         if (searchCfg.isHybridEnabled()) {
             MemorySearchIndex memoryIndex =
                     buildMemorySearchIndex(searchCfg, workspace, userProfileFile, modelManager);
-            toolkit.registration().tool(new HybridMemorySearchTool(memoryIndex, searchCfg.getTopK())).apply();
+            // memory-layering-and-decay (M-C, D2): feed a reuse signal from memory_search hits into the
+            // decay recorder when layering-decay is on, so retrieved facts are reinforced against decay;
+            // otherwise a no-op (recency-only decay). Store-backed recorder shares the curator's sidecar.
+            MemoryAccessRecorder accessRecorder = config.getMemory().getLayeringDecay().isEnabled()
+                    ? MemoryAccessRecorder.backedBy(
+                            new MemoryAccessStore(workspace.getRootPath().resolve("memory")))
+                    : MemoryAccessRecorder.noop();
+            toolkit.registration()
+                    .tool(new HybridMemorySearchTool(memoryIndex, searchCfg.getTopK(), accessRecorder)).apply();
             log.info("Hybrid memory search enabled (bm25 {}, vector {}, embedder {})",
                     searchCfg.getBm25Weight(), searchCfg.getVectorWeight(),
                     searchCfg.getEmbedderModelId().isBlank()
@@ -853,6 +867,29 @@ public final class AgentBootstrap {
                     dedupEmbedder == null ? "none (BM25)" : "vector");
         }
 
+        // memory-layering-and-decay (M-C, D4): the layering/decay post-consolidation curator, scheduled
+        // AFTER the M-D dedup pass. It deterministically re-layers MEMORY.md and ages stale facts (recency
+        // from the dated ledger + reuse from the access sidecar), archiving to the dot-prefixed audit
+        // ledger. Default off → no curator, no schedule (MEMORY.md untouched, byte-identical). Even when
+        // enabled it defaults to a non-destructive dry-run (auto-archive=false); the classifier/scorer are
+        // deterministic pure functions and the curator self-throttles + is fault-tolerant (mirrors M-D).
+        PigAgentConfig.LayeringDecayConfig ldCfg = config.getMemory().getLayeringDecay();
+        if (ldCfg.isEnabled()) {
+            java.nio.file.Path memoryDir = workspaceRoot.resolve("memory");
+            int ldGapMinutes = Math.max(1, ldCfg.getMinGapMinutes());
+            MemoryLayeringDecayCurator decayCurator = new MemoryLayeringDecayCurator(
+                    workspaceRoot.resolve("MEMORY.md"), memoryDir,
+                    new FactLayerClassifier(),
+                    new RetentionScorer(ldCfg.getStaleAfterDays(), ldCfg.getArchiveAfterDays(),
+                            ldCfg.getReinforceAccessThreshold(), ldCfg.getPromoteAccessThreshold()),
+                    new DecayArchiveWriter(memoryDir),
+                    ldCfg.isAutoArchive(), java.time.Duration.ofMinutes(ldGapMinutes));
+            taskScheduler.schedule("memory:layering-decay",
+                    TaskSchedule.cron("*/" + (ldGapMinutes * 60)), decayCurator::maybeCurate);
+            log.info("Memory layering/decay curator scheduled (every {}m, auto-archive={})",
+                    ldGapMinutes, ldCfg.isAutoArchive());
+        }
+
         // Skill curator (skill-curator-and-graded-promotion, S3): schedule periodic skill aging/archival
         // on the existing TaskScheduler (mirrors user-profile consolidation / outreach briefing). Default
         // off → no service, no schedule. Enabled + auto-archive=false → the scheduled pass is a
@@ -983,6 +1020,11 @@ public final class AgentBootstrap {
         }
         if (cfg.getConsolidationMaxTokens() > 0) {
             b.consolidationMaxTokens(cfg.getConsolidationMaxTokens());
+        }
+        // memory-layering-and-decay (M-C, D7): expose the native daily-ledger retention knob. 0 (default)
+        // → don't call → native default (90 days), byte-identical to today.
+        if (cfg.getDailyFileRetentionDays() > 0) {
+            b.dailyFileRetentionDays(cfg.getDailyFileRetentionDays());
         }
         // Cheap auxiliary model (OD8). Blank id or an unresolvable model → null → native uses the
         // agent's primary reasoning model (fault-tolerant fallback).
