@@ -14,8 +14,8 @@ pig 的技能读栈（capability `builtin-skills` + `composite-skill`，已在 m
 
 **Goals**
 - 技能匹配**同源复用** `io.pigagent.core.search`（BM25，可选叠加 `HybridRanker`），与 `memory_search`/`tool_search` 一套 ranker、一套分词，杜绝评分漂移（兑现 R0「三线同源」）。
-- `listSkills` 可选按 query 返回 top-K 最相关（新增能力），**config 开关默认关 → 技能读栈逐字节不变**（backward-safe）。
-- 零对外契约回归：`loadSkill` 永远逐字不变；`listSkills` 的 `@Tool` 名不变、默认关 schema/输出逐字不变；仅显式开启时经**可选入参**扩展（与 S1 的 `@Tool` 字节稳定红线一致）。
+- 经**独立只读工具** `skill_search(query)` 返回 top-K 最相关技能（补齐 `memory_search`/`tool_search`/`skill_search` 同源三件套），**config 开关默认关 → 不注册、技能读栈逐字节不变**（backward-safe）。
+- 零对外契约回归：`listSkills`/`loadSkill` 的 `@Tool` 名/签名/schema/返回语义在**任何配置下**永远逐字不变（技能匹配以独立新工具暴露，不动既有两个读栈工具；与 S1 的 `@Tool` 字节稳定红线一致）。
 - 排序**只读廉价 metadata**（名+描述+keywords），MUST NOT 读技能正文——渐进加载不回归。
 
 **Non-Goals**
@@ -41,17 +41,18 @@ pig 的技能读栈（capability `builtin-skills` + `composite-skill`，已在 m
 ## Decisions
 
 - **D1 — `SkillDocument implements io.pigagent.core.search.SearchDocument`（镜像 T2 `ToolDocument`）**。`id`=技能名（`Skill.name()`，与 `listSkills` 行/`loadSkill` 解析一致），`text`=名 + 描述 + keywords 拼接（描述/keywords 均取自 `Skill.metadata()`——`keywords` 携带名字派生不出的触发词，提升召回，正如 T2 的 `ToolDocument` 用 keywords 承载 camelCase/CJK 切分）。仅 `import io.pigagent.core.search`，不牵扯 `io.pigagent.core.memory.search`。**关键约束（渐进加载）**：`text` 只从 `metadata()` 构造，MUST NOT 触 `Skill.content()`——列举/排序永不读正文（省 token，与 `listSkills` 今日渐进契约一致）。
-- **D2 —（暴露方式，backward-safe 命门）`listSkills` 可选 query，config 选择注册无参/带参变体；默认关逐字节不变**。语义：
-  - `skills.matching.enabled=false`（默认）→ `listSkills` 是**今日的无参变体**：`@Tool` 名 `listSkills`、无 `query` 入参、schema/输出与引入本能力前逐字节一致（平铺全部按名排序）。
-  - `enabled=true` → `listSkills` 是**带可选 `query` 入参的变体**（`@Tool` 名仍为 `listSkills`）：`query` 空/缺省 → 平铺全部（与今日一致）；`query` 非空 → 经共享 ranker 返回 top-K 最相关（每行格式 `- <name>` / `- <name> — <desc>` 与平铺一致）。
-  - **红线兑现**：默认关时无任何模型面变化（同今日）；`loadSkill` 任何时候不变；`@Tool` 名恒为 `listSkills`；仅显式开启时签名才增加一个**可选**入参——这正是 task 点名的"经参数/config 开关"暴露方式，且开启是用户主动行为。
-  - *机制留 `/ls:code` 定形（spec 只约束可观察结果）*：候选 (a) `AgentBootstrap`/`SkillsToolProvider` 据 `enabled` 注册两个同名 `@Tool` 方法变体之一（无参 vs 带 `query`）；(b) 单一 `SkillsTool` 持匹配 config，构造期决定 schema。倾向 (a)——注册期二选一最直、默认关时"无参变体"schema 与今日 100% 相同。
-  - *备选（否决）*：新增独立 `@Tool skill_search(query)`（与 `tool_search`/`memory_search` 命名对称）而不动 `listSkills`。**否决理由**：task 明确要"listSkills 可选返回 top-K"（单一列举入口按需变智能），而非再添一个模型面工具 + 其 guidance（多一份 token、多一个入口）；`skill_search` 的对称性收益不敌"单入口"的简洁（KISS/YAGNI）。若后续确有独立搜索工具需求，另 spec。
+- **D2 —（暴露方式，coordinator 定稿）独立只读工具 `skill_search(query)`，config 门控默认关不注册；`listSkills`/`loadSkill` 完全不动**。语义：
+  - 新增 `@Tool name="skill_search"`（`readOnly=true`）：输入 query → 经共享 ranker 返回 top-K 最相关技能（行格式 `- <name>` / `- <name> — <desc>` 与 `listSkills` 平铺一致）。镜像 `ToolSearchTool`（`tool_search`）的形态与契约。
+  - `skills.matching.enabled=false`（默认）→ `AgentBootstrap` **不注册** `skill_search` → 它不进模型 schema，初始工具 schema 与引入本能力前**逐字节一致**（镜像 `tool_search` 的条件注册）；`enabled=true` → 注册。
+  - **红线兑现（最强向后兼容）**：`listSkills`/`loadSkill` 的 `@Tool` 名/签名/schema/返回语义**在任何配置下逐字不变**（技能匹配是一个全新工具，不碰既有两个读栈工具）；默认关时模型面零变化。
+  - **决策理由（coordinator）**：R0 的前提是「三线同源一套 ranker」，而 `memory_search`/`tool_search` 都是**独立检索工具**，`skill_search` 补齐对称三件套更一致、更干净，且 `listSkills` **100% 保持不动**（向后兼容最强）。
+  - *此前备选（已被 coordinator 否决，记录以备追溯）*：在 `listSkills` 上加可选 `query` 入参（config 二选一注册无参/带参变体）。否决理由：AgentScope `@Tool` schema 是静态注解，"默认关 schema 逐字节不变 + 名不变 + 开启才多一个可选入参"需要注册期二选一同名变体，较独立工具更绕；且独立工具与 `memory_search`/`tool_search` 命名对称、`listSkills` 零改动，向后兼容更强。
+  - **落点**：`SkillSearchTool`（`pig-agent-tools`，镜像 `ToolSearchTool`）持一个 `SkillRegistry` + `top-k`/`min-score`；`SkillsTool` 增一个 `registry()` 访问器（非 `@Tool`，供 `skill_search` 与 `listSkills` **共享同一 registry**、排序集与列举集同源）；`AgentBootstrap` 在 `ToolContractGuard.install` **前**条件注册（被 guard 包裹、READ_ONLY 分级生效）。
 - **D3 — 技能匹配只用 BM25（+`HybridRanker` 空向量降级），不接嵌入**（镜像 T2 D2）。技能条目少（几十量级）、`text` 短，BM25 的词频/IDF 已足够区分；接 `/embeddings` 会引入网络/凭据/延迟，收益不明（违 YAGNI）。用 `HybridRanker.rank(bm25Map, 空向量图, 1.0, 0.0, minScore, topK)` 而非直接取 `Bm25Index.score` 排序，是为了**与记忆/工具线走同一融合/归一化出口**（口径一致），向量权重传 0 / 向量图传空 → 等价 BM25-only（R0 已保证降级）。
 - **D4 — 新 capability `skill-matching`，不 MODIFIED `builtin-skills`**（镜像 S1 `native-skill-engine-bridge` / S3 `skill-curator-and-graded-promotion` 各自新 capability 的做法）。理由：本能力是**默认关的正交叠加**，不改写 `builtin-skills` 既有 REQUIREMENT（`listSkills` 合并去重/渐进加载/工作区覆盖等在默认关时逐字保持）；把「`@Tool` 字节稳定红线」「默认关零回归」作为**新能力自身的 REQUIREMENT** 承载，delta 自洽、不牵动 `builtin-skills` 主 spec。*备选*：MODIFIED `builtin-skills` 的「listSkills 合并去重」——否决，会把一条 opt-in 能力的行为塞进 always-on 主 spec，且需重述整条既有 requirement（openspec MODIFIED 要求全量重贴），得不偿失。
-- **D5 — config `skills.matching` 子块，默认关、字段全可选/默认安全**。`enabled`（默认 **false**）、`top-k`（默认 10）、`min-score`（默认 0.0）。挂在既有 `PigAgentConfig.SkillsConfig` 下（与 `autonomous`/`native`/`curator` 并列）。`enabled=false` → `AgentBootstrap` 注册无参 `listSkills` 变体、不装配任何匹配 seam。null/缺块安全（getter 归默认）、非法值 clamp（`top-k<1`→默认、`min-score` 负→0）。不引入向量/权重 config（D3，YAGNI）。
-- **D6 — 索引懒建 + 按"当前读栈"集合重建，无需节流**。技能集小、变更少（不像记忆语料按 mtime 频繁变），每次非空-query `listSkills` 对 `SkillRegistry.all()` 快照建一次 `Bm25Index`（镜像 `DeferredToolRegistry.search` 的"每次搜索建索引"，条目少、重建成本可忽略），避免维护跨调用缓存的复杂度与失效问题。排序输入始终与 `listSkills` 平铺看到的同一技能集**同源**（同一 `registry.all()`），故 top-K 是平铺集合的子集、去重/覆盖语义一致。
-- **D7 — 无匹配/空 query 的降级：回退平铺全部（不报错、不空）**。`enabled=true` 且 `query` 非空但无 in-vocab 命中时，`listSkills` 回退为**平铺全部**（而非 `"No skills found."` 或空）——保证技能始终可被模型发现、不因排序而"藏起来"（对小技能集这是最安全的 UX）。空/缺省 query 同样平铺全部。二者都复用今日平铺格式，边界字符串（`"No skills found."` 仅在**技能集本身为空**时）保持。
+- **D5 — config `skills.matching` 子块，默认关、字段全可选/默认安全**。`enabled`（默认 **false**）、`top-k`（默认 10）、`min-score`（默认 0.0）。挂在既有 `PigAgentConfig.SkillsConfig` 下（与 `autonomous`/`native`/`curator` 并列）。`enabled=false` → `AgentBootstrap` **不注册** `skill_search`、不装配任何匹配 seam。null/缺块安全（getter 归默认）、非法值 clamp（`top-k<1`→默认、`min-score` 负→0）。不引入向量/权重 config（D3，YAGNI）。
+- **D6 — 索引懒建 + 按"当前读栈"集合重建，无需节流**。技能集小、变更少（不像记忆语料按 mtime 频繁变），每次非空-query `skill_search` 对 `SkillRegistry.all()` 快照建一次 `Bm25Index`（镜像 `DeferredToolRegistry.search` 的"每次搜索建索引"，条目少、重建成本可忽略），避免维护跨调用缓存的复杂度与失效问题。排序输入始终与 `listSkills` 平铺看到的同一技能集**同源**（同一 `registry.all()`），故 top-K 是平铺集合的子集、去重/覆盖语义一致。
+- **D7 — 无匹配/空 query 的降级：回退平铺全部（不报错、不空）**。`skill_search` 的 query 非空但无 in-vocab 命中、或 query 为空时，回退为**平铺全部**（而非 `"No skills found."` 或空）——保证技能始终可被模型发现、不因排序而"藏起来"（对小技能集这是最安全的 UX）。复用与 `listSkills` 一致的平铺格式，边界字符串（`"No skills found."` 仅在**技能集本身为空**时）保持。
 
 ## 交叉依赖
 
@@ -60,14 +61,14 @@ pig 的技能读栈（capability `builtin-skills` + `composite-skill`，已在 m
 | **R0 `shared-retrieval`（已合并）** | 本 spec 消费其 `SearchDocument`/`Bm25Index`/`HybridRanker`/`Tokenizer` 做技能排序，**不改**其任何 REQUIREMENT。是 R0 delta「后续检索线只 import `core.search` 做 BM25 排序」场景的**第三个消费方**（定义 `SkillDocument implements SearchDocument`，只 import `io.pigagent.core.search`、不牵扯记忆域），兑现 R0「三线同源」——memory_search（M-A）/ tool_search（T2）/ skill matching（本 spec）**一套 ranker、一套分词**，同一 query 在三线排序口径一致、杜绝评分漂移。 |
 | **T2 `hybrid-tool-search-and-smart-defer`（已合并）** | **范式先例**：`SkillDocument` 逐点镜像 `ToolDocument`（`id`=名、`text`=名+描述+keywords、`HybridRanker` 空向量 BM25-only、CJK 分词）。无代码耦合（各自定义 `SearchDocument` 实现），仅复用同一内核包。 |
 | **S3 `skill-curator-and-graded-promotion`（已合并）** | **正交**：S3 管技能 **usage 分析 / 老化归档 / 分级晋级**（技能"新陈代谢"），本 spec 管**检索相关性匹配**。二者可叠加而不冲突：S3 的 `SkillUsageRecorder`/归档影响的是"哪些技能在读栈里"（`SkillRegistry.all()`），本 spec 只对"读栈里的技能"按 query 排序。**未来可组合排序**（相关性 × usage/新鲜度加权）是自然的下一步，但**本 spec 不做**（YAGNI，待真有需求）——现在只按相关性排。 |
-| **S1 `native-skill-engine-bridge` 的 `@Tool` 字节稳定红线** | 与 S1 一致：`SkillsTool` 的 `@Tool` 面（尤其 `loadSkill`）字节稳定；`listSkills` 名不变、默认关字节不变。本 spec 把这条红线作为自身 REQUIREMENT 明确承载。 |
+| **S1 `native-skill-engine-bridge` 的 `@Tool` 字节稳定红线** | 与 S1 一致：`SkillsTool` 的 `@Tool` 面（`listSkills`/`loadSkill`）在任何配置下字节稳定——本 spec 以**独立新工具** `skill_search` 暴露匹配、不动既有两个读栈工具，红线满足最强（`listSkills` 100% 不动）。本 spec 把这条红线作为自身 REQUIREMENT 明确承载。 |
 
 契约要点（供后续引用）：技能侧定义 `SkillDocument implements SearchDocument`（`id`=技能名、`text`=名+描述+keywords，源自廉价 `metadata()`、不读正文），经 `Bm25Index.index(List<? extends SearchDocument>)` + `HybridRanker.rank(...)`（向量权重 0 → BM25-only）排序；**不自造评分**。
 
 ## Risks / Trade-offs
 
 - **R1 — 排序质量 / 召回不足**。风险：BM25 对极短 query / 单 token 的排序对小技能集可能区分度低；纯关键词无语义（"调试崩溃" 未必命中 `systematic-debugging` 英文名）。→ `text` 纳入名+描述+**keywords**（内置技能 front-matter 已带 keywords，可补中文触发词提升召回）；`Tokenizer` 对名做 camelCase+CJK 切分；D7 无匹配回退平铺全部（永不"藏"技能）；tasks 加"更相关排前 + 中文命中"用例护栏。可接受的小差异：排序细节（非契约）。
-- **R2 —（backward-safe 命门）默认开或默认路径破坏 `listSkills` 字节稳定**。→ D2/D5：`enabled` 默认 **false** + 默认注册**无参** `listSkills` 变体（schema 与今日 100% 相同）；tasks 加"默认关时 `listSkills` 无 query 入参、输出与引入前逐字节等价 + `loadSkill` 不变"回归测试。
+- **R2 —（backward-safe 命门）默认开或默认路径破坏初始 schema 字节稳定**。→ D2/D5：`enabled` 默认 **false** + 默认**不注册** `skill_search`（schema 无该工具，与今日 100% 相同）；`listSkills`/`loadSkill` 是独立既有工具、根本不被本 spec 触碰；tasks 加"默认关时 schema 无 `skill_search` + `listSkills`/`loadSkill` 逐字不变"回归测试。
 - **R3 — 渐进加载回归（排序误读正文）**。风险：为排序去读 `Skill.content()` → 列举不再廉价（违 `builtin-skills` 渐进契约）。→ D1 硬约束 `SkillDocument.text` 只从 `metadata()` 构造；tasks 加"排序路径不触 `content()`"护栏（用会抛/被断言不应调用的 `content()` 探针）。
 - **R4 — 与 T2/M-A 的"同源"仅停留在 import 层，权重/降级各自漂移**。→ 三线都经 `HybridRanker` 同一融合出口；技能侧固定 BM25-only（D3，向量权重 0），不引入技能侧独立向量/权重 config（YAGNI）——口径一致由"同一 ranker + 同一 `Tokenizer`"保证。
 - **R5 — 每次搜索重建索引的成本**。风险：大技能集下每次非空-query 重建 `Bm25Index` 有成本。→ 技能集小（几十量级），重建成本可忽略（D6，与 `DeferredToolRegistry.search` 同思路）；若未来技能数量级暴涨再引入按读栈变更节流的缓存（另 spec）。
@@ -80,8 +81,9 @@ pig 的技能读栈（capability `builtin-skills` + `composite-skill`，已在 m
 | 原语可脱离记忆/工具语料索引技能元数据（承重） | Spike S1–S4 | 落 tasks 组 1（spike 验证） |
 | 复用 R0、不新增模块依赖 | Spike S4；D1 | 落 tasks 组 2 |
 | 技能匹配不接嵌入（BM25-only） | D3；Non-Goals；R4 | 落 tasks 组 2（`HybridRanker` 空向量） |
-| `listSkills` 可选 top-K，默认关逐字节不变（backward-safe 命门） | D2；D5；R2 | 落 tasks 组 3（config + 注册变体 + 回归测试） |
-| `SkillsTool` `@Tool` 面字节稳定（loadSkill 永不变、listSkills 名不变） | D2；交叉依赖(S1) | 落 delta spec（字节稳定 requirement）+ tasks 组 3 |
+| 独立 `skill_search` 工具，默认关不注册（backward-safe 命门） | D2；D5；R2 | 落 tasks 组 3（config + 条件注册 + 回归测试） |
+| `listSkills`/`loadSkill` `@Tool` 面任何配置下字节稳定 | D2；交叉依赖(S1) | 落 delta spec（字节稳定 requirement）+ tasks 组 3 |
+| `skill_search` 分级 READ_ONLY（对齐 tool_search/memory_search） | D2 | 落 tasks 组 3（`ToolRiskClassifier` 登记 + 用例） |
 | 排序只读 metadata 不触正文（渐进加载不回归） | D1；R3 | 落 tasks 组 2（渐进护栏用例） |
 | 无匹配/空 query 回退平铺（不报错不空） | D7 | 落 tasks 组 3 |
 | 与 S3 usage/老化正交、未来可组合排序（本 spec 不做） | 交叉依赖(S3)；Non-Goals | 记为正交 + 未来项（design 说明） |
