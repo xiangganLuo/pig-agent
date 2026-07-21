@@ -511,9 +511,15 @@ public final class AgentBootstrap {
         // native keyword-only scan. Default off → not registered → native keyword search unchanged
         // (byte-identical to before). Registered BEFORE the contract guard so it is guarded too.
         PigAgentConfig.SearchConfig searchCfg = config.getMemory().getSearch();
-        if (searchCfg.isHybridEnabled()) {
+        // M-B: resolve the embedder ONCE, then derive whether hybrid is on. hybrid-enabled is tri-state:
+        // unset (auto) = on iff an embedding model resolves (configured embedding model ⇒ hybrid by
+        // default); explicit true/false overrides. No embedder + auto → not registered → native
+        // keyword search unchanged (byte-identical). The resolved embedder is reused by the index
+        // (not re-resolved). Registered BEFORE the contract guard so it is guarded too.
+        Embedder searchEmbedder = resolveEmbedder(searchCfg.getEmbedderModelId(), modelManager);
+        if (searchCfg.resolveHybrid(searchEmbedder != null)) {
             MemorySearchIndex memoryIndex =
-                    buildMemorySearchIndex(searchCfg, workspace, userProfileFile, modelManager);
+                    buildMemorySearchIndex(searchCfg, workspace, userProfileFile, searchEmbedder);
             // memory-layering-and-decay (M-C, D2): feed a reuse signal from memory_search hits into the
             // decay recorder when layering-decay is on, so retrieved facts are reinforced against decay;
             // otherwise a no-op (recency-only decay). Store-backed recorder shares the curator's sidecar.
@@ -523,10 +529,10 @@ public final class AgentBootstrap {
                     : MemoryAccessRecorder.noop();
             toolkit.registration()
                     .tool(new HybridMemorySearchTool(memoryIndex, searchCfg.getTopK(), accessRecorder)).apply();
-            log.info("Hybrid memory search enabled (bm25 {}, vector {}, embedder {})",
+            log.info("Hybrid memory search enabled ({}; bm25 {}, vector {}, embedder {})",
+                    searchCfg.hasExplicitHybrid() ? "explicit" : "derived from embedding model",
                     searchCfg.getBm25Weight(), searchCfg.getVectorWeight(),
-                    searchCfg.getEmbedderModelId().isBlank()
-                            ? "none (BM25-only)" : searchCfg.getEmbedderModelId());
+                    searchEmbedder == null ? "none (BM25-only)" : "configured");
         }
 
         // Skill matching (skill-matching, S2): when skills.matching.enabled, register the independent
@@ -1110,16 +1116,15 @@ public final class AgentBootstrap {
     /**
      * Build the {@link MemorySearchIndex} for hybrid memory search ({@code hybrid-memory-search}) from
      * the {@code memory.search} config: corpus = workspace {@code MEMORY.md} + {@code memory/} ledger +
-     * {@code USER.md}; a pure-Java {@link InMemoryVectorStore}; and an optional real embedder resolved
-     * from {@code embedder-model-id} (blank/unresolvable → {@code null} → BM25-only). Called only when
-     * hybrid search is enabled.
+     * {@code USER.md}; a pure-Java {@link InMemoryVectorStore}; and the <b>already-resolved</b>
+     * {@code embedder} (M-B: resolved once at the assembly gate, {@code null} → BM25-only). Called only
+     * when hybrid search is enabled.
      */
     static MemorySearchIndex buildMemorySearchIndex(PigAgentConfig.SearchConfig cfg,
-            WorkspaceManager workspace, java.nio.file.Path userProfileFile, ModelManager modelManager) {
+            WorkspaceManager workspace, java.nio.file.Path userProfileFile, Embedder embedder) {
         java.nio.file.Path root = workspace.getRootPath();
         MemoryCorpusLoader loader = new MemoryCorpusLoader(
                 root.resolve("MEMORY.md"), root.resolve("memory"), userProfileFile);
-        Embedder embedder = resolveEmbedder(cfg.getEmbedderModelId(), modelManager);
         MemorySearchConfig settings = new MemorySearchConfig(
                 cfg.getBm25Weight(), cfg.getVectorWeight(), cfg.getCandidateMultiplier(),
                 cfg.getMinScore(), cfg.getTopK(), cfg.getRebuildThrottleSeconds() * 1000L);

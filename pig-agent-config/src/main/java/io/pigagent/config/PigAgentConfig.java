@@ -1,5 +1,6 @@
 package io.pigagent.config;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
@@ -454,7 +455,11 @@ public final class PigAgentConfig {
      * 全部可选、默认安全。
      */
     public static final class SearchConfig {
-        @JsonProperty("hybrid-enabled") private boolean hybridEnabled = false;
+        // Tri-state (M-B): null (unset, default) = auto → derive from embedder presence; TRUE/FALSE =
+        // explicit override. NON_NULL so an unset value is omitted on write (stays auto on read back);
+        // a legacy explicit true/false is read back verbatim (backward compatible).
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonProperty("hybrid-enabled") private Boolean hybridEnabled = null;
         @JsonProperty("bm25-weight") private double bm25Weight = 0.7;
         @JsonProperty("vector-weight") private double vectorWeight = 0.3;
         @JsonProperty("embedder-model-id") private String embedderModelId = "";
@@ -463,8 +468,21 @@ public final class PigAgentConfig {
         @JsonProperty("top-k") private int topK = 8;
         @JsonProperty("rebuild-throttle-seconds") private int rebuildThrottleSeconds = 5;
 
-        public boolean isHybridEnabled() { return hybridEnabled; }
-        public void setHybridEnabled(boolean e) { this.hybridEnabled = e; }
+        /** Raw override: {@code null} = auto (derive), {@code TRUE}/{@code FALSE} = explicit. */
+        public Boolean getHybridEnabled() { return hybridEnabled; }
+        public void setHybridEnabled(Boolean e) { this.hybridEnabled = e; }
+
+        /** True when hybrid was explicitly set (so the derive is overridden). */
+        public boolean hasExplicitHybrid() { return hybridEnabled != null; }
+
+        /**
+         * Effective hybrid enablement (pure, deterministic): the explicit override when set, else
+         * derived from {@code embedderPresent} — configured embedding model ⇒ hybrid on by default,
+         * no embedder ⇒ BM25-only (today's behavior, zero regression).
+         */
+        public boolean resolveHybrid(boolean embedderPresent) {
+            return hybridEnabled != null ? hybridEnabled : embedderPresent;
+        }
         public double getBm25Weight() { return bm25Weight; }
         public void setBm25Weight(double w) { this.bm25Weight = w; }
         public double getVectorWeight() { return vectorWeight; }

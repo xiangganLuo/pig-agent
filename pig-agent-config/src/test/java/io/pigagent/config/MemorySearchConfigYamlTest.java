@@ -15,9 +15,11 @@ class MemorySearchConfigYamlTest {
     private final ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
 
     @Test
-    void defaultsAreDisabledAndBm25Heavy() {
+    void defaultsAreAutoAndBm25Heavy() {
         PigAgentConfig.SearchConfig s = new PigAgentConfig().getMemory().getSearch();
-        assertThat(s.isHybridEnabled()).isFalse(); // default OFF → today's keyword search unchanged
+        // M-B: default is auto (unset) → derive; no embedder → BM25-only (today's keyword search)
+        assertThat(s.getHybridEnabled()).isNull();
+        assertThat(s.resolveHybrid(false)).isFalse();
         assertThat(s.getBm25Weight()).isEqualTo(0.7);
         assertThat(s.getVectorWeight()).isEqualTo(0.3);
         assertThat(s.getEmbedderModelId()).isEmpty();
@@ -30,7 +32,7 @@ class MemorySearchConfigYamlTest {
     @Test
     void missingSearchBlockYieldsDefaults() throws Exception {
         PigAgentConfig cfg = yaml.readValue("memory:\n  flush: always\n", PigAgentConfig.class);
-        assertThat(cfg.getMemory().getSearch().isHybridEnabled()).isFalse();
+        assertThat(cfg.getMemory().getSearch().getHybridEnabled()).isNull(); // auto (derive)
         assertThat(cfg.getMemory().getSearch().getBm25Weight()).isEqualTo(0.7);
     }
 
@@ -49,7 +51,7 @@ class MemorySearchConfigYamlTest {
                     rebuild-throttle-seconds: 10
                 """;
         PigAgentConfig.SearchConfig s = yaml.readValue(src, PigAgentConfig.class).getMemory().getSearch();
-        assertThat(s.isHybridEnabled()).isTrue();
+        assertThat(s.getHybridEnabled()).isTrue(); // explicit true read back verbatim
         assertThat(s.getBm25Weight()).isEqualTo(0.6);
         assertThat(s.getVectorWeight()).isEqualTo(0.4);
         assertThat(s.getEmbedderModelId()).isEqualTo("doubao-embedding");
