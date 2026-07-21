@@ -82,9 +82,17 @@ public final class ProfileConsolidationService {
             }
             String distilled = distiller.distill(current, memory);
             if (distilled == null || distilled.isBlank()) {
-                return false; // distiller declined — keep the existing profile
+                return false; // distiller declined (or no cheap model resolvable) — keep the existing profile
             }
-            boolean written = store.write(distilled);
+            // Conservative, model-free pre-filter (M-E): drop free-form/out-of-whitelist content before
+            // it can land in the injected USER.md; SecretRedactor (in store.write) stacks on top. No
+            // conforming field → treat as a decline (existing profile left intact).
+            String kept = DistilledProfileGuard.filter(distilled);
+            if (kept.isBlank()) {
+                log.debug("Distilled profile had no conforming identity/preference fields — keeping existing profile");
+                return false;
+            }
+            boolean written = store.write(kept);
             if (written) {
                 log.info("User profile consolidated into {}", store.path());
             }

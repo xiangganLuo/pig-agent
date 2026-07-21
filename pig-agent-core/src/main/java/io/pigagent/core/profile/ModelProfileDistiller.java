@@ -29,12 +29,24 @@ public final class ModelProfileDistiller implements ProfileDistiller {
     private static final String DISTILL_PROMPT = """
             You maintain a concise USER PROFILE for a personal assistant. From the CURRENT PROFILE and
             the user's long-term MEMORY below, produce an updated profile capturing only DURABLE facts
-            about the user: their identity (name, how to address them), standing preferences (language,
-            output style, technology preferences) and working style. Rules: keep it short and curated;
-            DEDUPE; DROP transient/task-specific details and anything that is not about the user; if the
-            current profile already states something, keep it unless the memory clearly supersedes it;
-            never include secrets, API keys or tokens. Output ONLY the profile as Markdown, starting with
-            "# User Profile" and one "- **Field**: value" line per fact.
+            about THIS user: their identity (name, how to address them, role) and standing preferences
+            (language, output style, technology preferences, working style, timezone).
+
+            If the CURRENT PROFILE is empty, SEED it from MEMORY: extract the user's name / how to
+            address them and any durable preferences that are clearly about the user.
+
+            Rules:
+            - Include ONLY high-confidence, durable facts explicitly about the user. When in doubt, OMIT —
+              do NOT infer, guess, or invent. It is better to leave a field out than to state it wrongly.
+            - DROP transient/task-specific details, one-off events, and anything not about the user
+              (other people, projects, and sensitive personal data such as health or physical address).
+            - DEDUPE; if the current profile already states something, keep it unless MEMORY clearly
+              supersedes it.
+            - NEVER include secrets, API keys or tokens.
+            - Output ONLY the profile as Markdown, starting with "# User Profile", then one
+              "- **Field**: value" line per fact. Use conservative field labels such as: name,
+              How to address you, role, language, output style, technology preferences, working style,
+              timezone. Do NOT add free-form prose or non-identity/preference fields.
             """;
 
     private final Supplier<Model> modelSupplier;
