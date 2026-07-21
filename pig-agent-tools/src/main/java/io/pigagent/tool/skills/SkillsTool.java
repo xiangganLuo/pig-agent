@@ -72,6 +72,15 @@ public final class SkillsTool {
                 new ClasspathSkillSource())));
     }
 
+    /**
+     * The composed {@link SkillRegistry} backing this tool. NOT a {@code @Tool} method — exposed so the
+     * optional {@code skill_search} tool (skill-matching, S2) can rank the <em>same</em> skill set
+     * {@code listSkills} lists (shared registry ⇒ ranking and listing never diverge).
+     */
+    public SkillRegistry registry() {
+        return registry;
+    }
+
     @Tool(description = "List available skills from the skills directory", readOnly = true)
     public String listSkills() {
         List<Skill> skills = registry.all();
