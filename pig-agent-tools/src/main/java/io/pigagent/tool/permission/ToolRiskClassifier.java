@@ -9,6 +9,9 @@ import java.util.Map;
  */
 public final class ToolRiskClassifier {
 
+    /** MCP 命名空间工具名前缀（{@code mcp__server__tool}，T4）。 */
+    private static final String MCP_NAMESPACE_PREFIX = "mcp__";
+
     // 本表是「工具名 → 风险」的中央目录，与工具物理所在模块解耦（字符串键，无编译期反向依赖）：
     // 即便工具住在别的模块（如 pig-agent-plugin-builtin 的 webSearch/fetchUrl 与计算工具），仍在此登记分级。
     private static final Map<String, ToolRisk> DEFAULTS = Map.ofEntries(
@@ -87,6 +90,13 @@ public final class ToolRiskClassifier {
                     // 非法覆盖值 → 落到默认表
                 }
             }
+        }
+        // T4（命名空间感知，安全）：命名空间 MCP 工具（mcp__server__tool）只按<b>完整名</b>分类——上面的
+        // overrides 已按完整名匹配；此处 fail-safe 到 EXEC，且 MUST NOT 回落 base 名去查内置表（否则某
+        // 服务器把可变工具命名为 "readFile" 会被误继承 READ_ONLY，构成冒充/提权）。行为与 getOrDefault 一致
+        // （命名空间名不在内置表），此显式分支使该安全保证永久、自证。
+        if (toolName.startsWith(MCP_NAMESPACE_PREFIX)) {
+            return ToolRisk.EXEC;
         }
         return DEFAULTS.getOrDefault(toolName, ToolRisk.EXEC);
     }

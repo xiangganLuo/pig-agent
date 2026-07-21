@@ -1,5 +1,6 @@
 package io.pigagent.mcp;
 
+import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
@@ -23,7 +24,13 @@ import java.util.Set;
  *
  * <p>并发（E1 细粒度锁）：网络/进程连接（{@code connect} / {@code listTools}）在锁外；
  * 仅"碰撞检查 + register + 写 map"的短临界区在 {@code synchronized(this)} 内，避免慢连接冻结
- * 其他 MCP 操作或对话回合。工具命名空间扁平（D-NS），新增时若工具名与已注册冲突即拒绝。
+ * 其他 MCP 操作或对话回合。
+ *
+ * <p><b>命名空间（T4）</b>：无撞名服务器以原始工具名扁平注册（原生 {@code registerMcpClient}，逐字节
+ * 向后兼容）；某服务器任一工具名与已注册工具撞名时，该服务器整体以 {@code mcp__server__tool} 命名空间
+ * 注册（{@link NamespacedMcpTool} 装饰器）共存——多 server 同名工具不再互斥。命名空间工具由本类自管移除
+ * （{@code removeTool}，因装饰器不带 {@code mcpClientName}）；每个服务器的工具分入 active 能力包
+ * {@code mcp:<server>}（schema-neutral）。
  *
  * <p>持久化委托 {@link McpStore}（{@code mcp.json}）；{@code application.yaml} 的旧
  * {@code mcp.servers} 在首启一次性导入。
@@ -40,13 +47,21 @@ public final class McpManager {
     /** 正在添加/连接中的 name（占位防并发重名，L-1），受 {@code this} 锁保护。 */
     private final Set<String> pending = new HashSet<>();
     /**
-     * 可选（deferred-tools）：服务器名 → tool-group 名。为 null（默认）时零行为变化——MCP 工具照旧
-     * 未分组注册。非 null 时 attach 把该服务器的工具注册进 {@code active} 分组，供 {@code DeferredToolGate}
-     * 按需停用以隐藏（延迟）；这样延迟对 MCP 安全（保留 {@code mcpClientName}，{@code removeMcpClient} 照常）。
+     * 可选（deferred-tools）：服务器名 → tool-group 名的<b>覆盖</b>函数。为 null（默认）时 {@link #groupFor}
+     * 回退到 {@code mcp:<server>}（T4 组4：无条件按服务器分组，能力包单元；active 组 schema-neutral）。非 null
+     * 时用其返回值作分组名，供 {@code DeferredToolGate} 按需停用以隐藏（延迟）；分组保留 {@code mcpClientName}
+     * （{@code removeMcpClient} 对无撞名服务器照常）。
      */
     private java.util.function.Function<String, String> toolGroupNamer;
     /** attach 时创建过的 tool-group 名（供上层枚举 MCP 工具→分组），受 {@code this} 锁保护。 */
     private final Set<String> managedGroups = new java.util.LinkedHashSet<>();
+    /**
+     * 命名空间化服务器（T4）：服务器名 → 其命名空间工具名列表（{@code mcp__server__tool}）。仅当某服务器
+     * 的工具名与已注册工具撞名时该服务器整体命名空间化（{@link NamespacedMcpTool} 经 {@code agentTool} 注册，
+     * <b>不</b>携带原生 {@code mcpClientName}），故其热移除须由本类按登记名 {@code removeTool}，而非
+     * {@code removeMcpClient}。无撞名服务器不入此表、仍走原生 {@code removeMcpClient}。受 {@code this} 锁保护。
+     */
+    private final Map<String, List<String>> namespacedTools = new LinkedHashMap<>();
     /**
      * 可选（M-2）：运行时工具集变化（{@code /mcp add|remove|enable|disable|edit}）后的回调。CLI 用它在
      * 新增 MCP 工具后重建交互/渠道 agent 的原生权限上下文（{@code PermissionContextState} 在 build 时
@@ -83,6 +98,11 @@ public final class McpManager {
     /** attach 期创建的 MCP tool-group 名快照（未启用分组时为空）。 */
     public synchronized Set<String> managedToolGroups() {
         return new java.util.LinkedHashSet<>(managedGroups);
+    }
+
+    /** T4：已被命名空间化（撞名共存）的服务器名快照；无撞名服务器不在其中。 */
+    public synchronized Set<String> namespacedServers() {
+        return new java.util.LinkedHashSet<>(namespacedTools.keySet());
     }
 
     /** 连通测试结果。 */
@@ -171,7 +191,7 @@ public final class McpManager {
         synchronized (this) {
             toClose = clients.remove(name);
             if (toClose != null) {
-                toolkit.removeMcpClient(name).block(DEFAULT_TIMEOUT);
+                unregisterServerTools(name);
             }
         }
         if (toClose != null) {
@@ -245,7 +265,7 @@ public final class McpManager {
         synchronized (this) {
             toClose = clients.remove(name);
             if (toClose != null) {
-                toolkit.removeMcpClient(name).block(DEFAULT_TIMEOUT);
+                unregisterServerTools(name);
             }
         }
         if (toClose != null) {
@@ -323,14 +343,13 @@ public final class McpManager {
         }
         try {
             synchronized (this) {
-                Set<String> existing = toolkit.getToolNames();
-                for (String tn : incoming) {
-                    if (existing.contains(tn)) {
-                        throw new IllegalStateException(
-                                "工具名冲突: '" + tn + "' 已被其他 MCP 服务器注册（扁平命名空间，拒绝添加）");
-                    }
+                if (collidesWithRegistered(incoming)) {
+                    // T4: 撞名不再整服务器拒绝，而是把该服务器全部工具命名空间化（mcp__server__tool）共存。
+                    // 命名空间工具经装饰器注册、不带原生 mcpClientName，故其移除由本类自管（见 unregisterServerTools）。
+                    registerNamespacedTools(spec.name(), listRawMcpTools(client));
+                } else {
+                    registerClient(client, spec.name());
                 }
-                registerClient(client, spec.name());
                 clients.put(spec.name(), client);
             }
         } catch (RuntimeException e) {
@@ -339,21 +358,96 @@ public final class McpManager {
         }
     }
 
+    /** 是否有 incoming 工具名与已注册工具撞名（须在 {@code synchronized(this)} 内调用）。 */
+    private boolean collidesWithRegistered(List<String> incoming) {
+        Set<String> existing = toolkit.getToolNames();
+        for (String tn : incoming) {
+            if (existing.contains(tn)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
-     * 注册 client：默认（无分组函数）走 {@code registerMcpClient}（带超时，逐字节旧行为）；启用分组时
-     * 先确保 {@code active} 分组存在，再经 {@code registration().mcpClient(...).group(g)} 注册——保留
-     * {@code mcpClientName}（{@code removeMcpClient} 热移除照常）。须在 {@code synchronized(this)} 内调用。
+     * 注册无撞名服务器（原生扁平路径，逐字节向后兼容）：经 {@code registration().mcpClient(...).group(g)}
+     * 注册——保留 {@code mcpClientName}（{@code removeMcpClient} 热移除照常）。工具名不变（原始名）。
+     * <b>T4 组4</b>：无条件把工具分入 active 的 {@code mcp:<server>} 能力包（{@link #groupFor}）——active 组
+     * 对模型 schema 是 schema-neutral，默认逐字节无感。须在 {@code synchronized(this)} 内调用。
      */
     private void registerClient(McpClientWrapper client, String serverName) {
-        String group = toolGroupNamer == null ? null : toolGroupNamer.apply(serverName);
-        if (group == null || group.isBlank()) {
-            toolkit.registerMcpClient(client).block(DEFAULT_TIMEOUT);
-            return;
+        String group = groupFor(serverName);
+        ensureGroup(group, serverName);
+        toolkit.registration().mcpClient(client).group(group).apply();
+    }
+
+    /**
+     * 注册撞名服务器（命名空间路径，T4）：把每个原始工具包成 {@link NamespacedMcpTool}（{@code mcp__server__tool}）
+     * 经 {@code registration().agentTool(...).group(g)} 注册进该服务器的能力包，并登记命名空间名供自管移除。
+     * 装饰器路径<b>不</b>携带 {@code mcpClientName}，故不可用 {@code removeMcpClient} 热移除。
+     * 包私有以便离线单测（用简单委托工具驱动，无需真实连接）。须在 {@code synchronized(this)} 内调用。
+     */
+    void registerNamespacedTools(String serverName, List<AgentTool> rawTools) {
+        String group = groupFor(serverName);
+        ensureGroup(group, serverName);
+        List<String> names = new ArrayList<>();
+        for (AgentTool raw : rawTools) {
+            NamespacedMcpTool ns = new NamespacedMcpTool(raw, serverName);
+            toolkit.registration().agentTool(ns).group(group).apply();
+            names.add(ns.getName());
         }
+        namespacedTools.put(serverName, names);
+    }
+
+    /**
+     * 注销某服务器的工具（须在 {@code synchronized(this)} 内调用）：命名空间服务器 → 按登记名逐个
+     * {@code removeTool}（原生 {@code removeMcpClient} 对它无效，见 {@link #namespacedTools}）；无撞名服务器
+     * → 原生 {@code removeMcpClient}（逐字节旧行为）。
+     */
+    void unregisterServerTools(String serverName) {
+        List<String> ns = namespacedTools.remove(serverName);
+        if (ns != null) {
+            for (String name : ns) {
+                toolkit.removeTool(name);
+            }
+        } else {
+            toolkit.removeMcpClient(serverName).block(DEFAULT_TIMEOUT);
+        }
+    }
+
+    /** 从已连接 client 取原生 {@code McpTool} 实例（经临时 Toolkit 复用框架构造：readOnly/参数/输出 schema 保真）。 */
+    private List<AgentTool> listRawMcpTools(McpClientWrapper client) {
+        Toolkit scratch = new Toolkit();
+        scratch.registerMcpClient(client).block(DEFAULT_TIMEOUT);
+        List<AgentTool> raw = new ArrayList<>();
+        for (String name : scratch.getToolNames()) {
+            AgentTool t = scratch.getTool(name);
+            if (t != null) {
+                raw.add(t);
+            }
+        }
+        return raw;
+    }
+
+    /**
+     * 该服务器的能力包（tool-group）名（T4 组4）：优先注入的 {@link #toolGroupNamer}（deferred 兼容），
+     * 否则默认 {@code mcp:<server>}——每个 MCP 服务器即一个可整组启停的能力包。
+     */
+    private String groupFor(String serverName) {
+        if (toolGroupNamer != null) {
+            String g = toolGroupNamer.apply(serverName);
+            if (g != null && !g.isBlank()) {
+                return g;
+            }
+        }
+        return "mcp:" + serverName;
+    }
+
+    /** 确保 active 分组存在并登记（须在 {@code synchronized(this)} 内调用）。 */
+    private void ensureGroup(String group, String serverName) {
         if (toolkit.getToolGroup(group) == null) {
             toolkit.createToolGroup(group, "MCP server: " + serverName, true);
         }
-        toolkit.registration().mcpClient(client).group(group).apply();
         managedGroups.add(group);
     }
 
