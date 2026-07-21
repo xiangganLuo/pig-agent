@@ -4,6 +4,7 @@ import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.tool.AgentTool;
+import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -125,5 +126,33 @@ class GuardedAgentToolTest {
         assertThat(guarded.getName()).isEqualTo("boom");
         assertThat(guarded.getDescription()).isEqualTo("desc-boom");
         assertThat(guarded.getParameters()).containsEntry("k", "v");
+    }
+
+    /**
+     * Regression for the transposed-boolean bug: {@code ToolBase}'s 9-arg positional ctor orders its
+     * booleans {@code readOnly, concurrencySafe, mcp, mcpName, externalTool, stateInjected}. An earlier
+     * revision passed them in a different order, so {@code guarded.isReadOnly()} actually returned the
+     * delegate's {@code concurrencySafe} and {@code isMcp()} returned {@code externalTool} — which
+     * corrupts the plan/EXPLORE read-only gate that keys on {@code isReadOnly()}. Distinct flag values
+     * (readOnly=true, concurrencySafe=false, externalTool=true) make the transposition observable.
+     */
+    @Test
+    void preservesToolBaseFlags_noBooleanTransposition() {
+        ToolBase delegate = new ToolBase(ToolBase.builder()
+                .name("ro").description("d").inputSchema(Map.of("k", "v"))
+                .readOnly(true).concurrencySafe(false).externalTool(true).stateInjected(false)) {
+            @Override
+            public Mono<ToolResultBlock> callAsync(ToolCallParam p) {
+                return Mono.empty();
+            }
+        };
+
+        GuardedAgentTool guarded = new GuardedAgentTool(delegate);
+
+        assertThat(guarded.isReadOnly()).as("isReadOnly must be readOnly, not concurrencySafe").isTrue();
+        assertThat(guarded.isConcurrencySafe()).isFalse();
+        assertThat(guarded.isExternalTool()).as("isExternalTool must not be stateInjected").isTrue();
+        assertThat(guarded.isMcp()).as("isMcp must not be externalTool").isFalse();
+        assertThat(guarded.isStateInjected()).isFalse();
     }
 }

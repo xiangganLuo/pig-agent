@@ -44,10 +44,33 @@ public final class GuardedAgentTool extends ToolBase {
     private final AgentTool delegate;
 
     public GuardedAgentTool(AgentTool delegate) {
-        super(Objects.requireNonNull(delegate, "delegate").getName(), delegate.getDescription(),
-                delegate.getParameters(), concurrencySafe(delegate), delegate.isReadOnly(),
-                externalTool(delegate), mcpName(delegate), stateInjected(delegate), mcp(delegate));
+        super(baseBuilder(Objects.requireNonNull(delegate, "delegate")));
         this.delegate = delegate;
+    }
+
+    /**
+     * Snapshot the delegate's schema + {@code ToolBase} flags through the <b>named builder</b> so every
+     * flag lands in the right field. The 9-arg positional {@code ToolBase(...)} ctor orders its booleans
+     * {@code readOnly, concurrencySafe, mcp, mcpName, externalTool, stateInjected}; an earlier revision
+     * called it in the wrong order, so {@code guarded.isReadOnly()} actually returned the delegate's
+     * {@code concurrencySafe} and {@code isMcp()} returned {@code externalTool} — a P0 correctness bug
+     * because the plan/EXPLORE read-only gate keys on {@code isReadOnly()}. The builder is order-safe.
+     */
+    private static ToolBase.Builder baseBuilder(AgentTool d) {
+        ToolBase.Builder b = ToolBase.builder()
+                .name(d.getName())
+                .description(d.getDescription())
+                .inputSchema(d.getParameters())
+                .readOnly(d.isReadOnly())
+                .concurrencySafe(concurrencySafe(d))
+                .externalTool(externalTool(d))
+                .stateInjected(stateInjected(d));
+        // Guard is installed before MCP servers attach, so this never triggers in practice; preserved
+        // defensively so an (unexpected) MCP delegate keeps its identity.
+        if (mcp(d) && mcpName(d) != null) {
+            b.mcp(mcpName(d));
+        }
+        return b;
     }
 
     /** The wrapped tool (exposed so callers can avoid double-wrapping). */
