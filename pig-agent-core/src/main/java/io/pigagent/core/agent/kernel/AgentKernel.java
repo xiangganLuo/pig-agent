@@ -65,6 +65,14 @@ public final class AgentKernel {
      */
     private volatile Supplier<List<ToolInventoryEntry>> toolInventoryProvider;
 
+    /**
+     * Runtime tool-management seam ({@code tools-observability}, T3), injected by the wiring layer.
+     * {@code null} (default) → {@link #toolAdmin()} is empty, so {@code /tools} management actions
+     * report "unavailable" and a kernel built without observability wiring is unaffected. Volatile
+     * because it is set once after construction and read from any thread.
+     */
+    private volatile ToolAdmin toolAdmin;
+
     public AgentKernel(AgentRegistry registry, AgentSpecRepository repository,
                        AgentInstanceFactory instanceFactory, AgentRunner runner) {
         this(registry, repository, instanceFactory, runner, new InterruptController());
@@ -321,6 +329,16 @@ public final class AgentKernel {
         }
         List<ToolInventoryEntry> out = provider.get();
         return out == null ? List.of() : out;
+    }
+
+    /** Install the runtime tool-management seam (see {@link ToolAdmin}). */
+    public void setToolAdmin(ToolAdmin toolAdmin) {
+        this.toolAdmin = toolAdmin;
+    }
+
+    /** The runtime tool-management seam, if wired — the entry point for {@code /tools} management. */
+    public Optional<ToolAdmin> toolAdmin() {
+        return Optional.ofNullable(toolAdmin);
     }
 
     /** Subscribe to kernel lifecycle events (hot, multicast). */

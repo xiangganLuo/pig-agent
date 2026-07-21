@@ -804,6 +804,7 @@ public final class PigAgentConfig {
         @JsonProperty("web") private WebToolConfig web = new WebToolConfig();
         @JsonProperty("deferred") private DeferredToolsConfig deferred = new DeferredToolsConfig();
         @JsonProperty("result-eviction") private ResultEvictionConfig resultEviction = new ResultEvictionConfig();
+        @JsonProperty("metrics") private ToolMetricsConfig metrics = new ToolMetricsConfig();
         public WebToolConfig getWeb() { return web; }
         public void setWeb(WebToolConfig w) { this.web = w; }
         public DeferredToolsConfig getDeferred() { return deferred; }
@@ -814,6 +815,23 @@ public final class PigAgentConfig {
         public void setResultEviction(ResultEvictionConfig r) {
             this.resultEviction = r == null ? new ResultEvictionConfig() : r;
         }
+        public ToolMetricsConfig getMetrics() { return metrics; }
+        public void setMetrics(ToolMetricsConfig m) {
+            this.metrics = m == null ? new ToolMetricsConfig() : m;
+        }
+    }
+
+    /**
+     * per-tool 度量（{@code tools.metrics}，{@code tools-observability} / T3）配置。默认
+     * {@code enabled=true} 且**纯观察 additive**：接入一个只旁路记数的 metrics middleware，按工具名聚合
+     * 调用数/延迟/错误率（供 {@code /tools} 查询），<b>不改</b> acting 输入/工具结果/既有日志行为、度量键仅
+     * 工具名（凭据/入参绝不入）。{@code enabled=false} 则不接入 metrics middleware（零开销，逐字节无感）。
+     * 度量为进程内内存态，重启清零——是即时排障线索，非持久审计日志。全部可选、默认安全、向后兼容。
+     */
+    public static final class ToolMetricsConfig {
+        @JsonProperty("enabled") private boolean enabled = true;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
     }
 
     /**

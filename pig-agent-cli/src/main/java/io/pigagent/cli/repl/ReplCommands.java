@@ -10,6 +10,7 @@ import io.pigagent.cli.repl.command.NotifyCommand;
 import io.pigagent.cli.repl.command.PermissionCommand;
 import io.pigagent.cli.repl.command.PlanCommand;
 import io.pigagent.cli.repl.command.SkillCommand;
+import io.pigagent.cli.repl.command.ToolsCommand;
 import io.pigagent.config.PigAgentConfig;
 import io.pigagent.core.compression.CompressionStatus;
 import io.pigagent.core.protocol.ModelProtocol;
@@ -71,6 +72,7 @@ public final class ReplCommands {
         cmd.addSubcommand(new ChannelCommand(ctx));
         cmd.addSubcommand(new SessionCommand(ctx));
         cmd.addSubcommand(new McpCommand(ctx));
+        cmd.addSubcommand(new ToolsCommand(ctx));
         cmd.addSubcommand(new PermissionCommand(ctx));
         cmd.addSubcommand(new PlanCommand(ctx));
         cmd.addSubcommand(new MemoryCommand(ctx));
@@ -114,6 +116,7 @@ public final class ReplCommands {
             entry(t, "/channel <action>", "Manage channels (list|add|remove|enable|disable|test)");
             entry(t, "/session <action>", "Manage sessions (list|new|fork|switch|rename|clear|delete)");
             entry(t, "/mcp <action>", "Manage MCP servers (list|add|remove|edit|enable|disable|test)");
+            entry(t, "/tools <action>", "Inspect/manage tools (list|info|enable|disable|groups|refresh)");
             entry(t, "/permission <action>", "Tool permissions (status|mode|channel-mode|allow|revoke|reset|list)");
             entry(t, "/plan <action>", "Native Plan Mode (enter|exit|status)");
             entry(t, "/memory <on|off>", "Toggle/show native long-term memory (MEMORY.md)");
