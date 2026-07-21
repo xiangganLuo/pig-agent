@@ -60,6 +60,12 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void skillSearchIsReadOnly() {
+        // skill-matching (S2): skill_search 只按 query 排序技能元数据，必须只读（对齐 tool_search/memory_search）
+        assertThat(ToolRiskClassifier.classify("skill_search", Map.of())).isEqualTo(ToolRisk.READ_ONLY);
+    }
+
+    @Test
     void unknownToolDefaultsToExecFailSafe() {
         assertThat(ToolRiskClassifier.classify("someRandomTool", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify(null, Map.of())).isEqualTo(ToolRisk.EXEC);

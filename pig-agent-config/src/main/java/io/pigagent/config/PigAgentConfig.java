@@ -380,6 +380,7 @@ public final class PigAgentConfig {
         @JsonProperty("autonomous") private AutonomousSkillsConfig autonomous = new AutonomousSkillsConfig();
         @JsonProperty("native") private NativeSkillConfig nativeSkills = new NativeSkillConfig();
         @JsonProperty("curator") private CuratorConfig curator = new CuratorConfig();
+        @JsonProperty("matching") private MatchingSkillsConfig matching = new MatchingSkillsConfig();
         public AutonomousSkillsConfig getAutonomous() { return autonomous; }
         public void setAutonomous(AutonomousSkillsConfig a) {
             this.autonomous = a == null ? new AutonomousSkillsConfig() : a;
@@ -392,6 +393,30 @@ public final class PigAgentConfig {
         public void setCurator(CuratorConfig c) {
             this.curator = c == null ? new CuratorConfig() : c;
         }
+        public MatchingSkillsConfig getMatching() { return matching; }
+        public void setMatching(MatchingSkillsConfig m) {
+            this.matching = m == null ? new MatchingSkillsConfig() : m;
+        }
+    }
+
+    /**
+     * {@code skills.matching} 子块（skill-matching，S2）。技能语义匹配：独立只读工具 {@code skill_search}
+     * 经内核共享检索原语（BM25 + CJK 分词）按 query 排序技能，返回 top-K。
+     *
+     * <p><b>默认 {@code enabled=false}</b> → {@code AgentBootstrap} 不注册 {@code skill_search}、初始工具
+     * schema 逐字节等价今天，{@code listSkills}/{@code loadSkill} 完全不动。全部字段可选、null/缺块安全、
+     * 非法数值 clamp（{@code top-k<1}→默认、{@code min-score} 负→0）。
+     */
+    public static final class MatchingSkillsConfig {
+        @JsonProperty("enabled") private boolean enabled = false;
+        @JsonProperty("top-k") private int topK = 10;
+        @JsonProperty("min-score") private double minScore = 0.0;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean e) { this.enabled = e; }
+        public int getTopK() { return topK; }
+        public void setTopK(int k) { this.topK = k < 1 ? 10 : k; }
+        public double getMinScore() { return minScore; }
+        public void setMinScore(double m) { this.minScore = m < 0 ? 0.0 : m; }
     }
 
     /** {@code skills.autonomous} 子块。缺省全安全（关闭 + {@code .pending} 暂存 + 不自动提升）。 */

@@ -26,6 +26,8 @@ public final class ToolRiskClassifier {
             Map.entry("showChecklist", ToolRisk.READ_ONLY),
             // 延迟工具发现（deferred-tools）——只读：仅搜索/揭示元数据，不改任何状态
             Map.entry("tool_search", ToolRisk.READ_ONLY),
+            // 技能语义匹配（skill-matching）——只读：按 query 排序技能元数据，不改任何状态
+            Map.entry("skill_search", ToolRisk.READ_ONLY),
             // 原生两层记忆检索（pa-memory-native）——只读：扫固化层/日志层、读行区间、搜历史转录
             Map.entry("memory_search", ToolRisk.READ_ONLY),
             Map.entry("memory_get", ToolRisk.READ_ONLY),

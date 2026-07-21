@@ -109,6 +109,7 @@ import io.pigagent.tool.skills.ClasspathSkillSource;
 import io.pigagent.tool.skills.NativeRepositorySkillSource;
 import io.pigagent.tool.skills.SkillLimits;
 import io.pigagent.tool.skills.SkillRegistry;
+import io.pigagent.tool.skills.SkillSearchTool;
 import io.pigagent.tool.skills.SkillSource;
 import io.pigagent.tool.skills.SkillsTool;
 import io.pigagent.tool.skills.WorkspaceSkillSource;
@@ -504,6 +505,14 @@ public final class AgentBootstrap {
                     searchCfg.getEmbedderModelId().isBlank()
                             ? "none (BM25-only)" : searchCfg.getEmbedderModelId());
         }
+
+        // Skill matching (skill-matching, S2): when skills.matching.enabled, register the independent
+        // read-only `skill_search` tool sharing the SkillsTool's SkillRegistry (so ranking sees the exact
+        // same skill set listSkills lists). It ranks skills via the shared kernel retrieval primitives
+        // (io.pigagent.core.search: BM25 + CJK tokenizer), the same ranker memory_search/tool_search use.
+        // Default off → NOT registered → initial schema byte-identical, listSkills/loadSkill untouched
+        // (mirrors tool_search). Registered BEFORE the contract guard so it is guarded + READ_ONLY-gated.
+        applySkillMatching(toolkit, builtinTools, config.getSkills().getMatching());
 
         // Dispatch-layer contract guard (tool-json-contract): wrap every built-in tool so any
         // exception a tool lets escape becomes a canonical {"error":...} result instead of aborting
@@ -1164,6 +1173,32 @@ public final class AgentBootstrap {
         DeferredToolGate.applyTo(toolkit, plan, inventory, registry);
         log.info("Deferred tools: {} hidden from initial schema (searchable via tool_search)",
                 registry.deferredNames().size());
+    }
+
+    /**
+     * Skill matching (skill-matching, S2): register the independent read-only {@code skill_search} tool
+     * only when {@code skills.matching.enabled}. It shares the {@link SkillsTool}'s {@link SkillRegistry}
+     * (via {@code registry()}) so it ranks the exact same skill set {@code listSkills} lists. Default off
+     * → not registered → initial schema is byte-identical and {@code listSkills}/{@code loadSkill} are
+     * untouched (backward-safe, mirroring {@code tool_search}'s conditional registration).
+     */
+    static void applySkillMatching(Toolkit toolkit, List<Object> builtinTools,
+                                   PigAgentConfig.MatchingSkillsConfig cfg) {
+        if (cfg == null || !cfg.isEnabled()) {
+            return;
+        }
+        SkillRegistry skillRegistry = builtinTools.stream()
+                .filter(SkillsTool.class::isInstance)
+                .map(t -> ((SkillsTool) t).registry())
+                .findFirst().orElse(null);
+        if (skillRegistry == null) {
+            log.warn("skills.matching enabled but no SkillsTool present; skill_search not registered");
+            return;
+        }
+        toolkit.registration().tool(
+                new SkillSearchTool(skillRegistry, cfg.getTopK(), cfg.getMinScore())).apply();
+        log.info("Skill matching enabled: skill_search registered (top-k {}, min-score {})",
+                cfg.getTopK(), cfg.getMinScore());
     }
 
     static List<ToolInfo> buildToolInventory(Toolkit toolkit, McpManager mcpManager) {
