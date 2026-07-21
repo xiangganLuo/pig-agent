@@ -81,4 +81,13 @@ class UserProfileConfigTest {
         c.setModelId(null);
         assertThat(c.getModelId()).isEmpty();
     }
+
+    @Test
+    void consolidation_staysDefaultOff_meSafetyPosture() {
+        // M-E: the seeding + hardening mechanism ships, but the enable flag stays false by default
+        // (a deliberate safety posture; the one-line flip is deferred to a live-model IT). Locking this
+        // default keeps the byte-for-byte "no distillation, no schedule, no LLM" behavior unchanged.
+        assertThat(new PigAgentConfig.ProfileConsolidationConfig().isEnabled()).isFalse();
+        assertThat(new PigAgentConfig.UserProfileConfig().getConsolidation().isEnabled()).isFalse();
+    }
 }
