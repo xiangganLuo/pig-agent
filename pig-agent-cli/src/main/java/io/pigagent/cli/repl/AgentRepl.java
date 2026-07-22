@@ -444,21 +444,35 @@ public final class AgentRepl {
                     done.countDown();
                 });
 
-        Terminal.SignalHandler prev = terminal.handle(Terminal.Signal.INT, s -> {
-            // Mark interrupted BEFORE disposing so a racing onComplete flush can't beat the notice.
+        // Single interrupt path shared by ESC/Ctrl-C (the char-mode watcher) and Signal.INT (the
+        // dumb-terminal fallback). Mark interrupted BEFORE disposing so a racing onComplete flush
+        // can't beat the notice.
+        Runnable doInterrupt = () -> {
             interrupted.set(true);
             if (agentKernel != null) {
                 agentKernel.interruptCurrent();
             }
             sub.dispose();
             done.countDown();
-        });
+        };
+
+        // On a real TTY, read keys in char-input mode during the turn so ESC (27) and Ctrl-C (3) both
+        // interrupt via the same path — no JLine readLine runs, so UserInterruptException can neither
+        // be thrown nor printed (fix #2 + #3). Dumb/non-TTY terminals skip this and use Signal.INT
+        // below (keeps the dumb-terminal interrupt test valid).
+        TurnKeyWatcher watcher = io.pigagent.cli.repl.select.InlineSelector.isInteractive(terminal)
+                ? TurnKeyWatcher.start(terminal, doInterrupt) : null;
+
+        Terminal.SignalHandler prev = terminal.handle(Terminal.Signal.INT, s -> doInterrupt.run());
         try {
             done.await();
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         } finally {
             terminal.handle(Terminal.Signal.INT, prev);
+            if (watcher != null) {
+                watcher.close();
+            }
             sub.dispose();
         }
 
@@ -710,7 +724,19 @@ public final class AgentRepl {
             String prompt = PLAN_EXIT_TOOL.equals(call.getName())
                     ? "Approve the plan and exit Plan Mode to begin execution? (y=approve / N=stay in plan) "
                     : "Allow tool '" + call.getName() + "'? (y=once / a=always / N=deny) ";
-            String ans = reader.readLine(Ansi.warn(prompt));
+            String ans;
+            try {
+                ans = reader.readLine(Ansi.warn(prompt));
+            } catch (UserInterruptException | EndOfFileException interrupt) {
+                // Ctrl-C / Ctrl-D at the confirm prompt: fail-closed (deny this and every remaining
+                // tool call) and show a friendly notice — the exception MUST NOT escape to a terminal
+                // stack (fix #3). Deny from the current call to the end, then stop prompting.
+                Ansi.println(terminal, Ansi.warn("[已中断]"));
+                for (int i = results.size(); i < ask.getToolCalls().size(); i++) {
+                    results.add(new ConfirmResult(false, ask.getToolCalls().get(i)));
+                }
+                return results;
+            }
             String s = ans == null ? "" : ans.strip().toLowerCase();
             if (s.equals("a")) {
                 // "always allow" (change permission-always-allow-persist): make the choice actually
