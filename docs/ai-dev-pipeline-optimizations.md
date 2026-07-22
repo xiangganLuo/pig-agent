@@ -3,7 +3,7 @@
 > **目的**：对已跑通的半自动 AI 循环开发流水线 `/ls:*`（澄清→spec→[code⇄itest]→归档）做一次批判性梳理，列出**工作流本身**的优化点，供评审后决定是否落地。
 > **范围**：只分析流水线的 AI 工作流设计（命令编排、loop engine、人工门、状态传递、质量门），**不改产品代码**。
 > **依据**：`.claude/commands/ls/*.md`（7 命令）+ `.claude/commands/opsx/*` + `.claude/rules/common/{ls-pipeline,development-workflow,testing}.md` + `docs/ai-dev-pipeline.md`（含首轮实战复盘的真实踩坑）。
-> **状态**：评审稿，未实施。批准项须**同步落到两处**：源仓库 `pig-agent/.claude/commands/ls/` 与模板仓库 `ls-pipeline/assets/.claude/commands/ls/`（及各自 `rules/ls-pipeline.md`、`templates/ls-pipeline.config.md`）。
+> **状态**：**13 项全部已落地（2026-07-22，P0/P1/P2 三批）**，同步落到两处：源仓库 `pig-agent/.claude/commands/ls/` 与模板仓库 `ls-pipeline/assets/.claude/commands/ls/`（及各自 `rules/ls-pipeline.md`、`templates/ls-pipeline.config.md`）。
 
 ---
 
@@ -31,11 +31,11 @@
 | 6 | 内环质量门扩展：可选 **lint / typecheck / security-scan** | 内环质量 | **P1 ✅** | config 新字段 + `ls/code.md` |
 | 7 | `/ls:spec` 显式**研究复用**步骤，结论写进 design | 规格闭环 | **P1 ✅** | `ls/spec.md` |
 | 8 | 卡住时**升级/拆分**而非只"停下"（内环 task、spec 回改） | 内外环 | **P1 ✅** | `ls/code.md`、`ls/itest.md` |
-| 9 | 归档前**实现↔spec 一致性**快检 + 敏感 diff 强制安全评审 | 规格闭环 | **P2** | `ls/archive.md` |
-| 10 | 多 spec **依赖违例告警**（B 在 A 归档前起了 tasks） | 多 spec 协同 | **P2** | `ls/status.md` |
-| 11 | 归档时把**教训写回** config「备注/踩坑」段（学习闭环） | 学习闭环 | **P2** | `ls/archive.md` + config |
-| 12 | itest **触发判定显式化**（哪些变更需 IT，spec 打标） | 外环智能 | **P2** | `ls/spec.md` tasks 打标 + `ls/itest.md` |
-| 13 | 上下文**重复读取**优化（只读 Decisions+tasks，缓存摘要） | 效率 | **P2** | 各命令 |
+| 9 | 归档前**实现↔spec 一致性**快检 + 敏感 diff 强制安全评审 | 规格闭环 | **P2 ✅** | `ls/archive.md` |
+| 10 | 多 spec **依赖违例告警**（B 在 A 归档前起了 tasks） | 多 spec 协同 | **P2 ✅** | `ls/status.md` |
+| 11 | 归档时把**教训写回** config「备注/踩坑」段（学习闭环） | 学习闭环 | **P2 ✅** | `ls/archive.md` + config |
+| 12 | itest **触发判定显式化**（哪些变更需 IT，spec 打标） | 外环智能 | **P2 ✅** | `ls/spec.md` tasks 打标 + `ls/itest.md` |
+| 13 | 上下文**重复读取**优化（只读 Decisions+tasks，缓存摘要） | 效率 | **P2 ✅** | 各命令 |
 
 ---
 
@@ -93,6 +93,8 @@
 
 ## 五、P2（闭环增强 / 效率）
 
+> **状态：#9–#13 已落地（2026-07-22）**——同步改到两处 `commands/ls/{archive,status,spec,itest,code,dev}.md`：#9 归档前抽查 spec↔实现一致性 + 敏感 diff 强制 `security-reviewer`；#10 `/ls:status` 增依赖违例告警 `⚠ 依赖未就绪`；#11 归档收尾把踩坑写回（ls=`ls-pipeline.config.md` 备注段 / pig=`docs/ai-dev-pipeline.md` 复盘）；#12 `/ls:spec` 给需 IT 的 task 打 `[IT]` 标、`/ls:itest` 据标决定范围；#13 code/dev 续跑读增量不重读全量 proposal。至此 13 项优化全部落地。
+
 ### 9. 归档前实现↔spec 一致性快检 + 敏感 diff 安全门
 **现象**：`ls/archive.md` 检查 artifacts/tasks 完成度并 sync delta→主 spec，但**不校验实现是否真的兑现了 spec**（spec 漂移风险），敏感变更也无强制安全评审。
 **建议**：归档前加轻量一致性快检（spec 的每条 Requirement 是否有对应实现/测试佐证）；若 diff 触及 auth/输入/文件/外部调用/加密，**强制**过一遍 `security-reviewer` 再归档。
@@ -124,7 +126,7 @@
 
 - **第一批（P0，直击真实踩坑，改动小）✅ 已落地**：#1 逐组提交、#2 组级回归、#3 可判定的外环护栏。三项都改 `ls/code.md`/`ls/itest.md` 文案 + config 增补，风险低、收益即时。
 - **第二批（P1，鲁棒性/闭环）✅ 已落地**：#4 状态持久化、#5 失败分类、#7 复用步骤、#8 卡住升级、#6 质量门（可选字段，默认关）。
-- **第三批（P2，闭环/效率）**：#9–#13。
+- **第三批（P2，闭环/效率）✅ 已落地**：#9–#13。
 
 > 每项落地都应**同步改两处**（pig-agent 源 + ls-pipeline 模板），并保持"命令读 config、不硬编码工具"的解耦原则；新增 config 字段一律**可选、缺省安全**（不填 = 现状，零回归）。
 

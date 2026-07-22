@@ -14,13 +14,16 @@ openspec 归档。`/ls:*` 流水线第 5 步（**人工确认收尾**）。复�
 1. **归档前检查（人工确认门）**
    - `openspec status --change "<name>" --json` 确认 artifacts 全 `done`。
    - 读 `tasks.md` 确认无遗留 `- [ ]`（有则列出，问用户是否仍归档）。
+   - **实现↔spec 一致性快检（P2）**：抽查 delta spec 每条 Requirement 是否有对应实现/测试佐证；有缺口就列出，让用户确认再归档（防 spec 漂移）。
+   - **敏感变更安全门（P2）**：若本变更 diff 触及 auth/输入/文件/外部调用/加密，归档前**强制**过一遍 `security-reviewer`（见 `security.md`），通过再归档。
    - 打印摘要（变更、任务完成度、待同步的 delta spec），**请用户确认归档**。确认前不移动文件。
 
 2. **执行归档（委托 /opsx:archive）**
    - 按 `.claude/commands/opsx/archive.md` 流程：若 delta spec 未同步，先 `openspec-sync-specs` 同步到 `openspec/specs/<capability>/spec.md`，再移动到 `openspec/changes/archive/YYYY-MM-DD-<name>/`。
    - 目标已存在则报错并给选项（改名/删旧/换日期）。
 
-3. **收尾提交（可选）**
+3. **收尾：沉淀教训 + 提交（可选）**
+   - **沉淀教训（P2）**：若本轮有值得记住的工具链/流程踩坑，一句话追加到 `docs/ai-dev-pipeline.md` 复盘的「教训/踩坑」段，让下轮直接读到。
    - 归档改动了 `openspec/`（移动 + 新建主 spec），提示用户是否 `docs(openspec): 归档 <name>` 提交到当前分支。
 
 **Output**

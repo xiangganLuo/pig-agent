@@ -14,6 +14,7 @@ tags: [workflow, ls-pipeline, integration-test, loop-engine]
 1. **确认有集成测试**
    - 该变更是否涉及需真模型验证的端到端行为（agent 流、工具执行、渠道等）？
    - 有 `*IT` 测试（如 `AnthropicConnectivityIT`、`FullLinkAgentIT`）则跑；纯离线变更无 `*IT` → 跳过并说明，直接提示 `/ls:archive`。
+   - **据 `[IT]` 打标决定范围（P2）**：优先跑 `tasks.md` 中标 `[IT]` 的任务对应的集成测试；tasks 无 `[IT]` 标且无 `*IT` → 判定本变更无集成层，跳过。
    - 确认真模型可用：`~/.pig-agent/workspace/models.json` 或 env（`ANTHROPIC_API_KEY` 等）已配。
 
 2. **跑集成测试**（PowerShell，`-D` 参数须引号；`*IT` 默认被 surefire 排除，需显式指定）

@@ -52,3 +52,4 @@ tags: [workflow, ls-pipeline, orchestrator]
 - 复用 `/ls:clarify|spec|code|itest|archive` 与其委托的 `/opsx:*`，不另起炉灶。
 - 外环禁止无限重跑：3 轮无进展升级人工。
 - 全程只动 spec + 产品代码 + tasks 勾选，不碰无关文件。
+- 续跑读增量（design Decisions + tasks 勾选状态），不重读全量 proposal，省 token 护 prefix-cache（P2）。

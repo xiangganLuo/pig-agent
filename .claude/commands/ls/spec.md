@@ -19,6 +19,7 @@ spec 设计。`/ls:*` 流水线第 2 步（**人工审批阶段**）。复用 `/
    - **先做复用扫描（P1，先查再造）**：生成 design 前，先查有无可复用/可移植的现成实现（既有代码 / 库 / 开源项目 / 框架能力）；把「复用 X / 移植 Y / 决定自研因 Z」写进 `design.md` 的 Decisions（`/ls:clarify` 已问的可复用性在此做实）。
    - 按 `.claude/commands/opsx/propose.md` 的流程：`openspec new change "<name>"` → 逐 artifact 用 `openspec instructions <id> --change "<name>" --json` 生成 `proposal.md` / `design.md` / `tasks.md` + delta spec。
    - 遵循本仓库既有范例风格（中文、`## Why/What Changes/Capabilities/Impact`、design 的 `Decisions/Risks`、tasks 的分组 `- [ ]`）。
+   - **给需集成/E2E 验证的 task 打标 `[IT]`（P2）**：在 `tasks.md` 里把需真模型/外部服务端到端验证的任务行标注 `[IT]`，供 `/ls:itest` 决定跑哪些、是否可跳过。
 
 3. **承重技术设 spike 卡点**
    - 若变更依赖未验证的承重假设（如 AgentScope 语义、外部 API 行为），把 `tasks.md` **第 1 组设为 Spike（先做、卡点）**，spike 不过不进编码。

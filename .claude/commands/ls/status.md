@@ -50,5 +50,6 @@ tags: [workflow, ls-pipeline, status, report]
 **Guardrails**
 - 纯只读：只跑 `openspec ... --json`、读 tasks.md、`git branch`。不改文件、不切分支、不建 spec。
 - 多 spec 并行时一屏看全，突出**卡点**（spike 未过 / 长期停在某阶段 / 可归档未归档）。
+- **依赖违例告警（P2）**：若能从各 change 的 proposal/design 读到 spec 间依赖，检查是否有 spec 在其依赖尚未归档时已起 tasks，标 `⚠ 依赖未就绪`。
 - 单 change 参数时只渲染那一行 + 它的任务分组明细。
 - **断点续跑的权威状态源（P1）**：阶段 / 外环轮次（`.ls-itest-log.md`）/ spike 状态均以本命令读出为准；`/ls:dev` 重入时先跑本命令恢复状态，再从对应阶段继续。

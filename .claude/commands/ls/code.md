@@ -14,6 +14,7 @@ tags: [workflow, ls-pipeline, code, tdd, loop-engine]
 1. **载入变更上下文**
    - `openspec status --change "<name>" --json` 取 schema、`changeRoot`、tasks 位置。
    - `openspec instructions apply --change "<name>" --json` 取 `contextFiles` 与任务清单；读全 proposal/design/tasks/spec。
+   - **增量读取（P2，省 token / 护 prefix-cache）**：首次载入后，续跑只读 design 的 Decisions + tasks 勾选增量，不重读全量 proposal。
    - 若含 **Spike 卡点**且未完成：先做 spike，结论写回 `design.md`；spike 不过则停下报告，不进后续编码。
 
 2. **探测覆盖率工具（一次）**
