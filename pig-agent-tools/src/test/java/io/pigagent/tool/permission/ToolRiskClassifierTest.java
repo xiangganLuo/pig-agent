@@ -66,6 +66,20 @@ class ToolRiskClassifierTest {
     }
 
     @Test
+    void osToolsClassified() {
+        // os-tools: system introspection is read-only; network probes are NETWORK (permission-gated,
+        // but intentionally not SSRF-blocked — see ToolRiskClassifier / NetworkProbeTools).
+        for (String name : new String[]{"systemInfo", "diskUsage", "listProcesses",
+                "getEnvironment", "whichCommand"}) {
+            assertThat(ToolRiskClassifier.classify(name, Map.of()))
+                    .as("tool %s should be READ_ONLY", name)
+                    .isEqualTo(ToolRisk.READ_ONLY);
+        }
+        assertThat(ToolRiskClassifier.classify("resolveHost", Map.of())).isEqualTo(ToolRisk.NETWORK);
+        assertThat(ToolRiskClassifier.classify("checkPort", Map.of())).isEqualTo(ToolRisk.NETWORK);
+    }
+
+    @Test
     void unknownToolDefaultsToExecFailSafe() {
         assertThat(ToolRiskClassifier.classify("someRandomTool", Map.of())).isEqualTo(ToolRisk.EXEC);
         assertThat(ToolRiskClassifier.classify(null, Map.of())).isEqualTo(ToolRisk.EXEC);

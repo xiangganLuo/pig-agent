@@ -10,3 +10,8 @@ io.pigagent.tool.spi.providers.SkillsToolProvider
 io.pigagent.tool.spi.providers.SkillAuthoringToolProvider
 io.pigagent.tool.spi.providers.NotifyUserToolProvider
 io.pigagent.tool.spi.providers.UserProfileToolProvider
+# OS-level tools (os-tools): pure-Java, cross-platform, high-availability system introspection.
+io.pigagent.tool.spi.providers.SystemInfoToolsProvider
+io.pigagent.tool.spi.providers.ProcessToolsProvider
+io.pigagent.tool.spi.providers.EnvironmentToolsProvider
+io.pigagent.tool.spi.providers.NetworkProbeToolsProvider

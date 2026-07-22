@@ -37,6 +37,13 @@ public final class ToolRiskClassifier {
             Map.entry("session_search", ToolRisk.READ_ONLY),
             Map.entry("session_list", ToolRisk.READ_ONLY),
             Map.entry("session_history", ToolRisk.READ_ONLY),
+            // OS 层内置工具（os-tools）——纯 Java 跨平台系统自省，只读不改盘：
+            // 主机快照 / 磁盘用量 / 进程列表（命令行脱敏）/ 读环境变量（密钥名遮蔽）/ PATH 上定位可执行文件
+            Map.entry("systemInfo", ToolRisk.READ_ONLY),
+            Map.entry("diskUsage", ToolRisk.READ_ONLY),
+            Map.entry("listProcesses", ToolRisk.READ_ONLY),
+            Map.entry("getEnvironment", ToolRisk.READ_ONLY),
+            Map.entry("whichCommand", ToolRisk.READ_ONLY),
             // 内置计算插件（pig-agent-plugin-builtin）——纯计算工具，无 shell/网络/写盘
             Map.entry("currentDateTime", ToolRisk.READ_ONLY),
             Map.entry("convertTimezone", ToolRisk.READ_ONLY),
@@ -69,6 +76,10 @@ public final class ToolRiskClassifier {
             // 网络（webSearch 走 Brave 公网、不经 SSRF 守卫 → 与 fetchUrl 同归 NETWORK，H-1）
             Map.entry("webSearch", ToolRisk.NETWORK),
             Map.entry("fetchUrl", ToolRisk.NETWORK),
+            // OS 网络探测（os-tools）——resolveHost/checkPort 只解析域名/连端口、不取内容，故不套 fetchUrl 的
+            // SSRF 私网黑名单（探测 localhost/内网正是主用途），但仍归 NETWORK 受权限门控
+            Map.entry("resolveHost", ToolRisk.NETWORK),
+            Map.entry("checkPort", ToolRisk.NETWORK),
             // 主动外呼：经渠道给用户发通知（proactive-outreach）
             Map.entry("notifyUser", ToolRisk.NETWORK),
             // MCP 自助管理
