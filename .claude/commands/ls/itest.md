@@ -22,9 +22,11 @@ tags: [workflow, ls-pipeline, integration-test, loop-engine]
    ```
    （`$mvn` = 仓库 Maven wrapper 路径。）用 `Select-String` 过滤 `BUILD SUCCESS|BUILD FAILURE|Tests run` 看结果；注意 PowerShell 5.1 会把测试 stderr 包成 NativeCommandError，非真失败，以 `Tests run`/`BUILD` 行与退出码为准。
 
-3. **外环：失败回喂修复**（这是 loop engine 的外环）
-   - 失败 → 归纳失败点（哪个 IT、断言、栈）→ 回到 `/ls:code` 逻辑修实现/测试 → 重跑第 2 步。
-   - **连续 3 轮无进展**（同类失败反复）→ 停下升级人工，报告已试方案（不空转烧 token）。
+3. **外环：失败回喂修复 + 结构化尝试日志**（loop engine 外环；P0：无进展改为可判定 + 跨会话可续）
+   - 每轮把结果**追加**到变更目录下的 `.ls-itest-log.md`，一行：`轮次 | 失败用例集指纹 | 本轮所改 | 结果`。**失败指纹** = 失败测试名 + 断言/异常类型的集合，规范化后（去时间戳/路径、排序）比较。
+   - 失败 → 归纳失败点（哪个 IT、断言、栈）→ 回 `/ls:code` 修实现/测试 → 重跑第 2 步并追加日志。
+   - **可判定的"无进展"**："进展" = 失败集缩小 **或** 出现新的失败指纹（换了新错误）。若最新指纹与上一轮**完全相同**记一次无进展；**连续 2 轮指纹不变（即同一批失败重复 3 轮）→ 停下升级人工**，附 `.ls-itest-log.md`。
+   - 计数**读自 `.ls-itest-log.md`**（持久化）→ 会话重启也能续算，不会清零后无限重跑。
 
 4. **外环退出**
    - 所有 `*IT` 绿 → 提示 `/ls:archive`。
@@ -41,5 +43,6 @@ tags: [workflow, ls-pipeline, integration-test, loop-engine]
 **Guardrails**
 - 集成测试跑真模型、耗 token，仅在内环绿后跑。
 - 失败先修**产品代码**，别改测试掩盖问题（除非测试本身错）。
-- 连续 3 轮无进展必须升级人工，禁止无限重跑。
+- 无进展（失败指纹连续 2 轮不变）必须升级人工，禁止无限重跑；计数以 `.ls-itest-log.md` 为准（跨会话可续）。
+- `.ls-itest-log.md` 是 scratch 记录，可 `.gitignore`（或归档时清理），不进主 spec。
 - 不动 openspec 归档（那是 `/ls:archive`）。

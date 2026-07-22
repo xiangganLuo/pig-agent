@@ -14,3 +14,5 @@ docs/review/
 cp.txt
 # isolated subagent worktrees (never commit)
 .claude/worktrees/
+# /ls:itest 外环尝试日志（scratch，见 .claude/commands/ls/itest.md）
+**/.ls-itest-log.md
