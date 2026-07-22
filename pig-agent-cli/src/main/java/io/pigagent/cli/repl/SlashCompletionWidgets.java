@@ -36,6 +36,7 @@ public final class SlashCompletionWidgets {
     private static final String BACKWARD_DELETE = "slash-backward-delete";
     private static final String MENU_DOWN = "slash-menu-down";
     private static final String MENU_UP = "slash-menu-up";
+    private static final String ESCAPE = "slash-escape";
 
     private final LineReader reader;
     private final List<String> commandNames;
@@ -61,6 +62,7 @@ public final class SlashCompletionWidgets {
         reader.getWidgets().put(BACKWARD_DELETE, (Widget) this::backwardDelete);
         reader.getWidgets().put(MENU_DOWN, (Widget) this::menuDown);
         reader.getWidgets().put(MENU_UP, (Widget) this::menuUp);
+        reader.getWidgets().put(ESCAPE, (Widget) this::escape);
 
         KeyMap<Binding> main = reader.getKeyMaps().get(LineReader.MAIN);
         // Every printable ASCII char (space..~) routes through self-insert-then-maybe-list.
@@ -70,6 +72,10 @@ public final class SlashCompletionWidgets {
         bindKey(main, BACKWARD_DELETE, KeyMap.key(terminal, Capability.key_backspace));
         bindKey(main, MENU_DOWN, KeyMap.key(terminal, Capability.key_down));
         bindKey(main, MENU_UP, KeyMap.key(terminal, Capability.key_up));
+        // Bare ESC at the prompt clears the current input line (and thereby closes any slash-completion
+        // menu). JLine disambiguates a lone ESC from arrow-key escape sequences ("\033[A") via its
+        // ambiguous-key timeout, so arrow navigation is unaffected.
+        bindKey(main, ESCAPE, KeyMap.esc());
     }
 
     private static void bindKey(KeyMap<Binding> map, String widget, String seq) {
@@ -79,8 +85,30 @@ public final class SlashCompletionWidgets {
     }
 
     boolean selfInsert() {
+        // Normal (non-slash) chat input goes through a plain, reliable buffer insert — NO callWidget
+        // re-dispatch and NO completion machinery — so the typed character shows on the FIRST keypress.
+        // Previously every printable key routed through callWidget(SELF_INSERT) + the global
+        // AUTO_LIST/AUTO_MENU completion path, which required a second press before the char rendered.
+        // The custom completion (auto-list + narrow) only engages once the buffer is a slash command.
+        String lastBinding = reader.getLastBinding();
+        if (!willActivateSlash() && lastBinding != null && !lastBinding.isEmpty()) {
+            reader.getBuffer().write(lastBinding);
+            return true;
+        }
         reader.callWidget(LineReader.SELF_INSERT);
         maybeList();
+        return true;
+    }
+
+    /**
+     * Clear the current input line on ESC (also removing any slash-completion menu, which belongs to
+     * the just-cleared buffer). A no-op on an already-empty line. Chat text and half-typed commands are
+     * both abandoned — the common, predictable "escape out of what I'm typing" behavior.
+     */
+    boolean escape() {
+        if (!reader.getBuffer().toString().isEmpty()) {
+            reader.callWidget(LineReader.KILL_WHOLE_LINE);
+        }
         return true;
     }
 
@@ -107,6 +135,19 @@ public final class SlashCompletionWidgets {
         if (slashActive()) {
             reader.callWidget(LineReader.EXPAND_OR_COMPLETE);
         }
+    }
+
+    /**
+     * Whether inserting the current keystroke keeps/turns the buffer into a slash command — either the
+     * buffer already is one, or a leading {@code /} is being typed on an otherwise-empty line. Used to
+     * decide whether the keystroke engages the type-ahead completion path.
+     */
+    private boolean willActivateSlash() {
+        String buffer = reader.getBuffer().toString();
+        if (SlashCommands.isCommandBuffer(buffer)) {
+            return true;
+        }
+        return buffer.stripLeading().isEmpty() && "/".equals(reader.getLastBinding());
     }
 
     /** A slash command is being typed and at least one command still matches its prefix. */

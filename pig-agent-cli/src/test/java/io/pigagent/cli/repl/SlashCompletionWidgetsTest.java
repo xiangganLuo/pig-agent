@@ -43,7 +43,17 @@ class SlashCompletionWidgetsTest {
         assertThat(reader.isSet(LineReader.Option.AUTO_MENU)).isTrue();
         assertThat(reader.getWidgets())
                 .containsKeys("slash-self-insert", "slash-backward-delete",
-                        "slash-menu-down", "slash-menu-up");
+                        "slash-menu-down", "slash-menu-up", "slash-escape");
+    }
+
+    @Test
+    void install_bindsEscapeToLineClear() throws IOException {
+        LineReader reader = newReader();
+
+        SlashCompletionWidgets.install(reader, List.of("/model", "/help"));
+
+        KeyMap<Binding> main = reader.getKeyMaps().get(LineReader.MAIN);
+        assertThat(bound(main, "\033")).isEqualTo("slash-escape");
     }
 
     @Test
