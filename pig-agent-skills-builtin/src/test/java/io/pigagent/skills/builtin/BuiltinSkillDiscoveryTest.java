@@ -16,8 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * End-to-end: the built-in skills are discovered purely by the {@code META-INF/services} declaration
  * (classpath {@link ClasspathSkillSource} via {@link ServiceLoader}) — proving "ship a provider + a
- * service line" wiring with no central assembly edit. Every discovered skill's {@code SKILL.md} is
- * non-empty.
+ * service line" wiring with no central assembly edit. Every curated skill's {@code SKILL.md} is
+ * discovered and non-empty.
  */
 class BuiltinSkillDiscoveryTest {
 
@@ -32,7 +32,7 @@ class BuiltinSkillDiscoveryTest {
     }
 
     @Test
-    void classpathSource_discoversAllSevenBuiltinSkills() throws IOException {
+    void classpathSource_discoversAllBuiltinSkills() throws IOException {
         // Act — the built-in source used by SkillsTool at runtime
         List<Skill> skills = new ClasspathSkillSource().discover();
         Set<String> names = skills.stream().map(Skill::name).collect(Collectors.toSet());

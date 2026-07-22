@@ -17,20 +17,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@link SkillCatalog} is the single source of truth for the built-in skill set. These tests guard:
- * the seven curated skills are declared with unique names, each ships a non-empty {@code SKILL.md}
+ * the curated skills are declared with unique names, each ships a non-empty {@code SKILL.md}
  * with a title, and the catalog names match the actual classpath resource directories (a drift guard
  * mirroring {@code PluginCatalogTest}).
  */
 class SkillCatalogTest {
 
     private static final Set<String> EXPECTED = Set.of(
+            // Engineering methods
             "code-review", "systematic-debugging", "tdd", "refactoring",
-            "git-commit", "security-review", "planning");
+            "git-commit", "security-review", "planning",
+            // Operating-system operations
+            "shell-commands", "file-operations", "process-and-ports", "log-triage",
+            "system-health", "networking-diagnostics", "env-and-path", "archive-and-compress",
+            // Environment / toolchain setup
+            "python-environment", "install-tools",
+            // Windows usage scenarios
+            "windows-services", "windows-scheduled-tasks", "windows-startup-apps", "windows-firewall",
+            "windows-network-config", "windows-wifi", "windows-user-accounts", "windows-event-logs",
+            "windows-updates", "windows-disk-management", "windows-registry", "windows-defender",
+            "windows-power", "windows-printers", "windows-remote-access", "windows-file-permissions",
+            "windows-disk-cleanup", "windows-hosts-file", "windows-datetime", "windows-slow-boot-triage");
 
     @Test
-    void skillNames_areTheSevenCuratedSkills_unique() {
+    void skillNames_areTheCuratedSkills_unique() {
         // Assert
-        assertThat(SkillCatalog.SKILL_NAMES).hasSize(7);
+        assertThat(SkillCatalog.SKILL_NAMES).hasSize(EXPECTED.size());
         assertThat(Set.copyOf(SkillCatalog.SKILL_NAMES)).hasSameSizeAs(SkillCatalog.SKILL_NAMES);
         assertThat(Set.copyOf(SkillCatalog.SKILL_NAMES)).isEqualTo(EXPECTED);
     }

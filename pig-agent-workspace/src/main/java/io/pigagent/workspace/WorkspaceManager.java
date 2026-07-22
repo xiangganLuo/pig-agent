@@ -183,11 +183,20 @@ public final class WorkspaceManager {
                 - `listSkills` — see which skills are available.
                 - `loadSkill` — load a skill's guidance and then follow it.
 
-                Built-in skills include: `code-review`, `systematic-debugging`, `tdd`, `refactoring`,
-                `git-commit`, `security-review`, `planning`. For example, load `systematic-debugging` before
-                diagnosing a failure, `code-review` before reviewing a diff, `tdd` before adding a feature and
-                `planning` before a large multi-step change. Users may add or override skills in their
-                workspace.
+                Built-in skills include engineering methods — `code-review`, `systematic-debugging`, `tdd`,
+                `refactoring`, `git-commit`, `security-review`, `planning` — and everyday operating-system
+                operations (cross-platform: bash + PowerShell) — `shell-commands`, `file-operations`,
+                `process-and-ports`, `log-triage`, `system-health`, `networking-diagnostics`, `env-and-path`,
+                `archive-and-compress`, `python-environment`, `install-tools`. For example, load
+                `systematic-debugging` before diagnosing a failure, `code-review` before reviewing a diff,
+                `tdd` before adding a feature, `process-and-ports` when a port is in use, `python-environment`
+                before setting up a venv, `install-tools` before installing a package, and `shell-commands`
+                before a non-trivial cross-platform command. There is also a set of Windows operations skills
+                (`windows-…`: services, scheduled tasks, startup apps, firewall, network, wifi, user accounts,
+                event logs, updates, disk management/cleanup, registry, defender, power, printers, remote
+                access, file permissions, hosts file, datetime, slow-boot triage) — load the matching one
+                before a Windows admin/troubleshooting task. Run `listSkills` to see the full set. Users may
+                add or override skills in their workspace.
 
                 ## Planning multi-step work
 

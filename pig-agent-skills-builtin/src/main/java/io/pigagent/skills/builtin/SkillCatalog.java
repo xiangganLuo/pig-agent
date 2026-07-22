@@ -15,8 +15,10 @@ import java.util.List;
  * resource directory are two views of the same set; a consistency test asserts they match, so adding
  * a skill name without shipping its {@code SKILL.md} (or vice-versa) is caught as drift.
  *
- * <p>The set is a starter kit of general engineering methods for a coding agent — each an actionable,
- * agent-facing guide (title + when-to-use + a concrete step-by-step method / checklist).
+ * <p>The set is a starter kit for a coding agent — general engineering methods (code review, debugging,
+ * TDD, …) plus everyday operating-system operations (shell, files, processes/ports, logs, system health,
+ * networking, environment, archives) — each an actionable, agent-facing guide (title + when-to-use + a
+ * concrete step-by-step method / checklist).
  */
 public final class SkillCatalog {
 
@@ -26,13 +28,47 @@ public final class SkillCatalog {
 
     /** Curated built-in skill names, in a stable order. */
     public static final List<String> SKILL_NAMES = List.of(
+            // Engineering methods
             "code-review",
             "systematic-debugging",
             "tdd",
             "refactoring",
             "git-commit",
             "security-review",
-            "planning");
+            "planning",
+            // Operating-system operations (cross-platform: bash + PowerShell)
+            "shell-commands",
+            "file-operations",
+            "process-and-ports",
+            "log-triage",
+            "system-health",
+            "networking-diagnostics",
+            "env-and-path",
+            "archive-and-compress",
+            // Environment / toolchain setup
+            "python-environment",
+            "install-tools",
+            // Windows usage scenarios (PowerShell; honest about elevation / GUI / sandbox-blocked ops)
+            "windows-services",
+            "windows-scheduled-tasks",
+            "windows-startup-apps",
+            "windows-firewall",
+            "windows-network-config",
+            "windows-wifi",
+            "windows-user-accounts",
+            "windows-event-logs",
+            "windows-updates",
+            "windows-disk-management",
+            "windows-registry",
+            "windows-defender",
+            "windows-power",
+            "windows-printers",
+            "windows-remote-access",
+            "windows-file-permissions",
+            "windows-disk-cleanup",
+            "windows-hosts-file",
+            "windows-datetime",
+            "windows-slow-boot-triage");
 
     private SkillCatalog() {
     }
