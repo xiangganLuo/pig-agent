@@ -34,9 +34,9 @@ tags: [workflow, ls-pipeline, code, tdd, loop-engine]
      或整模块：`& $mvn -pl <module> -am test`。（`mvn` = 仓库 wrapper 路径。）
    - **REFACTOR**：绿了再清理，保持测试绿。
    - 通过后把该 task `- [ ]` → `- [x]`。
-   - 失败：修实现（非改测试，除非测试本身错）；同一 task 连续 3 次修不好 → 停下报告。
+   - 失败：修实现（非改测试，除非测试本身错）。同一 task **连续 3 次修不好**时不要死磕，按序尝试（P1）：(a) **拆分**该 task 为更小步逐个过；(b) 若发现是 **design 缺陷**（承重假设/接口不对）→ 回 `/ls:spec` 回改设计；(c) 仍无解 → 停下升级人工。"停下"是最后手段。
 
-4. **每组 task 后：回归 → 编译 → 逐组提交**（P0）
+4. **每组 task 后：回归 → 编译 → 质量门 → 逐组提交**（P0/P1）
    - **回归**（防止新 task 悄悄打破旧 task，别只跑本组新测试）：跑受影响模块的**整模块单测**：
      ```powershell
      & $mvn -pl <本组及其下游模块> -am test
@@ -47,6 +47,7 @@ tags: [workflow, ls-pipeline, code, tdd, loop-engine]
      & $mvn -pl pig-agent-cli -am compile
      ```
      BUILD SUCCESS 才继续。
+   - **质量门（P1，可选）**：若项目有 lint / 静态检查 / 类型检查 / 安全扫描命令，一并跑绿再提交；变更触及 auth/输入/文件/外部调用/加密时按 `security.md` 过 `security-reviewer`。（无则跳过，零回归。）
    - **逐组提交**（green 后立即，杜绝"漏提交测试文件 / 半成品跨分支"）：
      ```powershell
      git add <本组涉及的模块目录>   # 必须同时覆盖 src/main 与 src/test

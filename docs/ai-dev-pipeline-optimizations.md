@@ -26,11 +26,11 @@
 | 1 | 逐组 green 后**强制提交**（含 test 目录） | 内环质量 | **P0 ✅** | `ls/code.md` |
 | 2 | 内环每组后跑**全量/受影响回归**，非仅新测试 | 内环质量 | **P0 ✅** | `ls/code.md` + config |
 | 3 | 外环"无进展"改为**可判定**（失败集/错误签名对比 + 结构化尝试日志） | 外环智能 | **P0 ✅** | `ls/itest.md` |
-| 4 | 流水线**状态持久化**（当前阶段/外环轮次/spike），支持断点续跑 | 状态 | **P1** | `ls/status.md` 为准 + 轮次日志 |
-| 5 | 外环失败**分类**：code-level 回 code / design-level 升 spec 或人工 | 外环智能 | **P1** | `ls/itest.md` |
-| 6 | 内环质量门扩展：可选 **lint / typecheck / security-scan** | 内环质量 | **P1** | config 新字段 + `ls/code.md` |
-| 7 | `/ls:spec` 显式**研究复用**步骤，结论写进 design | 规格闭环 | **P1** | `ls/spec.md` |
-| 8 | 卡住时**升级/拆分**而非只"停下"（内环 task、spec 回改） | 内外环 | **P1** | `ls/code.md`、`ls/itest.md` |
+| 4 | 流水线**状态持久化**（当前阶段/外环轮次/spike），支持断点续跑 | 状态 | **P1 ✅** | `ls/status.md` 为准 + 轮次日志 |
+| 5 | 外环失败**分类**：code-level 回 code / design-level 升 spec 或人工 | 外环智能 | **P1 ✅** | `ls/itest.md` |
+| 6 | 内环质量门扩展：可选 **lint / typecheck / security-scan** | 内环质量 | **P1 ✅** | config 新字段 + `ls/code.md` |
+| 7 | `/ls:spec` 显式**研究复用**步骤，结论写进 design | 规格闭环 | **P1 ✅** | `ls/spec.md` |
+| 8 | 卡住时**升级/拆分**而非只"停下"（内环 task、spec 回改） | 内外环 | **P1 ✅** | `ls/code.md`、`ls/itest.md` |
 | 9 | 归档前**实现↔spec 一致性**快检 + 敏感 diff 强制安全评审 | 规格闭环 | **P2** | `ls/archive.md` |
 | 10 | 多 spec **依赖违例告警**（B 在 A 归档前起了 tasks） | 多 spec 协同 | **P2** | `ls/status.md` |
 | 11 | 归档时把**教训写回** config「备注/踩坑」段（学习闭环） | 学习闭环 | **P2** | `ls/archive.md` + config |
@@ -61,6 +61,8 @@
 ---
 
 ## 四、P1（显著提升鲁棒性/闭环）
+
+> **状态：#4/#5/#6/#7/#8 已落地（2026-07-22）**——同步改到两处 `commands/ls/{spec,status,dev,code,itest}.md`；#6 在 ls-pipeline 增补可选 config 字段 `lint`/`typecheck`/`security-scan`（缺省 `none` 跳过）+ `docs/config-reference.md`；#4 让 `/ls:status` 成为断点续跑权威状态源（读 `.ls-itest-log.md` 外环轮次）、`/ls:dev` 重入先跑 status；#5 外环失败分 实现级/设计级，设计级回 `/ls:spec`；#8 卡住给 拆分/回改 spec/升级人工 三档。
 
 ### 4. 流水线状态持久化，支持断点续跑
 **现象**：每个命令从"参数/对话/分支名"重新推断 change 名与阶段；`/ls:dev` 总控被打断后靠重新推断续跑。外环轮次、spike 是否过、当前处于内环还是外环——**无单一状态源**。
@@ -121,7 +123,7 @@
 ## 六、建议的落地批次
 
 - **第一批（P0，直击真实踩坑，改动小）✅ 已落地**：#1 逐组提交、#2 组级回归、#3 可判定的外环护栏。三项都改 `ls/code.md`/`ls/itest.md` 文案 + config 增补，风险低、收益即时。
-- **第二批（P1，鲁棒性/闭环）**：#4 状态持久化、#5 失败分类、#7 复用步骤、#8 卡住升级、#6 质量门（可选字段，默认关）。
+- **第二批（P1，鲁棒性/闭环）✅ 已落地**：#4 状态持久化、#5 失败分类、#7 复用步骤、#8 卡住升级、#6 质量门（可选字段，默认关）。
 - **第三批（P2，闭环/效率）**：#9–#13。
 
 > 每项落地都应**同步改两处**（pig-agent 源 + ls-pipeline 模板），并保持"命令读 config、不硬编码工具"的解耦原则；新增 config 字段一律**可选、缺省安全**（不填 = 现状，零回归）。

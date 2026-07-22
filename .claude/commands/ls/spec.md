@@ -16,6 +16,7 @@ spec 设计。`/ls:*` 流水线第 2 步（**人工审批阶段**）。复用 `/
    - 打印「Using change: <name>」及覆盖方式。
 
 2. **生成 spec 提案（委托 /opsx:propose）**
+   - **先做复用扫描（P1，先查再造）**：生成 design 前，先查有无可复用/可移植的现成实现（既有代码 / 库 / 开源项目 / 框架能力）；把「复用 X / 移植 Y / 决定自研因 Z」写进 `design.md` 的 Decisions（`/ls:clarify` 已问的可复用性在此做实）。
    - 按 `.claude/commands/opsx/propose.md` 的流程：`openspec new change "<name>"` → 逐 artifact 用 `openspec instructions <id> --change "<name>" --json` 生成 `proposal.md` / `design.md` / `tasks.md` + delta spec。
    - 遵循本仓库既有范例风格（中文、`## Why/What Changes/Capabilities/Impact`、design 的 `Decisions/Risks`、tasks 的分组 `- [ ]`）。
 
@@ -47,4 +48,5 @@ spec 设计。`/ls:*` 流水线第 2 步（**人工审批阶段**）。复用 `/
 - 复用 `/opsx:propose` 的机制，别手搓 openspec 结构。
 - `context`/`rules` 是给你的约束，**不要**抄进 artifact 文件。
 - 关键上下文不明时追问用户，但优先做合理决策保持推进。
+- **先复用后自研**：复用扫描结论必须落进 `design.md` 的 Decisions（P1）。
 - 本步只产出 spec，**不写产品代码**。

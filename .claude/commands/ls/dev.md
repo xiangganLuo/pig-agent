@@ -24,6 +24,8 @@ tags: [workflow, ls-pipeline, orchestrator]
 
 **Steps**
 
+0. **续跑先恢复状态（P1，断点续跑）**：若是中途重入（会话重启/被打断），先执行 `/ls:status <name>` 读回 当前阶段 / 外环轮次（`.ls-itest-log.md`）/ spike 状态，再从对应阶段继续，不从头重来。
+
 1. **澄清 + 建分支**：执行 `/ls:clarify` 逻辑。**在人工确认门停下**，得到确认再继续。
 2. **spec**：执行 `/ls:spec` 逻辑。**在人工审批门停下**，批准后继续。若有 Spike 卡点，先做 spike，不过则停。
 3. **外环循环**（自动）：
